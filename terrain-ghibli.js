@@ -1,53 +1,67 @@
 import * as THREE from 'three';
 
-const colorDeepWater = new THREE.Color(0x1a4a8c);
-const colorSand = new THREE.Color(0xf2e1b8);
-const colorIslandGrass = new THREE.Color(0x76d149);
-const colorEmeraldGrass = new THREE.Color(0x56b847);
-const colorOliveGrass = new THREE.Color(0x8cc440);
-const colorHigh = new THREE.Color(0x89e05e);
-const colorIslandRock = new THREE.Color(0x8a725a);
-const colorDirt = new THREE.Color(0xdcb58a);
+// --- Rich Ghibli Studio Palette ---
+const colorDeepWater   = new THREE.Color(0x0f3b68); // Deep Ghibli Cobalt Ocean
+const colorSand        = new THREE.Color(0xe6c896); // Golden Shore Sand
+const colorSpringGrass = new THREE.Color(0x52c439); // Vibrant Ghibli Spring Grass
+const colorEmeraldGrass= new THREE.Color(0x2ea84b); // Lush Emerald Clover Patch
+const colorGoldenPasture=new THREE.Color(0x9eb834); // Golden Sunlit Highland Pasture
+const colorHighGrass   = new THREE.Color(0x409c3a); // Alpine Meadow Grass
+const colorMossyRock   = new THREE.Color(0x5b7a54); // Mossy Cliff Ledge Rock
+const colorSlateCliff  = new THREE.Color(0x6b7280); // Cool Slate Alpine Mountain Cliff
+const colorOchreRidge  = new THREE.Color(0xb48a5c); // Sunlit Ochre Ridge Highlight
+const colorSummitMist  = new THREE.Color(0xd1d5db); // High Summit Mist Ledge
 
 export default {
     name: "🌳 Ghibli Land",
     shoreName: "░ Continental Shore",
     getHeight(x, z, snoise) {
-        let y = snoise(x * 0.0015, z * 0.0015) * 90.0 + snoise(x * 0.005, z * 0.005) * 35.0 + snoise(x * 0.02, z * 0.02) * 8.0;
-        if (y < 12.0) y = (y - 12.0) * 0.15 + 12.0;
-        
-        const rn = snoise(x * 0.0015 + 100.0, z * 0.0015 + 100.0);
-        const rw = snoise(x * 0.01, z * 0.01) * 0.02;
-        const rd = Math.abs(rn + rw);
-        if (rd < 0.04) { 
-            let c = 1.0 - rd / 0.04; 
-            c = c * c * (3.0 - 2.0 * c); 
-            y -= c * 15.0; 
-        }
-        
-        const ln = snoise(x * 0.002 - 500.0, z * 0.002 + 500.0);
-        if (ln > 0.72) {
-            const d = Math.min((ln - 0.72) * 3.5, 1.0); 
-            let c = d * d * (3.0 - 2.0 * d); 
-            y -= c * 15.0; 
+        // 1. Domain warping for organic, sweeping Ghibli mountain ridges and valleys
+        const warpX = snoise(x * 0.0003, z * 0.0003) * 120.0;
+        const warpZ = snoise(x * 0.0003 + 150.0, z * 0.0003 + 150.0) * 120.0;
+        const wx = x + warpX;
+        const wz = z + warpZ;
+
+        // 2. Smooth rolling valleys and foothills
+        const valleyBase = snoise(wx * 0.0008, wz * 0.0008) * 35.0 + 20.0;
+
+        // 3. C1-Continuous Hermite mountain ridges (no sharp jagged crease spikes)
+        let ridge1 = 1.0 - Math.abs(snoise(wx * 0.0010 + 200.0, wz * 0.0010 - 200.0));
+        ridge1 = ridge1 * ridge1 * (3.0 - 2.0 * ridge1); // Smoothstep curve
+
+        let ridge2 = 1.0 - Math.abs(snoise(wx * 0.0022 - 300.0, wz * 0.0022 + 300.0));
+        ridge2 = ridge2 * ridge2 * (3.0 - 2.0 * ridge2);
+
+        const mountainHeight = Math.pow(ridge1 * 0.7 + ridge2 * 0.3, 1.6) * 95.0;
+
+        let y = valleyBase + mountainHeight;
+
+        // 4. Smooth river bed carving
+        const riverNoise = Math.abs(snoise(wx * 0.0012 + 500.0, wz * 0.0012 + 500.0));
+        if (riverNoise < 0.05) {
+            const riverFactor = 1.0 - riverNoise / 0.05;
+            const smoothRiver = riverFactor * riverFactor * (3.0 - 2.0 * riverFactor);
+            y -= smoothRiver * 18.0;
         }
 
-        // Clamp base terrain above water (original behavior)
+        // Clamp above water
         y = Math.max(6.0, y);
 
-        // Sparse small ponds (applied AFTER the base clamp)
-        const pondN = snoise(x * 0.012 + 880.0, z * 0.012 - 550.0);
-        if (pondN > 0.78) {
-            let t = Math.min((pondN - 0.78) / 0.15, 1.0);
-            let c = t * t * (3.0 - 2.0 * t);
-            y -= c * 8.0;
+        // Serene Ghibli Lakes (80% fewer tiny micro-puddles, creating large smooth lakes)
+        const pondNoise = snoise(x * 0.003 + 880.0, z * 0.003 - 550.0);
+        if (pondNoise > 0.88) {
+            const t = Math.min((pondNoise - 0.88) / 0.10, 1.0);
+            const smoothPond = t * t * (3.0 - 2.0 * t);
+            y -= smoothPond * 8.0;
         }
 
         return y;
     },
     getColor(h, x, z, snoise, tempColor, smoothstep) {
-        const meadowNoise = snoise(x * 0.0035, z * 0.0035);
-        const oliveNoise = snoise(x * 0.008 + 200, z * 0.008 + 200);
+        // Multi-scale noise for organic meadow patches and rock strata
+        const meadowPatch = snoise(x * 0.004, z * 0.004);
+        const pasturePatch = snoise(x * 0.008 + 120.0, z * 0.008 + 120.0);
+        const rockStrata   = snoise(x * 0.015 - 300.0, z * 0.015 + 300.0);
 
         if (h < 1.0) {
             tempColor.copy(colorDeepWater);
@@ -56,16 +70,26 @@ export default {
         } else if (h < 4.2) {
             tempColor.copy(colorSand);
         } else if (h < 6.2) {
-            tempColor.lerpColors(colorSand, colorIslandGrass, smoothstep(4.2, 6.2, h));
-        } else if (h < 25) {
-            const patchColor = colorIslandGrass.clone();
-            if (meadowNoise > 0.15) patchColor.lerp(colorEmeraldGrass, Math.min(1, (meadowNoise - 0.15) * 2.5));
-            if (oliveNoise > 0.2) patchColor.lerp(colorOliveGrass, Math.min(1, (oliveNoise - 0.2) * 2.5));
-            tempColor.lerpColors(patchColor, colorHigh, smoothstep(6.2, 25, h));
-        } else if (h < 38) {
-            tempColor.lerpColors(colorHigh, colorIslandRock, smoothstep(25, 38, h));
+            tempColor.lerpColors(colorSand, colorSpringGrass, smoothstep(4.2, 6.2, h));
+        } else if (h < 28.0) {
+            // Low to mid valleys: Vibrant Ghibli Grasses (Spring Green -> Emerald -> Golden Pasture)
+            const patch = colorSpringGrass.clone();
+            if (meadowPatch > 0.1) patch.lerp(colorEmeraldGrass, Math.min(1.0, (meadowPatch - 0.1) * 2.2));
+            if (pasturePatch > 0.15) patch.lerp(colorGoldenPasture, Math.min(1.0, (pasturePatch - 0.15) * 2.0));
+            tempColor.lerpColors(patch, colorHighGrass, smoothstep(6.2, 28.0, h));
+        } else if (h < 48.0) {
+            // Mid-elevation slopes: Transition from Alpine Grass to Mossy Rock Ledges
+            const rockBlend = colorMossyRock.clone();
+            if (rockStrata > 0.2) rockBlend.lerp(colorOchreRidge, (rockStrata - 0.2) * 1.8);
+            tempColor.lerpColors(colorHighGrass, rockBlend, smoothstep(28.0, 48.0, h));
+        } else if (h < 75.0) {
+            // Mountain Cliffs: Cool Slate Rock with Ochre Ridge Variations
+            const cliffBlend = colorSlateCliff.clone();
+            if (rockStrata > 0.1) cliffBlend.lerp(colorOchreRidge, Math.min(1.0, (rockStrata - 0.1) * 2.0));
+            tempColor.lerpColors(colorMossyRock, cliffBlend, smoothstep(48.0, 75.0, h));
         } else {
-            tempColor.lerpColors(colorIslandRock, colorDirt, smoothstep(38, 55, h));
+            // High Mountain Summits: Slate Cliffs to Summit Mist Ledges
+            tempColor.lerpColors(colorSlateCliff, colorSummitMist, smoothstep(75.0, 110.0, h));
         }
     }
 };

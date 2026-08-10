@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -381,6 +381,22 @@ export function initTerrainEditor(scene, camera, renderer, terrainMesh) {
     shortcutsEl.innerHTML = '<b>Keys:</b> G Move · R Rotate · S Scale · D Clone · Del Delete · Ctrl+S Save';
     uiContainer.appendChild(shortcutsEl);
 
+    function toggleTerrainEditor() {
+        isEditorVisible = !isEditorVisible;
+        uiContainer.style.display = isEditorVisible ? 'flex' : 'none';
+        const btnToggleEditor = document.getElementById('editor-toggle');
+        if (btnToggleEditor) {
+            btnToggleEditor.innerText = isEditorVisible ? 'Hide Editor' : 'Terrain Editor';
+        }
+        if (isEditorVisible) {
+            enterEditorMode();
+            refreshModelLibrary();
+        } else {
+            exitEditorMode();
+        }
+    }
+    window.toggleTerrainEditor = toggleTerrainEditor;
+
     // --- Toggle Button in Settings ---
     const editorSubmenu = document.getElementById('editor-submenu');
     if (editorSubmenu) {
@@ -395,17 +411,12 @@ export function initTerrainEditor(scene, camera, renderer, terrainMesh) {
             editorSubmenu.insertBefore(btnToggleEditor, editorSubmenu.firstChild);
         }
 
-        btnToggleEditor.addEventListener('click', () => {
-            isEditorVisible = !isEditorVisible;
-            uiContainer.style.display = isEditorVisible ? 'flex' : 'none';
-            btnToggleEditor.innerText = isEditorVisible ? 'Hide Editor' : 'Terrain Editor';
-            if (isEditorVisible) {
-                enterEditorMode();
-                refreshModelLibrary();
-            } else {
-                exitEditorMode();
-            }
-        });
+        btnToggleEditor.addEventListener('click', toggleTerrainEditor);
+    }
+
+    const existingBtn = document.getElementById('editor-toggle');
+    if (existingBtn) {
+        existingBtn.addEventListener('click', toggleTerrainEditor);
     }
 
     function updateContextUI() {

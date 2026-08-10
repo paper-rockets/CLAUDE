@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Low Poly Ocean & Beach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body, html {
+            width: 100%; height: 100%; overflow: hidden;
+            background-color: #050608;
+            font-family: 'Outfit', sans-serif;
+            color: #e2e8f0;
+        }
+        #webgl-canvas { width: 100%; height: 100%; display: block; cursor: grab; }
+        #webgl-canvas:active { cursor: grabbing; }
+
+        .ui-container {
+            position: absolute; top: 20px; left: 20px; z-index: 10;
+            display: flex; flex-direction: column; gap: 12px; pointer-events: none;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border-radius: 16px; padding: 16px 20px; pointer-events: auto;
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+        .header-title {
+            font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+        }
+        .header-sub { font-size: 0.78rem; color: #94a3b8; font-weight: 400; }
+
+        .controls-bar {
+            position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+            z-index: 10; display: flex; align-items: center; gap: 16px; padding: 10px 20px;
+        }
+        .btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #f1f5f9; border-radius: 10px; padding: 8px 14px;
+            font-family: inherit; font-size: 0.85rem; font-weight: 500;
+            cursor: pointer; display: flex; align-items: center; gap: 8px;
+            transition: all 0.2s ease;
+        }
+        .btn:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.3); transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .btn svg { width: 16px; height: 16px; fill: currentColor; }
+        .stat-badge {
+            font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: #38bdf8;
+            background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 4px 10px; border-radius: 8px;
+        }
+        .instructions {
+            position: absolute; bottom: 24px; right: 24px; z-index: 10;
+            font-size: 0.75rem; color: #64748b; text-align: right; pointer-events: none;
+        }
+        #error-overlay {
+            position: absolute; inset: 0; background: #090d16; color: #f87171;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            padding: 30px; z-index: 100; font-family: 'JetBrains Mono', monospace;
+        }
+        #error-overlay pre {
+            background: #111827; padding: 20px; border-radius: 8px;
+            border: 1px solid #374151; max-width: 800px; overflow: auto;
+            white-space: pre-wrap; margin-top: 16px; font-size: 0.85rem; color: #fca5a5;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+
+    <div class="ui-container">
+        <div class="glass-panel">
+            <div class="header-title">🌊 Low Poly Ocean & Beach</div>
+            <div class="header-sub">Voronoi Shore + Wind Waker Toon Ocean — Merged Shader</div>
+        </div>
+    </div>
+
+    <div class="glass-panel controls-bar">
+        <button id="btn-play" class="btn">
+            <svg id="icon-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            <svg id="icon-play" viewBox="0 0 24 24" style="display:none;"><path d="M8 5v14l11-7z"/></svg>
+            <span id="txt-play">Pause</span>
+        </button>
+        <button id="btn-reset" class="btn">
+            <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            Reset
+        </button>
+        <div class="stat-badge" id="fps-counter">60 FPS</div>
+    </div>
+
+    <div class="instructions">
+        Click & Drag to rotate horizon / zoom<br>
+        WebGL2 Multipass Rendering
+    </div>
+
+    <div id="error-overlay">
+        <h2>WebGL Compilation Error</h2>
+        <pre id="error-text"></pre>
+    </div>
+
+    <script>
+        // ===================================================================
+        // GLSL COMMON CODE
+        // ===================================================================
+        const COMMON_GLSL = `#version 300 es
+        precision highp float;
+
+        uniform vec3 iResolution;
+        uniform float iTime;
+        uniform vec4 iMouse;
+        uniform sampler2D iChannel0;
+
+        out vec4 fragColor;
+
+        vec2 rot(vec2 p, float a) {
+            return p * mat2(cos(a), sin(a), -sin(a), cos(a));
+        }
+
+        float mapRange(float v, float fromMin, float fromMax, float toMin, float toMax) {
+            return toMin + ((v - fromMin) / (fromMax - fromMin)) * (toMax - toMin);
+        }
+
+        float sineInOut(float t) {
+            return -0.5 * (cos(3.1415926535 * t) - 1.0);
+        }
+
+        vec4 blur(vec2 uv, sampler2D sampler, vec2 scale, float sigma) {
+            vec4 O = vec4(0.0);
+            float samples = sigma * 4.0;
+            int LOD = max(0, int(log2(float(samples))) - 3);
+            int sLOD = 1 << LOD;
+            int s = max(1, int(samples / float(sLOD)));
+            float sum = 0.0;
+            for (int i = 0; i < s * s; i++) {
+                vec2 d = vec2(float(i % s), float(i / s)) * float(sLOD) - 0.5 * float(samples);
+                vec2 dd = d / sigma;
+                float g = exp(-0.5 * dot(dd, dd)) / (6.2831853 * sigma * sigma);
+                O += g * textureLod(sampler, uv + 1.0 / scale * d, float(LOD));
+                sum += g;
+            }
+            return O / sum;
+        }
+
+        vec3 Tonemap_ACES(vec3 x) {
+            const float a = 2.51;
+            const float b = 0.03;
+            const float c = 2.43;
+            const float d = 0.59;
+            const float e = 0.14;
+            return (x * (a * x + b)) / (x * (c * x + d) + e);
+        }
+
+        float smin(float a, float b, float k) {
+            float h = max(k - abs(a - b), 0.0) / k;
+            return min(a, b) - h * h * k * 0.25;
+        }
+
+        float hash11(float p) {
+            p = fract(p * 0.1031);
+            p *= p + 33.33;
+            p *= p + p;
+            return fract(p);
+        }
+
+        float hash1(float n) { return fract(sin(n) * 1e4); }
+
+        vec2 hash22(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.xx + p3.yz) * p3.zy);
+        }
+
+        vec3 hash32(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+            p3 += dot(p3, p3.yxz + 33.33);
+            return fract((p3.xxy + p3.yzz) * p3.zyx);
+        }
+
+        vec3 voronoi(in vec2 x, float s) {
+            vec2 ip = floor(x);
+            vec2 fp = fract(x);
+            vec2 mg, mr;
+            float md = 8.0;
+            for (int j = -1; j <= 1; j++)
+            for (int i = -1; i <= 1; i++) {
+                vec2 g = vec2(float(i), float(j));
+                vec2 o = hash22(ip + g);
+                vec2 r = g + o - fp;
+                float d = dot(r, r);
+                if (d < md) { md = d; mr = r; mg = g; }
+            }
+            md = 8.0;
+            for (int j = -2; j <= 2; j++)
+            for (int i = -2; i <= 2; i++) {
+                vec2 g = mg + vec2(float(i), float(j));
+                vec2 o = hash22(ip + g);
+                vec2 r = g + o - fp;
+                if (dot(mr - r, mr - r) > 0.00001)
+                    md = smin(md, dot(0.5 * (mr + r), normalize(r - mr)), s);
+            }
+            return vec3(md, mr);
+        }
+
+        float voronoise(in vec2 p) {
+            float k = 1.0;
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 a = vec2(0.0);
+            for (int y = -2; y <= 2; y++)
+            for (int x = -2; x <= 2; x++) {
+                vec2 g = vec2(x, y);
+                vec3 o = hash32(i + g);
+                vec2 d = g - f + o.xy;
+                float w = pow(1.0 - smoothstep(0.0, 1.414, length(d)), k);
+                a += vec2(o.z * w, w);
+            }
+            return a.x / a.y;
+        }
+
+        vec4 voronoi_smooth(in vec2 x, float w, float offset) {
+            vec2 n = floor(x);
+            vec2 f = fract(x);
+            vec4 m = vec4(8.0, 0.0, 0.0, 0.0);
+            for (int j = -2; j <= 2; j++)
+            for (int i = -2; i <= 2; i++) {
+                vec2 g = vec2(float(i), float(j));
+                vec2 o = hash22(n + g);
+                o = 0.5 + 0.5 * sin(offset + 6.283185 * o);
+                float d = length(g - f + o);
+                vec3 col = 0.5 + 0.5 * sin(hash11(dot(n + g, vec2(7.0, 113.0))) * 2.5 + 3.5 + vec3(2.0, 3.0, 0.0));
+                col = col * col;
+                float h = smoothstep(-1.0, 1.0, (m.x - d) / w);
+                m.x = mix(m.x, d, h) - h * (1.0 - h) * w / (1.0 + 3.0 * w);
+            }
+            return m;
+        }
+
+        vec2 f_shore(vec2 p) {
+            float f0 = voronoi(p * 0.8, 0.25).x;
+            float f1 = -p.y + voronoise(vec2(1.0, p.x) * 2.0);
+            float f01 = smoothstep(0.05, 0.0, smin(f0, -f1, 0.5));
+            return vec2(f1, min(f01, smoothstep(0.5, 0.48, f1 * 0.9)));
+        }
+
+        vec2 disp(vec2 p, float b, float e) {
+            vec2 s = iResolution.xy;
+            vec2 eps = vec2(0.0, e);
+            vec4 sx = blur(p + eps.xy, iChannel0, s, b) - blur(p - eps.xy, iChannel0, s, b);
+            vec4 sy = blur(p + eps.yx, iChannel0, s, b) - blur(p - eps.yx, iChannel0, s, b);
+            return vec2(sx.x, sy.x);
+        }
+
+        // ---- Wind Waker water circles ----
+        #define WATER_COL vec3(0.0, 0.4453, 0.7305)
+        #define WATER2_COL vec3(0.0, 0.3680, 0.6358)
+        #define FOAM_COL vec3(0.8125, 0.9609, 0.9648)
+        #define FOG_COL vec3(0.6406, 0.9453, 0.9336)
+        #define SKY_COL vec3(0.0, 0.8203, 1.0)
+        #define M_2PI 6.283185307
+        #define M_6PI 18.84955592
+
+        float circ(vec2 pos, vec2 c, float s) {
+            float r = (sin((iTime - (c.x * 10.0)) * 2.0) * 0.0015);
+            c = abs(pos - c);
+            c = min(c, 1.0 - c);
+            return dot(c, c) < s - r ? -1.0 : 0.0;
+        }
+
+        float waterlayer(vec2 uv) {
+            uv = mod(uv, 1.0);
+            float ret = 1.0;
+            ret += circ(uv, vec2(0.37378, 0.277169), 0.0268181);
+            ret += circ(uv, vec2(0.0317477, 0.540372), 0.0193742);
+            ret += circ(uv, vec2(0.430044, 0.882218), 0.0232337);
+            ret += circ(uv, vec2(0.641033, 0.695106), 0.0117864);
+            ret += circ(uv, vec2(0.0146398, 0.0791346), 0.0299458);
+            ret += circ(uv, vec2(0.43871, 0.394445), 0.0289087);
+            ret += circ(uv, vec2(0.909446, 0.878141), 0.028466);
+            ret += circ(uv, vec2(0.310149, 0.686637), 0.0128496);
+            ret += circ(uv, vec2(0.928617, 0.195986), 0.0152041);
+            ret += circ(uv, vec2(0.0438506, 0.868153), 0.0268601);
+            ret += circ(uv, vec2(0.308619, 0.194937), 0.00806102);
+            ret += circ(uv, vec2(0.349922, 0.449714), 0.00928667);
+            ret += circ(uv, vec2(0.0449556, 0.953415), 0.023126);
+            ret += circ(uv, vec2(0.117761, 0.503309), 0.0151272);
+            ret += circ(uv, vec2(0.563517, 0.244991), 0.0292322);
+            ret += circ(uv, vec2(0.566936, 0.954457), 0.00981141);
+            ret += circ(uv, vec2(0.0489944, 0.200931), 0.0178746);
+            ret += circ(uv, vec2(0.569297, 0.624893), 0.0132408);
+            ret += circ(uv, vec2(0.298347, 0.710972), 0.0114426);
+            ret += circ(uv, vec2(0.878141, 0.771279), 0.00322719);
+            ret += circ(uv, vec2(0.150995, 0.376221), 0.00216157);
+            ret += circ(uv, vec2(0.119673, 0.541984), 0.0124621);
+            ret += circ(uv, vec2(0.629598, 0.295629), 0.0198736);
+            ret += circ(uv, vec2(0.334357, 0.266278), 0.0187145);
+            ret += circ(uv, vec2(0.918044, 0.968163), 0.0182928);
+            ret += circ(uv, vec2(0.965445, 0.505026), 0.006348);
+            ret += circ(uv, vec2(0.514847, 0.865444), 0.00623523);
+            ret += circ(uv, vec2(0.710575, 0.0415131), 0.00322689);
+            ret += circ(uv, vec2(0.71403, 0.576945), 0.0215641);
+            ret += circ(uv, vec2(0.748873, 0.413325), 0.0110795);
+            ret += circ(uv, vec2(0.0623365, 0.896713), 0.0236203);
+            ret += circ(uv, vec2(0.980482, 0.473849), 0.00573439);
+            ret += circ(uv, vec2(0.647463, 0.654349), 0.0188713);
+            ret += circ(uv, vec2(0.651406, 0.981297), 0.00710875);
+            ret += circ(uv, vec2(0.428928, 0.382426), 0.0298806);
+            ret += circ(uv, vec2(0.811545, 0.62568), 0.00265539);
+            ret += circ(uv, vec2(0.400787, 0.74162), 0.00486609);
+            ret += circ(uv, vec2(0.331283, 0.418536), 0.00598028);
+            ret += circ(uv, vec2(0.894762, 0.0657997), 0.00760375);
+            ret += circ(uv, vec2(0.525104, 0.572233), 0.0141796);
+            ret += circ(uv, vec2(0.431526, 0.911372), 0.0213234);
+            ret += circ(uv, vec2(0.658212, 0.910553), 0.000741023);
+            ret += circ(uv, vec2(0.514523, 0.243263), 0.0270685);
+            ret += circ(uv, vec2(0.0249494, 0.252872), 0.00876653);
+            ret += circ(uv, vec2(0.502214, 0.47269), 0.0234534);
+            ret += circ(uv, vec2(0.693271, 0.431469), 0.0246533);
+            ret += circ(uv, vec2(0.415, 0.884418), 0.0271696);
+            ret += circ(uv, vec2(0.149073, 0.41204), 0.00497198);
+            ret += circ(uv, vec2(0.533816, 0.897634), 0.00650833);
+            ret += circ(uv, vec2(0.0409132, 0.83406), 0.0191398);
+            ret += circ(uv, vec2(0.638585, 0.646019), 0.0206129);
+            ret += circ(uv, vec2(0.660342, 0.966541), 0.0053511);
+            ret += circ(uv, vec2(0.513783, 0.142233), 0.00471653);
+            ret += circ(uv, vec2(0.124305, 0.644263), 0.00116724);
+            ret += circ(uv, vec2(0.99871, 0.583864), 0.0107329);
+            ret += circ(uv, vec2(0.894879, 0.233289), 0.00667092);
+            ret += circ(uv, vec2(0.246286, 0.682766), 0.00411623);
+            ret += circ(uv, vec2(0.0761895, 0.16327), 0.0145935);
+            ret += circ(uv, vec2(0.949386, 0.802936), 0.0100873);
+            ret += circ(uv, vec2(0.480122, 0.196554), 0.0110185);
+            ret += circ(uv, vec2(0.896854, 0.803707), 0.013969);
+            ret += circ(uv, vec2(0.292865, 0.762973), 0.00566413);
+            ret += circ(uv, vec2(0.0995585, 0.117457), 0.00869407);
+            ret += circ(uv, vec2(0.377713, 0.00335442), 0.0063147);
+            ret += circ(uv, vec2(0.506365, 0.531118), 0.0144016);
+            ret += circ(uv, vec2(0.408806, 0.894771), 0.0243923);
+            ret += circ(uv, vec2(0.143579, 0.85138), 0.00418529);
+            ret += circ(uv, vec2(0.0902811, 0.181775), 0.0108896);
+            ret += circ(uv, vec2(0.780695, 0.394644), 0.00475475);
+            ret += circ(uv, vec2(0.298036, 0.625531), 0.00325285);
+            ret += circ(uv, vec2(0.218423, 0.714537), 0.00157212);
+            ret += circ(uv, vec2(0.658836, 0.159556), 0.00225897);
+            ret += circ(uv, vec2(0.987324, 0.146545), 0.0288391);
+            ret += circ(uv, vec2(0.222646, 0.251694), 0.00092276);
+            ret += circ(uv, vec2(0.159826, 0.528063), 0.00605293);
+            return max(ret, 0.0);
+        }
+
+        vec3 ww_water(vec2 uv, vec3 cdir) {
+            uv *= vec2(0.25);
+            // Parallax
+            vec2 a = 0.025 * cdir.xz / cdir.y;
+            float h = sin(uv.x + iTime);
+            uv += a * h;
+            h = sin(0.841471 * uv.x - 0.540302 * uv.y + iTime);
+            uv += a * h;
+            // Distortion
+            float d1 = mod(uv.x + uv.y, M_2PI);
+            float d2 = mod((uv.x + uv.y + 0.25) * 1.3, M_6PI);
+            d1 = iTime * 0.1 + d1;
+            d2 = iTime * 0.6 + d2;
+            vec2 dist = vec2(
+                sin(d1) * 0.05 + sin(d2) * 0.05,
+                cos(d1) * 0.05 + cos(d2) * 0.05
+            );
+            vec3 ret = mix(WATER_COL, WATER2_COL, waterlayer(uv + dist.xy));
+            ret = mix(ret, FOAM_COL, waterlayer(vec2(0.1 * iTime, 1.0) - uv - dist.yx));
+            return ret;
+        }
+
+        vec3 pixtoray(vec2 uv) {
+            vec3 pixpos;
+            pixpos.xy = uv - 0.5;
+            pixpos.y *= iResolution.y / iResolution.x;
+            pixpos.z = -0.6;
+            return normalize(pixpos);
+        }
+
+        vec3 quatmul(vec4 q, vec3 v) {
+            vec3 qvec = q.xyz;
+            vec3 uuv = cross(qvec, cross(qvec, v)) * 2.0;
+            vec3 uv2 = cross(qvec, v) * (2.0 * q.w);
+            return v + uv2 + uuv;
+        }
+        `;
+
+        // ===================================================================
+        // BUFFER A — Shore terrain (voronoi beach) at bottom, blending to
+        //            Wind Waker toon ocean at top
+        // ===================================================================
+        const BUFFER_A_FS = COMMON_GLSL + `
+        #define VIGNETTE
+        #define COLOR_CORRECTION
+        #define AA 2
+        #define WIDTH 3.
+
+        void mainImage(out vec4 O, in vec2 I) {
+            vec3 tot = vec3(0.0);
+            vec2 stepsize = WIDTH / iResolution.xy / float(AA);
+            vec2 p = (2.0 * I - iResolution.xy) / iResolution.y;
+
+            for (int xi = 0; xi < AA; ++xi)
+            for (int yi = 0; yi < AA; ++yi) {
+                vec2 uv = p;
+                uv += (vec2(float(xi), float(yi)) + vec2(0.5)) * stepsize - vec2(1.0, 1.7);
+
+                float w = fract(iTime * 0.19);
+                float t = 1.3 * (sineInOut(w * 2.0) * 5.0 - 2.0);
+
+                vec2 m = iMouse.xy / iResolution.xy;
+                float mr = -0.18;
+                float mz = 1.0;
+
+                if (iMouse.z > 0.0) {
+                    mr += m.x * 6.28 + 3.14;
+                    mz = m.y * 1.5 + 0.5;
+                }
+
+                vec2 ps = rot(((uv + vec2(0.5, 1.0)) * mz / abs(uv.y)) * vec2(3.0, 5.0), mr);
+                float rx = ps.x;
+                float g = ps.y - 1.0;
+                ps -= vec2(0.0, t);
+
+                vec2 d = disp(ps * 0.015 + vec2(1.0, iTime * 0.07), 1.0, 0.01) * 0.3;
+                vec2 fb = f_shore(ps + d);
+                float ft = f_shore(ps + d - vec2(0.01, -0.13)).y;
+
+                // --- Shore / Beach colors (voronoi terrain) ---
+                vec3 b = mix(vec3(0.7, 0.47, 0.28), vec3(0.3, 0.21, 0.147), smoothstep(-4.0, 0.0, g));
+                vec3 c = mix(vec3(0.55, 0.4, 0.27) * 0.9, vec3(0.25, 0.35, 0.45), smoothstep(-3.5, -1.0, g));
+                c = mix(c, vec3(0.025, 0.37, 0.29), smoothstep(-3.2, 1.0, g));
+                c = mix(c, vec3(0.0), smoothstep(-2.5, 1.3, g));
+                c = mix(c, vec3(0.0), smoothstep(-4.0, 7.0, g));
+
+                float vs = voronoi_smooth(ps * 1.7, 0.8, iTime * 5.0).x;
+                c = mix(c, c * 2.0, smoothstep(0.0, 3.0, vs) * 1.6);
+
+                float fw = smoothstep(0.1, 1.0, w);
+                float ret = mapRange(fw, 0.0, 1.0, -4.0, -2.0);
+                float re = -0.6 - ret + g - voronoise(vec2(1.0, rx) * 2.0);
+                re = smoothstep(0.0, 0.5, re + 0.6) * max(mapRange(fw, 0.0, 0.4, 1.2, 0.0), 0.0);
+
+                b = mix(b, b * 0.68, re);
+                b = mix(b, c, step(fb.x, 0.0));
+                b = mix(b, c * 0.75, fb.y);
+                b = max(b, ft * 1.2);
+
+                // --- Wind Waker toon ocean for the upper region ---
+                // Compute the WW ocean for this pixel
+                vec2 wwUV = (I + vec2(float(xi), float(yi)) * 0.5 - vec2(0.25)) / iResolution.xy;
+                vec3 cpos = vec3(0.0, 4.0, 10.0);
+                vec3 cdir = pixtoray(wwUV);
+                cdir = quatmul(vec4(-0.19867, 0.0, 0.0, 0.980067), cdir);
+                // Slow camera rotation
+                float cost = cos(iTime * -0.05);
+                float sint = sin(iTime * -0.05);
+                cdir.xz = cost * cdir.xz + sint * vec2(-cdir.z, cdir.x);
+                cpos.xz = cost * cpos.xz + sint * vec2(-cpos.z, cpos.x);
+
+                const vec3 ocean = vec3(0.0, 1.0, 0.0);
+                float rdist = -dot(cpos, ocean) / dot(cdir, ocean);
+                vec3 pos = cpos + rdist * cdir;
+
+                vec3 wwPix;
+                if (rdist > 0.0 && rdist < 100.0) {
+                    vec3 wat = ww_water(pos.xz, cdir);
+                    wwPix = mix(wat, FOG_COL, min(rdist * 0.01, 1.0));
+                } else {
+                    wwPix = mix(FOG_COL, SKY_COL, min(cdir.y * 4.0, 1.0));
+                }
+
+                // --- BLEND: Shore at bottom (uv.y < 0), toon ocean at top ---
+                // g is the ground-plane y; shore region is roughly g < -1
+                // Blend band between the water edge and deep ocean
+                float blendZone = smoothstep(-2.5, 0.5, g);
+                vec3 finalPix = mix(wwPix, b, blendZone);
+
+                // Also blend in sky for the very top
+                float skyBlend = smoothstep(0.3, 1.5, uv.y + 1.0);
+                finalPix = mix(finalPix, wwPix, 1.0 - blendZone);
+
+                tot += b * blendZone + wwPix * (1.0 - blendZone);
+            }
+            tot = tot / float(AA * AA);
+
+            #ifdef VIGNETTE
+            tot = mix(tot, vec3(0.0), smoothstep(0.1, 2.2, length(p * 0.8)));
+            #endif
+
+            #ifdef COLOR_CORRECTION
+            tot = tot * vec3(1.2, 0.95, 1.0);
+            tot = pow(tot, vec3(1.1, 1.02, 0.94)) * 2.0;
+            #endif
+
+            O = vec4(Tonemap_ACES(tot), 1.0);
+        }
+
+        void main() { mainImage(fragColor, gl_FragCoord.xy); }
+        `;
+
+        // ===================================================================
+        // MAIN IMAGE PASS — Bloom post-process
+        // ===================================================================
+        const MAIN_IMAGE_FS = COMMON_GLSL + `
+        #define BLOOM
+
+        void mainImage(out vec4 O, in vec2 I) {
+            vec2 uv = I / iResolution.xy;
+            vec4 o = texture(iChannel0, uv);
+
+            #ifdef BLOOM
+            o += texture(iChannel0, uv) * 0.15;
+            o = max(o, blur(uv, iChannel0, iResolution.xy, 5.0) * 1.13);
+            #endif
+
+            O = o;
+        }
+
+        void main() { mainImage(fragColor, gl_FragCoord.xy); }
+        `;
+
+        // ===================================================================
+        // Vertex Shader
+        // ===================================================================
+        const VERTEX_VS = `#version 300 es
+        in vec2 position;
+        void main() { gl_Position = vec4(position, 0.0, 1.0); }
+        `;
+
+        // ===================================================================
+        // WebGL Engine
+        // ===================================================================
+        const canvas = document.getElementById('webgl-canvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) { showError("WebGL2 is not supported."); }
+
+        function showError(msg) {
+            document.getElementById('error-overlay').style.display = 'flex';
+            document.getElementById('error-text').textContent = msg;
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                const info = gl.getShaderInfoLog(shader);
+                gl.deleteShader(shader);
+                throw new Error(info);
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                const info = gl.getProgramInfoLog(program);
+                throw new Error(info);
+            }
+            return program;
+        }
+
+        // Fullscreen Quad
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            -1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1,
+        ]), gl.STATIC_DRAW);
+
+        let programBufferA, programImage;
+        try {
+            programBufferA = createProgram(gl, VERTEX_VS, BUFFER_A_FS);
+            programImage   = createProgram(gl, VERTEX_VS, MAIN_IMAGE_FS);
+        } catch (e) {
+            showError(e.message);
+        }
+
+        // Noise texture
+        const noiseSize = 256;
+        const noiseData = new Uint8Array(noiseSize * noiseSize * 4);
+        for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.floor(Math.random() * 256);
+
+        const noiseTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, noiseSize, noiseSize, 0, gl.RGBA, gl.UNSIGNED_BYTE, noiseData);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.generateMipmap(gl.TEXTURE_2D);
+
+        // Framebuffer A
+        let fboA, textureA;
+        let width = 0, height = 0;
+
+        function initFramebuffers() {
+            width = canvas.width; height = canvas.height;
+            if (fboA) gl.deleteFramebuffer(fboA);
+            if (textureA) gl.deleteTexture(textureA);
+            fboA = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+            textureA = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, textureA);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureA, 0);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+
+        function resize() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+            const displayWidth  = Math.floor(window.innerWidth * dpr);
+            const displayHeight = Math.floor(window.innerHeight * dpr);
+            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width  = displayWidth;
+                canvas.height = displayHeight;
+                initFramebuffers();
+            }
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Mouse
+        const mouse = { x: 0, y: 0, z: 0, w: 0, isDown: false };
+        canvas.addEventListener('pointerdown', (e) => {
+            mouse.isDown = true;
+            mouse.x = e.clientX * window.devicePixelRatio;
+            mouse.y = (window.innerHeight - e.clientY) * window.devicePixelRatio;
+            mouse.z = 1.0;
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            if (mouse.isDown) {
+                mouse.x = e.clientX * window.devicePixelRatio;
+                mouse.y = (window.innerHeight - e.clientY) * window.devicePixelRatio;
+            }
+        });
+        window.addEventListener('pointerup', () => { mouse.isDown = false; mouse.z = 0.0; });
+
+        // Controls
+        let isPlaying = true;
+        let startTime = performance.now();
+        let pausedTime = 0;
+
+        document.getElementById('btn-play').addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            document.getElementById('icon-play').style.display = isPlaying ? 'none' : 'block';
+            document.getElementById('icon-pause').style.display = isPlaying ? 'block' : 'none';
+            document.getElementById('txt-play').textContent = isPlaying ? 'Pause' : 'Play';
+            if (isPlaying) startTime = performance.now() - pausedTime;
+            else pausedTime = performance.now() - startTime;
+        });
+
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            startTime = performance.now(); pausedTime = 0;
+            mouse.x = 0; mouse.y = 0; mouse.z = 0;
+        });
+
+        // FPS
+        let frameCount = 0;
+        let lastFpsUpdate = performance.now();
+        const fpsCounter = document.getElementById('fps-counter');
+
+        // Render
+        function render(now) {
+            requestAnimationFrame(render);
+            frameCount++;
+            if (now - lastFpsUpdate >= 500) {
+                const fps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+                fpsCounter.textContent = `${fps} FPS`;
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+
+            const time = isPlaying ? (now - startTime) / 1000.0 : pausedTime / 1000.0;
+
+            // Pass 1: Buffer A
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(programBufferA);
+            gl.uniform3f(gl.getUniformLocation(programBufferA, "iResolution"), canvas.width, canvas.height, 1.0);
+            gl.uniform1f(gl.getUniformLocation(programBufferA, "iTime"), time);
+            gl.uniform4f(gl.getUniformLocation(programBufferA, "iMouse"), mouse.x, mouse.y, mouse.z, mouse.w);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
+            gl.uniform1i(gl.getUniformLocation(programBufferA, "iChannel0"), 0);
+            const posAttrA = gl.getAttribLocation(programBufferA, "position");
+            gl.enableVertexAttribArray(posAttrA);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+            gl.vertexAttribPointer(posAttrA, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            gl.bindTexture(gl.TEXTURE_2D, textureA);
+            gl.generateMipmap(gl.TEXTURE_2D);
+
+            // Pass 2: Main Image + Bloom
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(programImage);
+            gl.uniform3f(gl.getUniformLocation(programImage, "iResolution"), canvas.width, canvas.height, 1.0);
+            gl.uniform1f(gl.getUniformLocation(programImage, "iTime"), time);
+            gl.uniform4f(gl.getUniformLocation(programImage, "iMouse"), mouse.x, mouse.y, mouse.z, mouse.w);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textureA);
+            gl.uniform1i(gl.getUniformLocation(programImage, "iChannel0"), 0);
+            const posAttrImg = gl.getAttribLocation(programImage, "position");
+            gl.enableVertexAttribArray(posAttrImg);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+            gl.vertexAttribPointer(posAttrImg, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

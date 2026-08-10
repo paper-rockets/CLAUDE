@@ -73,26 +73,37 @@
 
 ---
 
+### 🔹 Stage 6: Modularization & Modernization
+* **Timeframe**: *August 2026 – Present*
+* **Focus**: Refactoring the monolithic engine into a modern ES module architecture and integrating a build system.
+* **Milestones**:
+  * Refactored the monolithic `index.html` engine into dedicated modules under the `src/` directory (Core, Entities, Environment, Physics, Shaders, UI, VFX, World).
+  * Transitioned from legacy Python/batch scripts to a modern **Vite** build system for faster Hot Module Replacement (HMR) and dependency management.
+  * Extracted custom shaders into a dedicated shader management system.
+  * Replaced monolithic terrain generators with modular imports and refactored tree billboard rendering for enhanced performance and visual fidelity.
+
+---
+
 ## 🏗️ Engine Architecture & File Structure
 
 ```
-ONLY HERE NOWHERE ELSE/GAME/
-├── index.html                  # Master Production Single-File Engine
+WANDERLUST/
+├── index.html                  # Main Entry Point
 ├── DEVELOPMENT_LOG.md          # Architecture & Development Log
-├── TerrainEditor.js            # Real-time Terrain Editing Tool
-├── particleWhaleGenerator.js   # Procedural Ambient Particle System
-│
-├── terrain-plains.js           # Plains Biome Generation Logic
-├── terrain-ghibli.js           # Ghibli Valley Biome Logic
-├── terrain-jungle.js           # Lush Jungle Biome Logic
-├── terrain-archipelago.js      # Archipelago Biome Logic
-├── terrain-mountains.js        # Mountains Biome Logic
-├── terrain-magical.js          # Magical Biome Logic
-├── terrain-crystal.js          # Crystal Land Biome Logic
-│
-├── kiki-draco.glb              # Compressed Player Character Model
-├── Princess.glb                # Secondary Character Model
-└── 1_run_server.bat            # One-click Local Dev Server Launcher
+├── vite.config.ts              # Vite Build Configuration
+├── package.json                # Dependencies and NPM Scripts
+├── public/                     # Static Assets (GLB models, etc.)
+├── assets/                     # Raw Textures and Billboard Assets
+└── src/                        # Modular Game Source Code
+    ├── main.js                 # Engine Initialization
+    ├── core/                   # Game Loop, Renderer, Controls
+    ├── entities/               # Player, NPC, and Object logic
+    ├── environment/            # Biomes, Terrain, Trees, Grass
+    ├── physics/                # Collision and Physics logic
+    ├── shaders/                # Core WebGL Shaders
+    ├── ui/                     # User Interface components
+    ├── vfx/                    # Particle Systems, Clouds
+    └── world/                  # Chunk Manager and World Generation
 ```
 
 ---
