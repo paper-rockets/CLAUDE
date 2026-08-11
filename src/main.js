@@ -3345,13 +3345,20 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             }
 
             // Auto-scale to fit a height of ~4.5 units
+            model.updateMatrixWorld(true);
             const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
             const size = box.getSize(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
             const baseScale = maxDim > 0 ? (4.5 / maxDim) : 1.0;
 
+            // Create a parent wrapper group to center the pivot and align bottom to y=0
+            const wrapper = new THREE.Group();
+            model.position.set(-center.x, -box.min.y, -center.z);
+            wrapper.add(model);
+
             // Configure initial userData
-            model.userData = {
+            wrapper.userData = {
                 baseScale: baseScale,
                 scaleMult: 1.0,
                 offsetX: spawnX,
@@ -3360,15 +3367,15 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 rotationY: 0.0
             };
 
-            loadedCustomModels.push(model);
+            loadedCustomModels.push(wrapper);
             selectedModelIndex = loadedCustomModels.length - 1;
 
-            window.updateCustomModelTransform(model);
+            window.updateCustomModelTransform(wrapper);
             window.rebuildModelDropdown();
             window.syncSlidersToSelectedModel();
 
             if (customModelFolder) customModelFolder.open();
-            scene.add(model);
+            scene.add(wrapper);
 
             URL.revokeObjectURL(url);
         }, undefined, (error) => {

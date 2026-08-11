@@ -604,6 +604,16 @@
                 // Remove current model
                 if (currentLoadedModel) scene.remove(currentLoadedModel);
 
+                // Center geometry and align bottom to local ground
+                model.updateMatrixWorld(true);
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                model.position.set(-center.x, -box.min.y, -center.z);
+
+                const wrapper = new THREE.Group();
+                wrapper.add(model);
+
                 // Position model at center of the island
                 modelOffsetX = 0.0;
                 modelOffsetZ = 0.0;
@@ -611,9 +621,6 @@
                 modelRotationY = 0.0;
                 modelScaleMult = 1.0;
 
-                // Auto-scale model to fit nicely (about 12 units high)
-                const box = new THREE.Box3().setFromObject(model);
-                const size = box.getSize(new THREE.Vector3());
                 const maxDim = Math.max(size.x, size.y, size.z);
                 if (maxDim > 0) {
                     modelBaseScale = 12 / maxDim;
@@ -636,9 +643,9 @@
                 // Reveal transform controls in HUD
                 document.getElementById('model-controls').style.display = 'block';
 
-                currentLoadedModel = model;
+                currentLoadedModel = wrapper;
                 updateModelTransform();
-                scene.add(model);
+                scene.add(wrapper);
                 
                 URL.revokeObjectURL(url);
             }, undefined, (error) => {
