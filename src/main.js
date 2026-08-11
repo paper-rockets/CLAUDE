@@ -751,7 +751,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     shaderToggleControllers['toon08'] = waterShaderFolder.add(params, 'toggleToon08').name('🌊 Toon Cloud Ocean 08').onChange(v => activateWaterShader('toon08', v));
     debugWaterDropdownController = waterShaderFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Active Mode').onChange(v => activateWaterShader(v, true));
 
-    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; if(typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = v; if(window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v); });
+    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; if(typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = v; if(window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v); if(window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v); });
     function updateCloudScale(instMesh, newMulti, oldMulti) {
         if (typeof instMesh === 'undefined') return;
         const ratio = newMulti / oldMulti;
@@ -2021,6 +2021,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
     const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 3500);
     instBillboardTrees.frustumCulled = false;
+    instBillboardTrees.visible = false; // Disabled billboard trees per user request
     scene.add(instBillboardTrees);
 
     // Initialize Jungle Billboard trees
@@ -2040,6 +2041,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
     const instJungleBillboardTrees = new THREE.InstancedMesh(jungleBillboardGeo, jungleBillboardMat, 1500);
     instJungleBillboardTrees.frustumCulled = false;
+    instJungleBillboardTrees.visible = false; // Disabled billboard trees per user request
     scene.add(instJungleBillboardTrees);
 
     // Exact color matching palette derived directly from 3D GLB Pine tree foliage colors
@@ -3090,6 +3092,88 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     }
                 }
 
+                // 3. Update Palm trees near water (window.instPalmTreeParts)
+                if (window.instPalmTreeParts && window.instPalmTreeParts.length > 0) {
+                    const firstPart = window.instPalmTreeParts[0];
+                    const countP = firstPart.count;
+                    let palmUpdated = false;
+                    for (let i = (currentFrame + 10) % 15; i < countP; i += 15) {
+                        firstPart.getMatrixAt(i, dummy.matrix);
+                        dummy.position.setFromMatrixPosition(dummy.matrix);
+
+                        if (Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
+                            if (dummy.position.y > 0) {
+                                treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
+                            }
+
+                            let valid = false;
+                            let nx, nz, h, pathVal, bName = '';
+                            let attempts = 0;
+
+                            while(!valid && attempts < 25) {
+                                nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                h = getWorldHeight(nx, nz);
+                                pathVal = getPathStrength(nx, nz);
+                                bName = getBiomeAt(nx, nz).name;
+
+                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                // Water edge elevation range: strictly near water level (6.1m to 12.0m)
+                                let elevationValid = (h >= 6.1 && h <= 12.0) && islandMaskOk;
+
+                                if (elevationValid && pathVal < 0.20 && isTreeZone(nx, nz)) {
+                                    let cx = Math.floor(nx / TREE_CELL_SIZE);
+                                    let cz = Math.floor(nz / TREE_CELL_SIZE);
+                                    let tooClose = false;
+                                    for (let dx = -1; dx <= 1 && !tooClose; dx++) {
+                                        for (let dz = -1; dz <= 1 && !tooClose; dz++) {
+                                            const ncx = (cx + dx + 32768) & 0xFFFF;
+                                            const ncz = (cz + dz + 32768) & 0xFFFF;
+                                            let neighbor = treeGrid.get((ncx << 16) | ncz);
+                                            if (neighbor) {
+                                                if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 25) tooClose = true;
+                                            }
+                                        }
+                                    }
+                                    if (!tooClose) valid = true;
+                                }
+                                attempts++;
+                            }
+
+                            if (valid) {
+                                treeGrid.set(getTreeCell(nx, nz), {x: nx, z: nz});
+                                dummy.position.set(nx, h, nz);
+                                dummy.rotation.set(0, Math.random() * Math.PI * 2.0, 0);
+                                let baseS = 1.0 + Math.random() * 0.3;
+                                dummy.scale.set(baseS * (0.95 + Math.random() * 0.1), baseS * (0.95 + Math.random() * 0.1), baseS * (0.95 + Math.random() * 0.1));
+
+                                window.instPalmTreeParts.forEach(part => {
+                                    const leafHslAttr = part.geometry.getAttribute('aLeafHslShift');
+                                    const barkHslAttr = part.geometry.getAttribute('aBarkHslShift');
+                                    if (leafHslAttr && barkHslAttr) {
+                                        leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                        barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                        leafHslAttr.needsUpdate = true;
+                                        barkHslAttr.needsUpdate = true;
+                                    }
+                                });
+                            } else {
+                                dummy.position.set(0, -1000, 0);
+                            }
+                            dummy.updateMatrix();
+                            window.instPalmTreeParts.forEach(part => {
+                                part.setMatrixAt(i, dummy.matrix);
+                            });
+                            palmUpdated = true;
+                        }
+                    }
+                    if (palmUpdated) {
+                        window.instPalmTreeParts.forEach(part => {
+                            part.instanceMatrix.needsUpdate = true;
+                        });
+                    }
+                }
+
             // Single Billboard Tree (380m to 800m with Hysteresis overlap for zero popping)
             const camX = camera.position.x;
             const camZ = camera.position.z;
@@ -3721,7 +3805,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         const bbox = new THREE.Box3().setFromObject(gltf.scene);
         const modelHeight = bbox.max.y - bbox.min.y;
-        const targetHeight = 28.0;
+        const targetHeight = 34.0;
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
 
@@ -3729,8 +3813,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             // Clone the geometry and bake parent matrices, translations, and scaling into it
             const g = m.geometry.clone();
             g.applyMatrix4(m.matrixWorld);
-            // Translate the geometry down by 9.5 units in world space (9.5 / sc) so that the roots sink fully into the ground
-            g.translate(0, offsetY - 9.5 / sc, 0);
+            // Translate the geometry down by 5.5 units in world space (5.5 / sc) so that the roots sink neatly into the ground
+            g.translate(0, offsetY - 5.5 / sc, 0);
             g.scale(sc, sc, sc);
 
             // Compute indices if not present
@@ -3884,6 +3968,179 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             scene.add(instMesh);
             window.instJungleTreeParts.push(instMesh);
+        });
+    });
+
+    window.instPalmTreeParts = [];
+
+    // Load Palm1_VAR5.glb for 3D palm tree instances near water
+    gltfLoader.load('assets/Palm1_VAR5/Palm1_VAR5.glb', (gltf) => {
+        gltf.scene.updateMatrixWorld(true);
+        const childMeshes = [];
+        gltf.scene.traverse((child) => {
+            if (child.isMesh) childMeshes.push(child);
+        });
+        if (childMeshes.length === 0) return;
+
+        const bbox = new THREE.Box3().setFromObject(gltf.scene);
+        const modelHeight = bbox.max.y - bbox.min.y;
+        const targetHeight = 20.0;
+        const sinkingDepth = 6.0;
+        const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
+        const offsetY = -bbox.min.y;
+
+        const maxPalmCount = 100;
+
+        childMeshes.forEach((m) => {
+            const g = m.geometry.clone();
+            g.applyMatrix4(m.matrixWorld);
+            // Translate the geometry down by 6.0 units in world space (6.0 / sc) to submerge roots under terrain
+            g.translate(0, offsetY - sinkingDepth / sc, 0);
+            g.scale(sc, sc, sc);
+
+            if (!g.index) {
+                const vertCount = g.attributes.position.count;
+                const indices = new Uint32Array(vertCount);
+                for (let i = 0; i < vertCount; i++) indices[i] = i;
+                g.setIndex(new THREE.BufferAttribute(indices, 1));
+            }
+            g.computeBoundingBox();
+            g.computeBoundingSphere();
+
+            const leafHslArr = new Float32Array(maxPalmCount * 3);
+            const barkHslArr = new Float32Array(maxPalmCount * 3);
+            const aLeafHslShift = new THREE.InstancedBufferAttribute(leafHslArr, 3);
+            const aBarkHslShift = new THREE.InstancedBufferAttribute(barkHslArr, 3);
+            g.setAttribute('aLeafHslShift', aLeafHslShift);
+            g.setAttribute('aBarkHslShift', aBarkHslShift);
+
+            const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
+            const meshName = (m.name || '').toLowerCase();
+            const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || matName.includes('batang') || meshName.includes('bark') || meshName.includes('trunk') || meshName.includes('stem');
+            const isLeaf = matName.includes('leaf') || matName.includes('leaves') || matName.includes('frond') || matName.includes('palm') || matName.includes('daun') || meshName.includes('leaf') || meshName.includes('palm');
+
+            const toonMat = new THREE.MeshToonMaterial({
+                color: (m.material && m.material.color) ? m.material.color : new THREE.Color(0xffffff),
+                map: m.material ? m.material.map : null,
+                vertexColors: (m.material && m.material.vertexColors) ? m.material.vertexColors : false,
+                gradientMap: gradientMap,
+                normalMap: m.material ? m.material.normalMap : null,
+                normalScale: m.material ? m.material.normalScale : null,
+                alphaMap: m.material ? m.material.alphaMap : null,
+                transparent: isLeaf ? false : ((m.material && m.material.transparent) || false),
+                alphaTest: isLeaf ? 0.35 : ((m.material && m.material.alphaTest) || 0.0),
+                opacity: 1.0,
+                side: THREE.DoubleSide,
+                depthWrite: true,
+                depthTest: true,
+                dithering: true
+            });
+
+            toonMat.onBeforeCompile = (shader) => {
+                shader.vertexShader = shader.vertexShader.replace(
+                    'void main() {',
+                    `
+                    attribute vec3 aLeafHslShift;
+                    attribute vec3 aBarkHslShift;
+                    varying vec3 vLeafHslShift;
+                    varying vec3 vBarkHslShift;
+                    void main() {
+                        vLeafHslShift = aLeafHslShift;
+                        vBarkHslShift = aBarkHslShift;
+                    `
+                );
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    'void main() {',
+                    `
+                    varying vec3 vLeafHslShift;
+                    varying vec3 vBarkHslShift;
+                    
+                    vec3 rgb2hsl_f(vec3 c) {
+                        float maxVal = max(c.r, max(c.g, c.b));
+                        float minVal = min(c.r, min(c.g, c.b));
+                        float h = 0.0;
+                        float s = 0.0;
+                        float l = (maxVal + minVal) / 2.0;
+
+                        if (maxVal != minVal) {
+                            float d = maxVal - minVal;
+                            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
+                            if (maxVal == c.r) {
+                                h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+                            } else if (maxVal == c.g) {
+                                h = (c.b - c.r) / d + 2.0;
+                            } else if (maxVal == c.b) {
+                                h = (c.r - c.g) / d + 4.0;
+                            }
+                            h /= 6.0;
+                        }
+                        return vec3(h, s, l);
+                    }
+
+                    float hue2rgb_f(float p, float q, float t) {
+                        if (t < 0.0) t += 1.0;
+                        if (t > 1.0) t -= 1.0;
+                        if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
+                        if (t < 1.0/2.0) return q;
+                        if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
+                        return p;
+                    }
+
+                    vec3 hsl2rgb_f(vec3 hsl) {
+                        float h = hsl.x;
+                        float s = hsl.y;
+                        float l = hsl.z;
+                        vec3 rgb;
+
+                        if (s == 0.0) {
+                            rgb = vec3(l);
+                        } else {
+                            float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+                            float p = 2.0 * l - q;
+                            rgb.r = hue2rgb_f(p, q, h + 1.0/3.0);
+                            rgb.g = hue2rgb_f(p, q, h);
+                            rgb.b = hue2rgb_f(p, q, h - 1.0/3.0);
+                        }
+                        return rgb;
+                    }
+                    
+                    void main() {
+                    `
+                ).replace(
+                    '#include <map_fragment>',
+                    `
+                    #include <map_fragment>
+                    
+                    if (diffuseColor.a > 0.01) {
+                        vec3 hsl = rgb2hsl_f(diffuseColor.rgb);
+                        vec3 shift = ${isBark ? 'vBarkHslShift' : 'vLeafHslShift'};
+                        
+                        hsl.x = mod(hsl.x + shift.x, 1.0);
+                        if (hsl.x < 0.0) hsl.x += 1.0;
+                        hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
+                        hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
+                        
+                        diffuseColor.rgb = hsl2rgb_f(hsl);
+                    }
+                    `
+                );
+            };
+
+            const instMesh = new THREE.InstancedMesh(g, toonMat, maxPalmCount);
+            instMesh.castShadow = true;
+            instMesh.receiveShadow = true;
+            instMesh.frustumCulled = false;
+
+            const dummyMatrix = new THREE.Matrix4();
+            dummyMatrix.setPosition(0, -1000, 0);
+            for (let i = 0; i < maxPalmCount; i++) {
+                instMesh.setMatrixAt(i, dummyMatrix);
+            }
+            instMesh.instanceMatrix.needsUpdate = true;
+
+            scene.add(instMesh);
+            window.instPalmTreeParts.push(instMesh);
         });
     });
 

@@ -117,10 +117,10 @@ export class PlayerPhysics {
                         const tz = tree.z;
                         const ty = getWorldHeight(tx, tz);
                         
-                        // We sink jungle trees by 9.5m, so the base is at ty - 9.5
-                        // Max tree height is around 28.0m
-                        const treeBottom = ty - 10.5;
-                        const treeTop = ty + 20.0;
+                        // We sink jungle trees by 5.5m
+                        // Max tree height is around 34.0m
+                        const treeBottom = ty - 6.5;
+                        const treeTop = ty + 28.5;
                         
                         if (py >= treeBottom && py <= treeTop) {
                             const dX = px - tx;

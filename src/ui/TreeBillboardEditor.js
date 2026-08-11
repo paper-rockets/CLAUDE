@@ -59,6 +59,14 @@ export const TREE_PRESETS = [
         billboardPath: 'assets/tree_billboard_2.png',
         targetHeight: 20.0,
         baseColorHex: '#2ea84b'
+    },
+    {
+        key: 'palm1_var5',
+        name: 'Palm 1 VAR5',
+        glbPath: 'assets/Palm1_VAR5/Palm1_VAR5.glb',
+        billboardPath: 'assets/Palm1_VAR5/preview.png',
+        targetHeight: 20.0,
+        baseColorHex: '#2ea84b'
     }
 ];
 
