@@ -2915,6 +2915,12 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 const playerBiomeName = getBiomeAt(playerX, playerZ).name;
                 const playerInJungle = playerBiomeName.toLowerCase().includes('jungle');
 
+                // Enforce zero pines, palms, or billboards in the Lush Jungle biome
+                if (instTree1) instTree1.visible = !playerInJungle;
+                if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = !playerInJungle);
+                if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = false;
+                if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = false;
+
                 // 1. Update standard pine trees (instTree1)
                 const count1 = instTree1.maxCount || instTree1.count;
                 let tree1Updated = false;
@@ -3805,7 +3811,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         const bbox = new THREE.Box3().setFromObject(gltf.scene);
         const modelHeight = bbox.max.y - bbox.min.y;
-        const targetHeight = 34.0;
+        const targetHeight = 36.0;
+        const sinkingDepth = 14.5;
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
 
@@ -3813,8 +3820,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             // Clone the geometry and bake parent matrices, translations, and scaling into it
             const g = m.geometry.clone();
             g.applyMatrix4(m.matrixWorld);
-            // Translate the geometry down by 5.5 units in world space (5.5 / sc) so that the roots sink neatly into the ground
-            g.translate(0, offsetY - 5.5 / sc, 0);
+            // Translate the geometry down by 14.5 units in world space (14.5 / sc) so that the entire root cage is buried underground
+            g.translate(0, offsetY - sinkingDepth / sc, 0);
             g.scale(sc, sc, sc);
 
             // Compute indices if not present
