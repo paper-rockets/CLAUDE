@@ -3154,7 +3154,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     // Initialize DRACOLoader for compressed GLB meshes
     const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/libs/draco/');
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
     gltfLoader.setDRACOLoader(dracoLoader);
     
     // Initialize KTX2Loader for compressed textures (like the Whale model)
