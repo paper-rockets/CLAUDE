@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quirky Series - 3D Animal Walk Cycle Viewer</title>
+  <!-- Google Fonts Outfit & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #0a0915;
+      --panel-bg: rgba(17, 20, 38, 0.75);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #a855f7;
+      --primary-glow: rgba(168, 85, 247, 0.4);
+      --secondary: #6366f1;
+      --secondary-glow: rgba(99, 102, 241, 0.4);
+      --accent: #22c55e;
+      --warning: #f59e0b;
+      --card-bg: rgba(255, 255, 255, 0.02);
+      --card-hover: rgba(255, 255, 255, 0.05);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      font-family: 'Inter', sans-serif;
+      color: var(--text-main);
+    }
+
+    .container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    /* Sidebar Styles */
+    .sidebar {
+      width: 360px;
+      height: 100%;
+      background: var(--panel-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+      box-shadow: 10px 0 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .app-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+      letter-spacing: -0.5px;
+    }
+
+    .app-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* Local File Loader Banner */
+    .local-loader-banner {
+      padding: 16px 24px 8px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn-file-select {
+      width: 100%;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      color: white;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px var(--primary-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-file-select:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px var(--primary-glow);
+    }
+
+    /* Protocol Warn Toast */
+    .warn-toast {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid var(--warning);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--warning);
+      line-height: 1.4;
+      display: none;
+    }
+
+    /* Filter/Search */
+    .search-box {
+      padding: 8px 24px;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: all 0.3s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 10px var(--primary-glow);
+    }
+
+    /* Model List */
+    .model-list-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 24px;
+    }
+
+    .model-list-container::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .model-list-container::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .model-list-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+    }
+
+    .model-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .model-card:hover {
+      background: var(--card-hover);
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .model-card.active {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.15), rgba(99, 102, 241, 0.15));
+      border-color: var(--primary);
+      box-shadow: 0 4px 15px rgba(168, 85, 247, 0.15);
+    }
+
+    .model-name {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .model-meta {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-weight: 500;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge.rigged {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--accent);
+    }
+
+    /* Controls Panel */
+    .controls-panel {
+      padding: 24px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .control-value {
+      color: var(--primary);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      outline: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 0 12px var(--primary-glow);
+    }
+
+    .slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+    }
+
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--primary);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--primary-glow);
+      transition: transform 0.1s ease;
+    }
+
+    .slider::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider-round {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.1);
+      transition: .3s;
+      border-radius: 20px;
+    }
+
+    .slider-round:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider-round {
+      background-color: var(--primary);
+    }
+
+    input:checked + .slider-round:before {
+      transform: translateX(16px);
+    }
+
+    /* 3D Viewport area */
+    .viewport {
+      flex: 1;
+      height: 100%;
+      position: relative;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Loading Spinner */
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 9, 21, 0.85);
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .loading-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 3px solid rgba(168, 85, 247, 0.1);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s infinite linear;
+    }
+
+    .loading-text {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Stats Panel Overlay */
+    .stats-overlay {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--panel-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 16px 20px;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 250px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    }
+
+    .stats-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 2px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      gap: 20px;
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-weight: 600;
+      text-align: right;
+    }
+
+    /* On-Screen Console Logger */
+    .error-console {
+      position: absolute;
+      bottom: 20px;
+      left: 380px;
+      right: 20px;
+      max-height: 180px;
+      overflow-y: auto;
+      background: rgba(220, 38, 38, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      color: white;
+      padding: 16px;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      z-index: 10000;
+      border-radius: 10px;
+      display: none;
+    }
+
+    .error-console-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.3);
+      padding-bottom: 4px;
+    }
+  </style>
+  
+  <!-- On-Screen Error Logging Script (Initializes early) -->
+  <script>
+    window.addEventListener('error', function(e) {
+      const consoleEl = document.getElementById('error-logger');
+      if (consoleEl) {
+        consoleEl.style.display = 'block';
+        const msg = document.createElement('div');
+        msg.innerText = `[JS Error] ${e.message} in ${e.filename.split('/').pop()}:${e.lineno}`;
+        consoleEl.appendChild(msg);
+      }
+    });
+
+    window.addEventListener('unhandledrejection', function(e) {
+      const consoleEl = document.getElementById('error-logger');
+      if (consoleEl) {
+        consoleEl.style.display = 'block';
+        const msg = document.createElement('div');
+        msg.innerText = `[Unhandled Promise] ${e.reason}`;
+        consoleEl.appendChild(msg);
+      }
+    });
+  </script>
+</head>
+<body>
+  <div class="container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="app-title">Quirky 3D Viewer</h1>
+        <p class="app-subtitle">Select a model to view its rigging structure and seamless loop walk animation cycle.</p>
+      </div>
+
+      <!-- Local File Selector for CORS bypass -->
+      <div class="local-loader-banner">
+        <button class="btn-file-select" id="btn-file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          Open Local GLB File...
+        </button>
+        <input type="file" id="file-input" accept=".glb" style="display: none;">
+        
+        <div class="warn-toast" id="toast-protocol">
+          ⚠️ **Local File Mode:** Direct list fetches are blocked by browser CORS policy when opened via <code>file://</code>. Use the button above to load GLBs directly from your hard drive, or open the page via Vite's localhost URL.
+        </div>
+      </div>
+
+      <div class="search-box">
+        <input type="text" class="search-input" id="search" placeholder="Search animal models...">
+      </div>
+
+      <div class="model-list-container" id="model-list">
+        <!-- JS inserts cards here -->
+      </div>
+
+      <div class="controls-panel">
+        <div class="control-group">
+          <div class="control-label">
+            <span>Playback Speed</span>
+            <span class="control-value" id="speed-val">1.0x</span>
+          </div>
+          <input type="range" class="slider" id="speed-slider" min="0" max="2" step="0.1" value="1">
+        </div>
+
+        <div class="btn-row">
+          <button class="btn active" id="btn-play">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Play
+          </button>
+          <button class="btn" id="btn-pause">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> Pause
+          </button>
+        </div>
+
+        <div class="checkbox-row">
+          <span>Show Grid Floor</span>
+          <label class="switch">
+            <input type="checkbox" id="chk-grid" checked>
+            <span class="slider-round"></span>
+          </label>
+        </div>
+
+        <div class="checkbox-row">
+          <span>Show Skeleton Rig</span>
+          <label class="switch">
+            <input type="checkbox" id="chk-skeleton">
+            <span class="slider-round"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Viewport Area -->
+    <div class="viewport">
+      <!-- 3D Canvas -->
+      <div id="canvas-container"></div>
+
+      <!-- Loading Spinner Overlay -->
+      <div class="loading-overlay" id="loading">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-txt">Loading Model...</div>
+      </div>
+
+      <!-- Stats Panel Overlay -->
+      <div class="stats-overlay" id="stats-panel" style="display: none;">
+        <div class="stats-title" id="stats-model-name">Animal Name</div>
+        <div class="stat-row">
+          <span class="stat-label">Rig Type</span>
+          <span class="stat-value" id="stats-rig-type">Rigged (Skinned)</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Active Action</span>
+          <span class="stat-value" id="stats-action">Scene_Skeleton.000</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Clip Duration</span>
+          <span class="stat-value" id="stats-duration">0.42s</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Bone Channels</span>
+          <span class="stat-value" id="stats-channels">52 channels</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- On-Screen Console Logger Panel -->
+  <div class="error-console" id="error-logger">
+    <div class="error-console-title">⚠️ Diagnostic Console (JavaScript Errors)</div>
+  </div>
+
+  <!-- Three.js module import maps -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <!-- ES6 script for loading 3D assets -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    // Model database with pre-mapped active walk/run actions
+    const modelsData = [
+      { id: "arowana", name: "Arowana", filename: "Rig_Arowana_001.glb", action: "Scene_Skeleton" },
+      { id: "badger", name: "Badger", filename: "Rig_Badger_001.glb", action: "Scene_Skeleton.001" },
+      { id: "carp", name: "Carp", filename: "Rig_Carp_001.glb", action: "Scene_Skeleton.002" },
+      { id: "crab", name: "Crab", filename: "Rig_Crab_001.glb", action: "Scene_Skeleton.003" },
+      { id: "dove", name: "Dove", filename: "Rig_Dove_001.glb", action: "Scene_Skeleton.004" },
+      { id: "flamingo", name: "Flamingo", filename: "Rig_Flamingo_001.glb", action: "Scene_Skeleton.005" },
+      { id: "frog", name: "Frog", filename: "Rig_Frog_001.glb", action: "Scene_Skeleton.006" },
+      { id: "jackal", name: "Jackal", filename: "Rig_Jackal_LOD.glb", action: "Scene_Skeleton.018" },
+      { id: "jaguar", name: "Jaguar", filename: "Rig_Jaguar_001.glb", action: "Scene_Skeleton.007" },
+      { id: "lamb", name: "Lamb", filename: "Rig_Lamb_001.glb", action: "Scene_Skeleton.008" },
+      { id: "mole", name: "Mole", filename: "Rig_Mole_001.glb", action: "Scene_Skeleton.009" },
+      { id: "ox", name: "Ox", filename: "Rig_Ox_001.glb", action: "Scene_Skeleton.010" },
+      { id: "peacock", name: "Peacock", filename: "Rig_Peacock_001.glb", action: "Scene_Skeleton.011" },
+      { id: "rhino", name: "Rhino", filename: "Rig_Rhino_001.glb", action: "Scene_Skeleton.012" },
+      { id: "snake", name: "Snake", filename: "Rig_Snake_001.glb", action: "Scene_Skeleton.013" },
+      { id: "snowleopard", name: "Snow Leopard", filename: "Rig_SnowLeopard_001.glb", action: "Scene_Skeleton.014" },
+      { id: "squid", name: "Squid", filename: "Rig_Squid_001.glb", action: "Scene_Skeleton.015" },
+      { id: "swan", name: "Swan", filename: "Rig_Swan_001.glb", action: "Scene_Skeleton.016" },
+      { id: "tortoise", name: "Tortoise", filename: "Rig_Tortoise_001.glb", action: "Scene_Skeleton.017" }
+    ];
+
+    // App state
+    let scene, camera, renderer, controls;
+    let currentModel = null;
+    let mixer = null;
+    let activeAction = null;
+    let skeletonHelper = null;
+    let gridHelper = null;
+    let currentSpeed = 1.0;
+    let clock = new THREE.Clock();
+
+    // DOM Elements
+    const modelListEl = document.getElementById('model-list');
+    const loadingEl = document.getElementById('loading');
+    const loadingTextEl = document.getElementById('loading-txt');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedVal = document.getElementById('speed-val');
+    const btnPlay = document.getElementById('btn-play');
+    const btnPause = document.getElementById('btn-pause');
+    const chkGrid = document.getElementById('chk-grid');
+    const chkSkeleton = document.getElementById('chk-skeleton');
+    const searchInput = document.getElementById('search');
+    const fileButton = document.getElementById('btn-file');
+    const fileInput = document.getElementById('file-input');
+    const toastProtocol = document.getElementById('toast-protocol');
+    
+    const statsPanel = document.getElementById('stats-panel');
+    const statsModelName = document.getElementById('stats-model-name');
+    const statsAction = document.getElementById('stats-action');
+    const statsDuration = document.getElementById('stats-duration');
+    const statsChannels = document.getElementById('stats-channels');
+
+    // Display warn toast if opened via file protocol
+    if (window.location.protocol === 'file:') {
+      toastProtocol.style.display = 'block';
+    }
+
+    // Init Application
+    function init() {
+      // 1. Scene setup
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x06060c);
+      scene.fog = new THREE.FogExp2(0x06060c, 0.08);
+
+      // 2. Camera setup
+      camera = new THREE.PerspectiveCamera(45, (window.innerWidth - 360) / window.innerHeight, 0.1, 100);
+      camera.position.set(2, 1.5, 4);
+
+      // 3. Renderer setup
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth - 360, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+      // 4. Orbit Controls
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxPolarAngle = Math.PI / 2 + 0.1; // Limit below ground
+      controls.minDistance = 0.5;
+      controls.maxDistance = 20;
+
+      // 5. Lighting
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+      hemiLight.position.set(0, 20, 0);
+      scene.add(hemiLight);
+
+      const dirLight = new THREE.DirectionalLight(0xa78bfa, 2.5); // Warm purple tone
+      dirLight.position.set(3, 10, 5);
+      dirLight.castShadow = true;
+      dirLight.shadow.camera.top = 2;
+      dirLight.shadow.camera.bottom = -2;
+      dirLight.shadow.camera.left = -2;
+      dirLight.shadow.camera.right = 2;
+      dirLight.shadow.camera.near = 0.1;
+      dirLight.shadow.camera.far = 40;
+      dirLight.shadow.mapSize.width = 2048;
+      dirLight.shadow.mapSize.height = 2048;
+      dirLight.shadow.bias = -0.0005;
+      scene.add(dirLight);
+
+      // Additional soft neon rim light
+      const pointLight = new THREE.PointLight(0x6366f1, 2, 10);
+      pointLight.position.set(-2, 3, -2);
+      scene.add(pointLight);
+
+      // 6. Ground grid & shadow receiver floor
+      const floorGeo = new THREE.PlaneGeometry(100, 100);
+      const floorMat = new THREE.ShadowMaterial({ opacity: 0.4 });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
+
+      gridHelper = new THREE.GridHelper(30, 30, 0x8a2be2, 0x1f1a3a);
+      gridHelper.position.y = 0.001; // Slightly above floor to prevent z-fighting
+      scene.add(gridHelper);
+
+      // 7. Window resize event
+      window.addEventListener('resize', onWindowResize);
+
+      // 8. Load model list UI
+      renderModelList(modelsData);
+
+      // 9. Load first model over HTTP if not local file
+      if (window.location.protocol !== 'file:') {
+        loadModel(modelsData[8]); // Jaguar by default
+      } else {
+        // Local mode message
+        loadingTextEl.innerText = "Select a local GLB model to begin.";
+        loadingEl.classList.add('active');
+      }
+
+      // 10. Start Animation loop
+      animate();
+    }
+
+    // Render list cards in the sidebar
+    function renderModelList(list) {
+      modelListEl.innerHTML = '';
+      list.forEach(model => {
+        const card = document.createElement('div');
+        card.className = `model-card ${currentModel && currentModel.id === model.id ? 'active' : ''}`;
+        card.innerHTML = `
+          <div class="model-name">
+            <span>${model.name}</span>
+            <span class="badge rigged">Rigged</span>
+          </div>
+          <div class="model-meta">
+            <span>Action: <code>${model.action}</code></span>
+          </div>
+        `;
+        card.addEventListener('click', () => {
+          // Deselect old card
+          document.querySelectorAll('.model-card').forEach(c => c.classList.remove('active'));
+          card.classList.add('active');
+          loadModel(model);
+        });
+        modelListEl.appendChild(card);
+      });
+    }
+
+    // Filter list via search box
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase();
+      const filtered = modelsData.filter(m => m.name.toLowerCase().includes(query));
+      renderModelList(filtered);
+    });
+
+    // File Selector logic (CORS bypass)
+    fileButton.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const objectURL = URL.createObjectURL(file);
+        
+        // Find matching name or default
+        const fileNameLower = file.name.toLowerCase();
+        let matchedModel = modelsData.find(m => fileNameLower.includes(m.id) || m.filename.toLowerCase() === fileNameLower);
+        if (!matchedModel) {
+          // Default action fallback
+          matchedModel = { name: file.name.split('.')[0], filename: file.name, action: "Scene_Skeleton" };
+        }
+        
+        loadModelFromURL(objectURL, matchedModel.name, matchedModel.action);
+      }
+    });
+
+    // Load model from file URL or relative server path
+    function loadModel(modelInfo) {
+      const path = `./assets/${modelInfo.filename}`;
+      loadModelFromURL(path, modelInfo.name, modelInfo.action);
+    }
+
+    // Main GLB Loader
+    function loadModelFromURL(pathOrObjectURL, displayName, targetActionName) {
+      // Show loader
+      loadingTextEl.innerText = `Loading ${displayName}...`;
+      loadingEl.classList.add('active');
+
+      // Clear previous model from scene
+      if (currentModel) {
+        scene.remove(currentModel);
+        if (skeletonHelper) {
+          scene.remove(skeletonHelper);
+          skeletonHelper = null;
+        }
+      }
+
+      const loader = new GLTFLoader();
+
+      loader.load(
+        pathOrObjectURL,
+        (gltf) => {
+          currentModel = gltf.scene;
+
+          // Enable shadows
+          currentModel.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              
+              // Boost material settings for premium look
+              if (child.material) {
+                child.material.roughness = 0.6;
+                child.material.metalness = 0.1;
+                child.material.side = THREE.DoubleSide;
+              }
+            }
+          });
+
+          // Normalize Model Scale to 2.0 units for consistent visibility
+          const box = new THREE.Box3().setFromObject(currentModel);
+          const size = box.getSize(new THREE.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z);
+          if (maxDim > 0) {
+            const scaleFactor = 2.0 / maxDim;
+            currentModel.scale.set(scaleFactor, scaleFactor, scaleFactor);
+          }
+
+          // Center & Align bottom of scaled model to floor (y=0)
+          const newBox = new THREE.Box3().setFromObject(currentModel);
+          const newCenter = newBox.getCenter(new THREE.Vector3());
+          const newSize = newBox.getSize(new THREE.Vector3());
+
+          currentModel.position.x = -newCenter.x;
+          currentModel.position.z = -newCenter.z;
+          currentModel.position.y = -newBox.min.y;
+
+          scene.add(currentModel);
+
+          // Handle Skeleton helper
+          if (chkSkeleton.checked) {
+            createSkeletonHelper();
+          }
+
+          // Handle Animations
+          mixer = new THREE.AnimationMixer(currentModel);
+          const animations = gltf.animations;
+
+          let activeClip = null;
+
+          if (animations && animations.length > 0) {
+            // Find our target walk animation
+            activeClip = animations.find(anim => anim.name === targetActionName);
+            // Fallback: If not found, use first animation
+            if (!activeClip) {
+              activeClip = animations[0];
+            }
+
+            if (activeClip) {
+              activeAction = mixer.clipAction(activeClip);
+              activeAction.setEffectiveTimeScale(currentSpeed);
+              activeAction.play();
+            }
+          }
+
+          // Update stats panel overlay
+          statsModelName.innerText = displayName;
+          if (activeClip) {
+            statsAction.innerText = activeClip.name;
+            statsDuration.innerText = `${activeClip.duration.toFixed(2)}s (10 frames)`;
+            statsChannels.innerText = `${activeClip.tracks.length} channels`;
+            statsPanel.style.display = 'flex';
+          } else {
+            statsAction.innerText = "None";
+            statsDuration.innerText = "0.0s";
+            statsChannels.innerText = "0";
+            statsPanel.style.display = 'flex';
+          }
+
+          // Frame camera to look at the animal center (normalized to 2.0 units)
+          const fov = camera.fov * (Math.PI / 180);
+          let cameraZ = Math.abs(2.0 / (2 * Math.tan(fov / 2)));
+          cameraZ *= 1.4; // Perfect zoom distance
+
+          camera.position.set(cameraZ * 0.7, 2.0 * 0.6, cameraZ);
+          controls.target.set(0, 2.0 * 0.4, 0);
+          
+          // Configure OrbitControls bounds for 2.0 unit model
+          controls.minDistance = 0.1;
+          controls.maxDistance = 15.0;
+          controls.update();
+
+          // Hide loader
+          loadingEl.classList.remove('active');
+        },
+        (xhr) => {
+          if (xhr.total > 0) {
+            const percent = Math.round((xhr.loaded / xhr.total) * 100);
+            loadingTextEl.innerText = `Loading ${displayName}: ${percent}%`;
+          }
+        },
+        (error) => {
+          console.error("Error loading model", error);
+          
+          // Print error to on-screen console
+          const consoleEl = document.getElementById('error-logger');
+          if (consoleEl) {
+            consoleEl.style.display = 'block';
+            const msg = document.createElement('div');
+            msg.innerText = `[Loader Error] Failed to load "${displayName}". Details: ${error.message || 'CORS restriction or file format error.'}`;
+            consoleEl.appendChild(msg);
+          }
+
+          loadingTextEl.innerText = "Error loading model!";
+          setTimeout(() => loadingEl.classList.remove('active'), 2500);
+        }
+      );
+    }
+
+    function createSkeletonHelper() {
+      if (skeletonHelper) scene.remove(skeletonHelper);
+      if (currentModel) {
+        skeletonHelper = new THREE.SkeletonHelper(currentModel);
+        skeletonHelper.material.linewidth = 3;
+        skeletonHelper.material.color = new THREE.Color(0x38bdf8); // Glowing light blue rig
+        scene.add(skeletonHelper);
+      }
+    }
+
+    // Playback Speed Slider
+    speedSlider.addEventListener('input', (e) => {
+      currentSpeed = parseFloat(e.target.value);
+      speedVal.innerText = `${currentSpeed.toFixed(1)}x`;
+      if (mixer && activeAction) {
+        activeAction.setEffectiveTimeScale(currentSpeed);
+      }
+    });
+
+    // Play/Pause buttons
+    btnPlay.addEventListener('click', () => {
+      btnPlay.classList.add('active');
+      btnPause.classList.remove('active');
+      if (activeAction) activeAction.paused = false;
+    });
+
+    btnPause.addEventListener('click', () => {
+      btnPause.classList.add('active');
+      btnPlay.classList.remove('active');
+      if (activeAction) activeAction.paused = true;
+    });
+
+    // Grid Switcher
+    chkGrid.addEventListener('change', (e) => {
+      gridHelper.visible = e.target.checked;
+    });
+
+    // Skeleton Switcher
+    chkSkeleton.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        createSkeletonHelper();
+      } else {
+        if (skeletonHelper) {
+          scene.remove(skeletonHelper);
+          skeletonHelper = null;
+        }
+      }
+    });
+
+    // Window resize handler
+    function onWindowResize() {
+      const width = window.innerWidth - 360;
+      const height = window.innerHeight;
+      
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize(width, height);
+    }
+
+    // Animation Loop
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = clock.getDelta();
+
+      // Update mixer animations
+      if (mixer && btnPlay.classList.contains('active')) {
+        mixer.update(delta);
+      }
+
+      // Update skeleton helper line transformations
+      if (skeletonHelper) {
+        skeletonHelper.update();
+      }
+
+      // Update Orbit controls damping
+      controls.update();
+
+      // Render Scene
+      renderer.render(scene, camera);
+    }
+
+    // Run app on load
+    init();
+  </script>
+</body>
+</html>

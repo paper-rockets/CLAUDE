@@ -62,6 +62,62 @@ export const TREE_PRESETS = [
     }
 ];
 
+// Dynamically discover other tree assets from the public/assets directory
+try {
+    const glbModules = import.meta.glob('/public/assets/*.glb', { query: '?url', import: 'default', eager: true });
+    const pngModules = import.meta.glob('/public/assets/*.png', { query: '?url', import: 'default', eager: true });
+
+    const isPathPreset = (path, type) => {
+        const norm = path.toLowerCase().replace(/^\//, '');
+        return TREE_PRESETS.some(p => {
+            const pPath = (type === 'glb' ? p.glbPath : p.billboardPath).toLowerCase();
+            return norm === pPath || norm === 'public/' + pPath;
+        });
+    };
+
+    Object.keys(glbModules).forEach(glbKey => {
+        const glbUrl = glbModules[glbKey];
+        if (isPathPreset(glbKey, 'glb')) return; // Skip if already defined
+
+        const filename = glbKey.split('/').pop();
+        const baseName = filename.substring(0, filename.lastIndexOf('.'));
+        const cleanBase = baseName.toLowerCase();
+
+        // Search for a matching PNG billboard texture
+        let matchedPngUrl = null;
+        Object.keys(pngModules).forEach(pngKey => {
+            const pngFilename = pngKey.split('/').pop();
+            const pngBase = pngFilename.substring(0, pngFilename.lastIndexOf('.')).toLowerCase();
+            if (pngBase === cleanBase || pngBase === cleanBase + '_billboard' || pngBase === cleanBase + '_bb' || pngBase === cleanBase + '-billboard') {
+                matchedPngUrl = pngModules[pngKey];
+            }
+        });
+
+        if (!matchedPngUrl) {
+            // Check if name contains it
+            Object.keys(pngModules).forEach(pngKey => {
+                const pngFilename = pngKey.split('/').pop().toLowerCase();
+                if (pngFilename.includes(cleanBase)) {
+                    matchedPngUrl = pngModules[pngKey];
+                }
+            });
+        }
+
+        const finalPngUrl = matchedPngUrl || 'assets/tree_billboard_1.png';
+
+        TREE_PRESETS.push({
+            key: cleanBase.replace(/[^a-z0-9]/g, '_'),
+            name: baseName.replace(/_/g, ' ').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            glbPath: glbUrl.replace(/^\//, '').replace(/^public\//, ''),
+            billboardPath: typeof finalPngUrl === 'string' ? finalPngUrl.replace(/^\//, '').replace(/^public\//, '') : finalPngUrl,
+            targetHeight: 20.0,
+            baseColorHex: '#52c439'
+        });
+    });
+} catch (e) {
+    console.warn('Dynamic tree preset scanning failed:', e);
+}
+
 // Helper: RGB (0..1) to HSL (0..1)
 export function rgbToHsl(r, g, b) {
     const max = Math.max(r, g, b), min = Math.min(r, g, b);

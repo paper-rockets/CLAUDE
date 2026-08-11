@@ -59,12 +59,35 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     let logicTimer = 0;
     let animeWaterSystem = null;
     let animeWaterGUI = null;
+    let waterEditorFolder = null;
+    let stdFolder = null;
     let terrainRes = TERRAIN_RES;
     
     let isGodMode = false;
     let godCamera = null;
     let godControls = null;
     let isInitializingGui = true;
+
+    // Clouds config
+    let CLOUD_COUNT = LOW_GFX ? 40 : 150;
+    let HIGH_CLOUD_COUNT = LOW_GFX ? 0 : 24;
+    let WISPY_CLOUD_COUNT = LOW_GFX ? 0 : 30;
+    let MEGA_CLOUD_COUNT = LOW_GFX ? 0 : 24;
+
+    // Water Materials Cache
+    const waterMaterialCache = {};
+
+    const loadedCustomModels = [];
+    let selectedModelIndex = -1;
+    let customModelBaseScale = 1.0;
+    let customModelScaleMult = 1.0;
+    let customModelOffsetX = 0.0;
+    let customModelOffsetY = 0.0;
+    let customModelOffsetZ = 0.0;
+    let customModelRotationY = 0.0;
+    let customModelFolder = null;
+    let modelDropdownController = null;
+    const customModelControllers = {};
 
     let _mapEl = null;
     let _isMapExpanded = false;
@@ -344,10 +367,18 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         showWater: true,
         showTrees: true,
         showClouds: true,
+        showCloudsRegular: true,
+        showCloudsHigh: true,
+        showCloudsWispy: true,
+        showCloudsMega: true,
         cloudScaleRegular: 1.0,
         cloudScaleHigh: 1.0,
         cloudScaleWispy: 1.0,
         cloudScaleMega: 1.0,
+        cloudCountRegular: LOW_GFX ? 40 : 150,
+        cloudCountHigh: LOW_GFX ? 0 : 24,
+        cloudCountWispy: LOW_GFX ? 0 : 30,
+        cloudCountMega: LOW_GFX ? 0 : 24,
         showBirds: true,
         showFogPlanes: true,
         showCrystals: true,
@@ -439,11 +470,172 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         }
     }}, 'openTreeBillboardEditor').name('🌲 Tree & Billboard Editor');
     editorFolder.add(params, 'lockSunToPlayer').name('Lock Sun To Player'); 
-    const editorWaterDropdownController = editorFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Water Shader').onChange(v => {
+
+    editorFolder.add({ loadCustomModel: () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.glb,.gltf';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file && window.loadCustomModelInGame) {
+                window.loadCustomModelInGame(file);
+            }
+        };
+        input.click();
+    }}, 'loadCustomModel').name('📦 Load Custom Toon Model');
+
+    customModelFolder = editorFolder.addFolder('📦 Custom Model');
+    customModelFolder.close();
+
+    params.selectedModelIdx = 0;
+    modelDropdownController = customModelFolder.add(params, 'selectedModelIdx', { 'No models': 0 }).name('Active Model').onChange(v => {
+        selectedModelIndex = v;
+        if (window.syncSlidersToSelectedModel) window.syncSlidersToSelectedModel();
+    });
+
+    params.customModelScale = 1.0;
+    params.customModelY = 0.0;
+    params.customModelX = 0.0;
+    params.customModelZ = 0.0;
+    params.customModelRot = 0;
+
+    customModelControllers.scale = customModelFolder.add(params, 'customModelScale', 0.1, 5.0, 0.05).name('Scale multiplier').onChange(v => {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (model) {
+            model.userData.scaleMult = v;
+            if (window.updateCustomModelTransform) window.updateCustomModelTransform(model);
+        }
+    });
+    customModelControllers.y = customModelFolder.add(params, 'customModelY', -15.0, 30.0, 0.1).name('Height offset').onChange(v => {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (model) {
+            model.userData.offsetY = v;
+            if (window.updateCustomModelTransform) window.updateCustomModelTransform(model);
+        }
+    });
+    customModelControllers.x = customModelFolder.add(params, 'customModelX', -2000.0, 2000.0, 0.5).name('Position X').onChange(v => {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (model) {
+            model.userData.offsetX = v;
+            if (window.updateCustomModelTransform) window.updateCustomModelTransform(model);
+        }
+    });
+    customModelControllers.z = customModelFolder.add(params, 'customModelZ', -2000.0, 2000.0, 0.5).name('Position Z').onChange(v => {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (model) {
+            model.userData.offsetZ = v;
+            if (window.updateCustomModelTransform) window.updateCustomModelTransform(model);
+        }
+    });
+    customModelControllers.rot = customModelFolder.add(params, 'customModelRot', 0, 360, 5).name('Rotation Y').onChange(v => {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (model) {
+            model.userData.rotationY = v * Math.PI / 180;
+            if (window.updateCustomModelTransform) window.updateCustomModelTransform(model);
+        }
+    });
+
+    customModelFolder.add({ cloneModel: () => {
+        if (window.cloneSelectedModel) window.cloneSelectedModel();
+    }}, 'cloneModel').name('👥 Clone Selected');
+
+    customModelFolder.add({ deleteModel: () => {
+        if (window.deleteSelectedModel) window.deleteSelectedModel();
+    }}, 'deleteModel').name('🗑️ Delete Selected');
+
+    waterEditorFolder = editorFolder.addFolder('🌊 Water Editor');
+    const editorWaterDropdownController = waterEditorFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Water Shader').onChange(v => {
         activateWaterShader(v, true);
     });
 
-    // 🎨 Live Biome Terrain Color & Shimmer Editor
+    // Common Opacity and Height controllers
+    waterEditorFolder.add(params, 'waterOpacity', 0, 1, 0.01).name('Opacity').onChange(v => {
+        if (waterMesh) {
+            waterMesh.material.opacity = v;
+            waterMesh.material.transparent = v < 1.0;
+            waterMesh.material.needsUpdate = true;
+        }
+        if (animeWaterSystem) {
+            animeWaterSystem.controls.opacity = v;
+        }
+    });
+
+    waterEditorFolder.add(params, 'waterHeight', -5, 20, 0.1).name('Height').onChange(v => {
+        if (waterMesh) waterMesh.position.y = v;
+        if (animeWaterSystem) {
+            if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
+                animeWaterSystem.waterFloor.mesh.position.y = v;
+            }
+            if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
+                animeWaterSystem.intersection.mesh.position.y = v;
+            }
+        }
+    });
+
+    // Sub-folder for standard shaders parameters
+    stdFolder = waterEditorFolder.addFolder('Standard Shader Settings');
+    stdFolder.addColor(params, 'waterColor').name('Color').onChange(hex => {
+        if (waterMesh) waterMesh.material.color.set(hex);
+    });
+    stdFolder.add(params, 'waterRoughness', 0, 1, 0.01).name('Roughness').onChange(v => {
+        if (waterMesh) waterMesh.material.roughness = v;
+    });
+    stdFolder.add(params, 'waterMetalness', 0, 1, 0.01).name('Metalness').onChange(v => {
+        if (waterMesh) waterMesh.material.metalness = v;
+    });
+    stdFolder.add(params, 'waterPatternScale', 0.05, 25.0, 0.05).name('Pattern Scale').onChange(v => {
+        waterUniforms.uPatternScale.value = v;
+    });
+    stdFolder.add(params, 'waterSpeed', 0, 5, 0.05).name('Speed').onChange(v => {
+        waterUniforms.uSpeedMult.value = v;
+    });
+    stdFolder.add(params, 'waterBlend', 0, 1, 0.01).name('Blend').onChange(v => {
+        waterUniforms.uBlendStrength.value = v;
+    });
+    stdFolder.add(params, 'waterFadeStart', 0, 10000, 100).name('Fade Start').onChange(v => {
+        waterUniforms.uFadeStart.value = v;
+    });
+    stdFolder.add(params, 'waterFadeEnd', 1000, 50000, 500).name('Fade End').onChange(v => {
+        waterUniforms.uFadeEnd.value = v;
+    });
+    stdFolder.add(params, 'waterFadeDarken', 0, 1, 0.01).name('Fade Darken').onChange(v => {
+        waterUniforms.uFadeDarken.value = v;
+    });
+    stdFolder.add({ reset: () => {
+        params.waterOpacity = 1.0; params.waterColor = '#4da9e8';
+        params.waterRoughness = 0.1; params.waterMetalness = 0.2;
+        params.waterHeight = 2.4; params.waterPatternScale = 1.0;
+        params.waterSpeed = 1.0; params.waterBlend = 0.85;
+        params.waterFadeStart = 2000; params.waterFadeEnd = 20000;
+        params.waterFadeDarken = 0.6;
+        waterUniforms.uPatternScale.value = 1.0;
+        waterUniforms.uSpeedMult.value = 1.0;
+        waterUniforms.uBlendStrength.value = 0.85;
+        waterUniforms.uFadeStart.value = 2000.0;
+        waterUniforms.uFadeEnd.value = 20000.0;
+        waterUniforms.uFadeDarken.value = 0.6;
+        if (waterMesh) {
+            waterMesh.material.opacity = 1.0;
+            waterMesh.material.transparent = false;
+            waterMesh.material.color.set('#4da9e8');
+            waterMesh.material.roughness = 0.1;
+            waterMesh.material.metalness = 0.2;
+            waterMesh.material.needsUpdate = true;
+            waterMesh.position.y = 2.4;
+        }
+        if (animeWaterSystem) {
+            animeWaterSystem.controls.opacity = 1.0;
+            if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
+                animeWaterSystem.waterFloor.mesh.position.y = 2.4;
+            }
+            if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
+                animeWaterSystem.intersection.mesh.position.y = 2.4;
+            }
+        }
+        waterEditorFolder.controllersRecursive().forEach(c => c.updateDisplay());
+    }}, 'reset').name('Reset Defaults');
+
+    // 🎨 Live Biome Terrain Color & Shimmer Editor - Moved below Water Editor
     const colorEditorFolder = editorFolder.addFolder('🎨 Terrain Color & Shimmer');
     const triggerTerrainColorUpdate = () => {
         lastTerrainGridX = -9999;
@@ -481,78 +673,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         terrainUniforms.uShimmerMult.value = val;
     });
 
-    const waterEditorFolder = editorFolder.addFolder('Water Editor');
-    const rebuildWater = () => { setWaterMaterialMode(params.waterMode); };
-    waterEditorFolder.add(params, 'waterOpacity', 0, 1, 0.01).name('Opacity').onChange(v => {
-        if (waterMesh) {
-            waterMesh.material.opacity = v;
-            waterMesh.material.transparent = v < 1.0;
-            waterMesh.material.needsUpdate = true;
-        }
-    });
-    waterEditorFolder.addColor(params, 'waterColor').name('Color').onChange(hex => {
-        if (waterMesh) waterMesh.material.color.set(hex);
-    });
-    waterEditorFolder.add(params, 'waterRoughness', 0, 1, 0.01).name('Roughness').onChange(v => {
-        if (waterMesh) waterMesh.material.roughness = v;
-    });
-    waterEditorFolder.add(params, 'waterMetalness', 0, 1, 0.01).name('Metalness').onChange(v => {
-        if (waterMesh) waterMesh.material.metalness = v;
-    });
-    waterEditorFolder.add(params, 'waterHeight', -5, 20, 0.1).name('Height').onChange(v => {
-        if (waterMesh) waterMesh.position.y = v;
-    });
-    waterEditorFolder.add(params, 'waterPatternScale', 0.1, 5, 0.05).name('Pattern Scale').onChange(v => {
-        waterUniforms.uPatternScale.value = v;
-    });
-    waterEditorFolder.add(params, 'waterSpeed', 0, 5, 0.05).name('Speed').onChange(v => {
-        waterUniforms.uSpeedMult.value = v;
-    });
-    waterEditorFolder.add(params, 'waterBlend', 0, 1, 0.01).name('Blend').onChange(v => {
-        waterUniforms.uBlendStrength.value = v;
-    });
-    waterEditorFolder.add(params, 'waterFadeStart', 0, 10000, 100).name('Fade Start').onChange(v => {
-        waterUniforms.uFadeStart.value = v;
-    });
-    waterEditorFolder.add(params, 'waterFadeEnd', 1000, 50000, 500).name('Fade End').onChange(v => {
-        waterUniforms.uFadeEnd.value = v;
-    });
-    waterEditorFolder.add(params, 'waterFadeDarken', 0, 1, 0.01).name('Fade Darken').onChange(v => {
-        waterUniforms.uFadeDarken.value = v;
-    });
-    waterEditorFolder.add({ reset: () => {
-        params.waterOpacity = 1.0; params.waterColor = '#4da9e8';
-        params.waterRoughness = 0.1; params.waterMetalness = 0.2;
-        params.waterHeight = 2.4; params.waterPatternScale = 1.0;
-        params.waterSpeed = 1.0; params.waterBlend = 0.85;
-        params.waterFadeStart = 2000; params.waterFadeEnd = 20000;
-        params.waterFadeDarken = 0.6;
-        waterUniforms.uPatternScale.value = 1.0;
-        waterUniforms.uSpeedMult.value = 1.0;
-        waterUniforms.uBlendStrength.value = 0.85;
-        waterUniforms.uFadeStart.value = 2000.0;
-        waterUniforms.uFadeEnd.value = 20000.0;
-        waterUniforms.uFadeDarken.value = 0.6;
-        if (waterMesh) {
-            waterMesh.material.opacity = 1.0;
-            waterMesh.material.transparent = false;
-            waterMesh.material.color.set('#4da9e8');
-            waterMesh.material.roughness = 0.1;
-            waterMesh.material.metalness = 0.2;
-            waterMesh.material.needsUpdate = true;
-            waterMesh.position.y = 2.4;
-        }
-        waterEditorFolder.controllersRecursive().forEach(c => c.updateDisplay());
-    }}, 'reset').name('Reset Defaults');
-
     // Add Game folder
     const gameFolder = gui.addFolder('Game');
-        gameFolder.add(guiActions, 'switchModel').name('Switch Character');
+    gameFolder.add(guiActions, 'switchModel').name('Switch Character');
     gameFolder.add(guiActions, 'toggleMusic').name('Toggle Music');
     gameFolder.add(guiActions, 'nextTrack').name('Next Track');
     gameFolder.add(params, 'summerFilter').name('Summer Filter').onChange(v => { document.getElementById('summer-toggle').click(); });
     gameFolder.add(params, 'modelVisible').name('Model Visible').onChange(v => { document.getElementById('invis-toggle').click(); });
-    gameFolder.add(guiActions, 'fullscreen').name('Fullscreen');
+    // Fullscreen removed from Game folder - now on the top bar!
 
     const envFolder = gui.addFolder('Environment');
     envFolder.add(params, 'wind').name('Wind').onChange(v => { if(isWindOn !== v) document.getElementById('wind-toggle').click(); });
@@ -603,6 +731,15 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         if (editorWaterDropdownController && editorWaterDropdownController.updateDisplay) editorWaterDropdownController.updateDisplay();
 
         setWaterMaterialMode(params.waterMode);
+
+        // Show/hide folders dynamically inside water editor
+        if (params.waterMode === 'anime') {
+            if (stdFolder) stdFolder.hide();
+            if (animeWaterGUI) animeWaterGUI.show();
+        } else {
+            if (stdFolder) stdFolder.show();
+            if (animeWaterGUI) animeWaterGUI.hide();
+        }
     }
 
     shaderToggleControllers['realistic'] = waterShaderFolder.add(params, 'toggleRealistic').name('🌊 Realistic Waves').onChange(v => activateWaterShader('realistic', v));
@@ -615,14 +752,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     debugWaterDropdownController = waterShaderFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Active Mode').onChange(v => activateWaterShader(v, true));
 
     debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; });
-    const cloudFolder = gui.addFolder('☁️ Cloud Editor');
-    cloudFolder.add(params, 'showClouds').name('Show All Clouds').onChange(v => { 
-        if(typeof instClouds !== 'undefined') instClouds.visible = v; 
-        if(typeof instHighClouds !== 'undefined') instHighClouds.visible = v; 
-        if(typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; 
-        if(typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; 
-    });
-    
     function updateCloudScale(instMesh, newMulti, oldMulti) {
         if (typeof instMesh === 'undefined') return;
         const ratio = newMulti / oldMulti;
@@ -636,12 +765,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         }
         instMesh.instanceMatrix.needsUpdate = true;
     }
-
-    let prevCloudScale = { regular: 1.0, high: 1.0, wispy: 1.0, mega: 1.0 };
-    cloudFolder.add(params, 'cloudScaleRegular', 0.1, 5.0).name('Regular Size').onChange(v => { updateCloudScale(instClouds, v, prevCloudScale.regular); prevCloudScale.regular = v; });
-    cloudFolder.add(params, 'cloudScaleHigh', 0.1, 5.0).name('Cumulonimbus Size').onChange(v => { updateCloudScale(instHighClouds, v, prevCloudScale.high); prevCloudScale.high = v; });
-    cloudFolder.add(params, 'cloudScaleWispy', 0.1, 5.0).name('Wispy Size').onChange(v => { updateCloudScale(instWispyClouds, v, prevCloudScale.wispy); prevCloudScale.wispy = v; });
-    cloudFolder.add(params, 'cloudScaleMega', 0.1, 5.0).name('Mega Size').onChange(v => { updateCloudScale(instMegaClouds, v, prevCloudScale.mega); prevCloudScale.mega = v; });
     debugFolder.add(params, 'showBirds').name('Birds').onChange(v => { if(typeof instBirds !== 'undefined') instBirds.visible = v; if(typeof flockGrp !== 'undefined') flockGrp.visible = v; });
     debugFolder.add(params, 'showFogPlanes').name('Fog Planes').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     debugFolder.add(params, 'showCrystals').name('Crystals').onChange(v => { instCrystals.visible = v; });
@@ -716,14 +839,35 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
 
 
-    document.getElementById('fullscreen-toggle').addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        document.body.requestFullscreen().catch(err => {
-          console.error(`Error attempting to enable fullscreen: ${err.message}`);
-        });
-      } else {
-        document.exitFullscreen();
-      }
+    const topFullscreenBtn = document.getElementById('top-fullscreen-btn');
+    const hiddenFullscreenBtn = document.getElementById('fullscreen-toggle');
+
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.body.requestFullscreen().catch(err => {
+                console.error(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+        } else {
+            document.exitFullscreen();
+        }
+    }
+
+    if (topFullscreenBtn) {
+        topFullscreenBtn.addEventListener('click', toggleFullscreen);
+    }
+    if (hiddenFullscreenBtn) {
+        // Keep fallback support
+        hiddenFullscreenBtn.addEventListener('click', toggleFullscreen);
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        const isFS = !!document.fullscreenElement;
+        if (topFullscreenBtn) {
+            topFullscreenBtn.innerHTML = isFS ? '🗵 Exit Full' : '⛶ Fullscreen';
+        }
+        if (hiddenFullscreenBtn) {
+            hiddenFullscreenBtn.innerHTML = isFS ? 'Exit Fullscreen' : 'Fullscreen';
+        }
     });
     
     // Mobile Drawer Event Handlers
@@ -867,7 +1011,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
 
     window.addEventListener('wheel', (e) => {
-        if (window.editorState && window.editorState.isEditorMode) return;
+        if ((window.editorState && window.editorState.isEditorMode) || isGodMode) return;
         cameraZoomDist += Math.sign(e.deltaY) * 4.0;
         cameraZoomDist = Math.max(0.5, Math.min(100.0, cameraZoomDist));
         if (cameraManager) cameraManager.setZoom(cameraZoomDist);
@@ -1426,7 +1570,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     const ROCK_COUNT = 0;
     const BUSH_COUNT = 0;
-        const CLOUD_COUNT = LOW_GFX ? 40 : 150;
     const FLOWER_COUNT = 0; // Optimized for FPS
     const TREE_MULT = 0.15; // Doubled tree count so entire landscape and horizon are filled with dense forests
     
@@ -1894,7 +2037,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
     const instRocks = new THREE.InstancedMesh(geoRock, matRock, ROCK_COUNT);
     const instBushes = new THREE.InstancedMesh(geoBush, matBush, BUSH_COUNT);
-        const instClouds = new THREE.InstancedMesh(geoCloud, matCloud, CLOUD_COUNT);
+    const MAX_CLOUD_COUNT = 300;
+    const instClouds = new THREE.InstancedMesh(geoCloud, matCloud, MAX_CLOUD_COUNT);
+    instClouds.count = CLOUD_COUNT;
     const instFlowers = new THREE.InstancedMesh(geoFlower, matFlower, FLOWER_COUNT);
 
 
@@ -1994,61 +2139,67 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         shader.uniforms.uFadeEnd = waterUniforms.uFadeEnd;
         shader.uniforms.uFadeDarken = waterUniforms.uFadeDarken;
 
-        shader.vertexShader = `
-            varying vec3 vWorldPos;
-        ` + shader.vertexShader;
+        if (!shader.vertexShader.includes('varying vec3 vWorldPos;')) {
+            shader.vertexShader = `
+                varying vec3 vWorldPos;
+            ` + shader.vertexShader;
+        }
 
-        shader.vertexShader = shader.vertexShader.replace(
-            `#include <worldpos_vertex>`,
-            `#include <worldpos_vertex>
-             vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
-        );
+        if (!shader.vertexShader.includes('vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;')) {
+            shader.vertexShader = shader.vertexShader.replace(
+                `#include <worldpos_vertex>`,
+                `#include <worldpos_vertex>
+                 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+            );
+        }
 
-        shader.fragmentShader = `
-            uniform float uTime;
-            uniform float uPatternScale;
-            uniform float uSpeedMult;
-            uniform float uBlendStrength;
-            uniform float uFadeStart;
-            uniform float uFadeEnd;
-            uniform float uFadeDarken;
-            varying vec3 vWorldPos;
+        if (!shader.fragmentShader.includes('uniform float uTime;')) {
+            shader.fragmentShader = `
+                uniform float uTime;
+                uniform float uPatternScale;
+                uniform float uSpeedMult;
+                uniform float uBlendStrength;
+                uniform float uFadeStart;
+                uniform float uFadeEnd;
+                uniform float uFadeDarken;
+                varying vec3 vWorldPos;
 
-            vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-            float snoise(vec2 v){
-                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-                vec2 i  = floor(v + dot(v, C.yy) );
-                vec2 x0 = v -   i + dot(i, C.xx);
-                vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-                vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
-                i = mod(i, 289.0);
-                vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
-                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-                m = m*m ; m = m*m ;
-                vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
-                vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
-                vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-                return 130.0 * dot(m, g);
-            }
-        ` + shader.fragmentShader;
+                vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
+                float snoise(vec2 v){
+                    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+                    vec2 i  = floor(v + dot(v, C.yy) );
+                    vec2 x0 = v -   i + dot(i, C.xx);
+                    vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                    vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
+                    i = mod(i, 289.0);
+                    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
+                    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+                    m = m*m ; m = m*m ;
+                    vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
+                    vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+                    vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+                    return 130.0 * dot(m, g);
+                }
+            ` + shader.fragmentShader;
 
-        shader.fragmentShader = shader.fragmentShader.replace(
-            `#include <color_fragment>`,
-            `#include <color_fragment>
-             float t = uTime * uSpeedMult;
-             vec2 uv = vWorldPos.xz * 0.1 * uPatternScale;
-             float n1 = 1.0 - abs(snoise(uv + vec2(t * 0.1, t * 0.05)));
-             float n2 = 1.0 - abs(snoise(uv * 1.5 - vec2(t * 0.15, -t * 0.05)));
-             float caustics = pow(n1, 6.0) + pow(n2, 6.0) * 0.5;
+            shader.fragmentShader = shader.fragmentShader.replace(
+                `#include <color_fragment>`,
+                `#include <color_fragment>
+                 float t = uTime * uSpeedMult;
+                 vec2 uv = vWorldPos.xz * 0.1 * uPatternScale;
+                 float n1 = 1.0 - abs(snoise(uv + vec2(t * 0.1, t * 0.05)));
+                 float n2 = 1.0 - abs(snoise(uv * 1.5 - vec2(t * 0.15, -t * 0.05)));
+                 float caustics = pow(n1, 6.0) + pow(n2, 6.0) * 0.5;
 
-             caustics = clamp(caustics, 0.0, 1.0);
-             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.95, 1.0), caustics * uBlendStrength * 0.59);
+                 caustics = clamp(caustics, 0.0, 1.0);
+                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.95, 1.0), caustics * uBlendStrength * 0.59);
 
-             float dist = length(vWorldPos.xz - cameraPosition.xz);
-             float depthFade = smoothstep(uFadeStart, uFadeEnd, dist);
-             diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * uFadeDarken, depthFade);
-            `
-        );
+                 float dist = length(vWorldPos.xz - cameraPosition.xz);
+                 float depthFade = smoothstep(uFadeStart, uFadeEnd, dist);
+                 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * uFadeDarken, depthFade);
+                `
+            );
+        }
     };
 
     const originalWaterMat = waterMat;
@@ -2060,7 +2211,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     // Initialize advanced anime water system
     animeWaterSystem = new WaterSystem(scene, renderer);
     animeWaterSystem.setVisible(false);
-    animeWaterGUI = new WaterEditorGUI(animeWaterSystem, editorFolder);
+    animeWaterGUI = new WaterEditorGUI(animeWaterSystem, waterEditorFolder);
 
     function setWaterMaterialMode(mode) {
         if (!params.showWater) {
@@ -2072,40 +2223,69 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         if (mode === 'anime') {
             if (waterMesh) waterMesh.visible = false;
-            if (animeWaterSystem) animeWaterSystem.setVisible(true);
+            if (animeWaterSystem) {
+                animeWaterSystem.setVisible(true);
+                if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
+                    animeWaterSystem.waterFloor.mesh.position.y = params.waterHeight;
+                }
+                if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
+                    animeWaterSystem.intersection.mesh.position.y = params.waterHeight;
+                }
+                animeWaterSystem.controls.opacity = params.waterOpacity;
+            }
             if (animeWaterGUI) animeWaterGUI.show();
             return;
         }
 
-        if (waterMesh) waterMesh.visible = true;
+        if (waterMesh) {
+            waterMesh.visible = true;
+            waterMesh.position.y = params.waterHeight;
+        }
         if (animeWaterSystem) animeWaterSystem.setVisible(false);
         if (animeWaterGUI) animeWaterGUI.hide();
 
         if (mode === 'realistic') {
             waterMesh.material = originalWaterMat;
+            waterMesh.material.opacity = params.waterOpacity;
+            waterMesh.material.transparent = params.waterOpacity < 1.0;
+            waterMesh.material.color.set(params.waterColor);
+            waterMesh.material.roughness = params.waterRoughness;
+            waterMesh.material.metalness = params.waterMetalness;
             waterMesh.material.needsUpdate = true;
             return;
         }
 
-        const shaderObj = waterShaderRegistry[mode];
-        if (shaderObj && shaderObj.onCompile) {
-            const mat = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(params.waterColor),
-                transparent: params.waterOpacity < 1.0,
-                opacity: params.waterOpacity,
-                roughness: params.waterRoughness,
-                metalness: params.waterMetalness
-            });
-            mat.customProgramCacheKey = () => mode + '_v2';
-            mat.onBeforeCompile = (shader) => {
-                shader.uniforms.uPatternScale = waterUniforms.uPatternScale;
-                shader.uniforms.uSpeedMult = waterUniforms.uSpeedMult;
-                shader.uniforms.uBlendStrength = waterUniforms.uBlendStrength;
-                shader.uniforms.uFadeStart = waterUniforms.uFadeStart;
-                shader.uniforms.uFadeEnd = waterUniforms.uFadeEnd;
-                shader.uniforms.uFadeDarken = waterUniforms.uFadeDarken;
-                shaderObj.onCompile(shader, waterUniforms);
-            };
+        let mat = waterMaterialCache[mode];
+        if (!mat) {
+            const shaderObj = waterShaderRegistry[mode];
+            if (shaderObj && shaderObj.onCompile) {
+                mat = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(params.waterColor),
+                    transparent: params.waterOpacity < 1.0,
+                    opacity: params.waterOpacity,
+                    roughness: params.waterRoughness,
+                    metalness: params.waterMetalness
+                });
+                mat.customProgramCacheKey = () => mode + '_v2';
+                mat.onBeforeCompile = (shader) => {
+                    shader.uniforms.uPatternScale = waterUniforms.uPatternScale;
+                    shader.uniforms.uSpeedMult = waterUniforms.uSpeedMult;
+                    shader.uniforms.uBlendStrength = waterUniforms.uBlendStrength;
+                    shader.uniforms.uFadeStart = waterUniforms.uFadeStart;
+                    shader.uniforms.uFadeEnd = waterUniforms.uFadeEnd;
+                    shader.uniforms.uFadeDarken = waterUniforms.uFadeDarken;
+                    shaderObj.onCompile(shader, waterUniforms);
+                };
+                waterMaterialCache[mode] = mat;
+            }
+        }
+
+        if (mat) {
+            mat.color.set(params.waterColor);
+            mat.opacity = params.waterOpacity;
+            mat.transparent = params.waterOpacity < 1.0;
+            mat.roughness = params.waterRoughness;
+            mat.metalness = params.waterMetalness;
             waterMesh.material = mat;
             waterMesh.material.needsUpdate = true;
         }
@@ -2206,7 +2386,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     scene.add(instClouds);
 
     // Super High Cumulonimbus Clouds & See-Through Wispy Clouds
-    const HIGH_CLOUD_COUNT = LOW_GFX ? 0 : 24;
     const baseCloudSpheres = [];
     const mainPillar = new THREE.DodecahedronGeometry(150, 1).toNonIndexed();
     mainPillar.scale(1, 1.2, 1);
@@ -2231,19 +2410,24 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const highCloudGeo = BufferGeometryUtils.mergeGeometries(baseCloudSpheres);
     highCloudGeo.computeVertexNormals();
     const highCloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
-    const instHighClouds = new THREE.InstancedMesh(highCloudGeo, highCloudMat, HIGH_CLOUD_COUNT);
+    
+    const MAX_HIGH_CLOUD_COUNT = 100;
+    const instHighClouds = new THREE.InstancedMesh(highCloudGeo, highCloudMat, MAX_HIGH_CLOUD_COUNT);
+    instHighClouds.count = HIGH_CLOUD_COUNT;
     instHighClouds.frustumCulled = false;
     scene.add(instHighClouds);
 
-    const WISPY_CLOUD_COUNT = 0;
-    const instWispyClouds = new THREE.InstancedMesh(geoCloud, matWispyCloud, WISPY_CLOUD_COUNT);
+    const MAX_WISPY_CLOUD_COUNT = 100;
+    const instWispyClouds = new THREE.InstancedMesh(geoCloud, matWispyCloud, MAX_WISPY_CLOUD_COUNT);
+    instWispyClouds.count = WISPY_CLOUD_COUNT;
     instWispyClouds.frustumCulled = false;
     scene.add(instWispyClouds);
 
     // Far-Distance Mega Painted Clouds (Visible when Kiki climbs high)
-    const MEGA_CLOUD_COUNT = LOW_GFX ? 0 : 24;
+    const MAX_MEGA_CLOUD_COUNT = 100;
     const megaCloudMat = new THREE.MeshToonMaterial({ color: 0xfff6e3, transparent: true, opacity: 1.0 });
-    const instMegaClouds = new THREE.InstancedMesh(highCloudGeo, megaCloudMat, MEGA_CLOUD_COUNT);
+    const instMegaClouds = new THREE.InstancedMesh(highCloudGeo, megaCloudMat, MAX_MEGA_CLOUD_COUNT);
+    instMegaClouds.count = MEGA_CLOUD_COUNT;
     instMegaClouds.frustumCulled = false;
     scene.add(instMegaClouds);
     
@@ -2252,10 +2436,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     dummyInit.position.set(0, -1000, 0); // Force teleport on first frame!
     dummyInit.scale.set(0, 0, 0);
     dummyInit.updateMatrix();
-    for (let i = 0; i < CLOUD_COUNT; i++) instClouds.setMatrixAt(i, dummyInit.matrix);
-    for (let i = 0; i < HIGH_CLOUD_COUNT; i++) instHighClouds.setMatrixAt(i, dummyInit.matrix);
-    for (let i = 0; i < WISPY_CLOUD_COUNT; i++) instWispyClouds.setMatrixAt(i, dummyInit.matrix);
-    for (let i = 0; i < MEGA_CLOUD_COUNT; i++) instMegaClouds.setMatrixAt(i, dummyInit.matrix);
+    for (let i = 0; i < MAX_CLOUD_COUNT; i++) instClouds.setMatrixAt(i, dummyInit.matrix);
+    for (let i = 0; i < MAX_HIGH_CLOUD_COUNT; i++) instHighClouds.setMatrixAt(i, dummyInit.matrix);
+    for (let i = 0; i < MAX_WISPY_CLOUD_COUNT; i++) instWispyClouds.setMatrixAt(i, dummyInit.matrix);
+    for (let i = 0; i < MAX_MEGA_CLOUD_COUNT; i++) instMegaClouds.setMatrixAt(i, dummyInit.matrix);
     instClouds.instanceMatrix.needsUpdate = true;
     instHighClouds.instanceMatrix.needsUpdate = true;
     instWispyClouds.instanceMatrix.needsUpdate = true;
@@ -2692,9 +2876,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         instMegaClouds.instanceMatrix.needsUpdate = true;
 
         if (shouldUpdateTerrain) {
-            // Center tree updates on camera position when in editor/freecam or player when flying
-            const focusX = (window.editorState && window.editorState.isEditorMode) ? camera.position.x : playerX;
-            const focusZ = (window.editorState && window.editorState.isEditorMode) ? camera.position.z : playerZ;
+            // Center tree updates on camera position when in editor/freecam/God Mode or player when flying
+            const isFreeCam = (window.editorState && window.editorState.isEditorMode) || isGodMode;
+            const focusX = isFreeCam ? (isGodMode ? godCamera.position.x : camera.position.x) : playerX;
+            const focusZ = isFreeCam ? (isGodMode ? godCamera.position.z : camera.position.z) : playerZ;
             
             // STRICT 800-METER TREE RADIUS WITH SEAMLESS PROGRESSIVE LOD HANDOFF
             const activeTreeDist = 800;
@@ -2980,6 +3165,230 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     // Initialize MeshoptDecoder for compressed geometries (like the Whale model)
     gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+
+    window.updateCustomModelTransform = function(model) {
+        if (!model) return;
+        const ud = model.userData;
+        model.position.x = ud.offsetX;
+        model.position.z = ud.offsetZ;
+        const h = getWorldHeight(ud.offsetX, ud.offsetZ);
+        model.position.y = h + ud.offsetY;
+        const s = ud.baseScale * ud.scaleMult;
+        model.scale.set(s, s, s);
+        model.rotation.y = ud.rotationY;
+    };
+
+    window.syncSlidersToSelectedModel = function() {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (!model) return;
+        
+        const ud = model.userData;
+        
+        // Temporarily disable callbacks or manually change params value to avoid double calls
+        params.customModelScale = ud.scaleMult;
+        params.customModelY = ud.offsetY;
+        params.customModelX = ud.offsetX;
+        params.customModelZ = ud.offsetZ;
+        params.customModelRot = Math.round(ud.rotationY * 180 / Math.PI);
+        
+        if (customModelControllers.scale) customModelControllers.scale.updateDisplay();
+        if (customModelControllers.y) customModelControllers.y.updateDisplay();
+        if (customModelControllers.x) {
+            customModelControllers.x.min(ud.offsetX - 100);
+            customModelControllers.x.max(ud.offsetX + 100);
+            customModelControllers.x.updateDisplay();
+        }
+        if (customModelControllers.z) {
+            customModelControllers.z.min(ud.offsetZ - 100);
+            customModelControllers.z.max(ud.offsetZ + 100);
+            customModelControllers.z.updateDisplay();
+        }
+        if (customModelControllers.rot) customModelControllers.rot.updateDisplay();
+    };
+
+    window.rebuildModelDropdown = function() {
+        if (!modelDropdownController) return;
+        
+        const options = {};
+        if (loadedCustomModels.length === 0) {
+            options['No models'] = 0;
+            selectedModelIndex = -1;
+        } else {
+            loadedCustomModels.forEach((m, idx) => {
+                options[`Model ${idx + 1}`] = idx;
+            });
+        }
+        
+        modelDropdownController.options(options);
+        if (selectedModelIndex >= 0) {
+            modelDropdownController.setValue(selectedModelIndex);
+        }
+        modelDropdownController.updateDisplay();
+    };
+
+    window.cloneSelectedModel = function() {
+        const source = loadedCustomModels[selectedModelIndex];
+        if (!source) return;
+        
+        const clone = source.clone();
+        
+        // Deep copy the custom materials to allow independent coloring/scaling if needed
+        clone.traverse((child) => {
+            if (child.isMesh && child.material) {
+                if (Array.isArray(child.material)) {
+                    child.material = child.material.map(m => m.clone());
+                } else {
+                    child.material = child.material.clone();
+                }
+            }
+        });
+        
+        clone.userData = {
+            baseScale: source.userData.baseScale,
+            scaleMult: source.userData.scaleMult,
+            offsetX: source.userData.offsetX + 4.0,
+            offsetY: source.userData.offsetY,
+            offsetZ: source.userData.offsetZ + 4.0,
+            rotationY: source.userData.rotationY
+        };
+        
+        scene.add(clone);
+        loadedCustomModels.push(clone);
+        selectedModelIndex = loadedCustomModels.length - 1;
+        
+        window.updateCustomModelTransform(clone);
+        window.rebuildModelDropdown();
+        window.syncSlidersToSelectedModel();
+    };
+
+    window.deleteSelectedModel = function() {
+        const model = loadedCustomModels[selectedModelIndex];
+        if (!model) return;
+        
+        scene.remove(model);
+        loadedCustomModels.splice(selectedModelIndex, 1);
+        
+        if (loadedCustomModels.length === 0) {
+            selectedModelIndex = -1;
+            if (customModelFolder) customModelFolder.close();
+        } else {
+            selectedModelIndex = Math.max(0, selectedModelIndex - 1);
+            window.syncSlidersToSelectedModel();
+        }
+        
+        window.rebuildModelDropdown();
+    };
+
+    window.loadCustomModelInGame = function(file) {
+        const url = URL.createObjectURL(file);
+        gltfLoader.load(url, (gltf) => {
+            const model = gltf.scene;
+
+            // Traverse and convert all materials to MeshToonMaterial with in-game gradientMap
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    if (child.material) {
+                        const convertMaterial = (mat) => {
+                            if (!mat) return null;
+                            if (mat.isMeshToonMaterial) {
+                                mat.gradientMap = gradientMap;
+                                mat.needsUpdate = true;
+                                return mat;
+                            }
+                            const toonMat = new THREE.MeshToonMaterial({
+                                color: mat.color || new THREE.Color(0xffffff),
+                                map: mat.map,
+                                vertexColors: mat.vertexColors || false,
+                                gradientMap: gradientMap,
+                                normalMap: mat.normalMap,
+                                normalScale: mat.normalScale,
+                                aoMap: mat.aoMap,
+                                aoMapIntensity: mat.aoMapIntensity,
+                                lightMap: mat.lightMap,
+                                lightMapIntensity: mat.lightMapIntensity,
+                                emissive: mat.emissive || new THREE.Color(0x000000),
+                                emissiveMap: mat.emissiveMap,
+                                emissiveIntensity: mat.emissiveIntensity !== undefined ? mat.emissiveIntensity : 1.0,
+                                displacementMap: mat.displacementMap,
+                                displacementScale: mat.displacementScale,
+                                displacementBias: mat.displacementBias,
+                                alphaMap: mat.alphaMap,
+                                transparent: mat.transparent,
+                                opacity: mat.opacity !== undefined ? mat.opacity : 1.0,
+                                side: mat.side || THREE.FrontSide,
+                                depthWrite: mat.depthWrite !== undefined ? mat.depthWrite : true,
+                                depthTest: mat.depthTest !== undefined ? mat.depthTest : true,
+                                wireframe: mat.wireframe || false,
+                                dithering: true
+                            });
+                            return toonMat;
+                        };
+
+                        if (Array.isArray(child.material)) {
+                            child.material = child.material.map(m => convertMaterial(m));
+                        } else {
+                            child.material = convertMaterial(child.material);
+                        }
+                    }
+                }
+            });
+
+            // Calculate spawn positions right in front of the player
+            let spawnX = 0.0, spawnZ = 0.0;
+            const spawnOffset = new THREE.Vector3(0, 0, -8);
+            if (typeof playerGrp !== 'undefined') {
+                spawnOffset.applyQuaternion(playerGrp.quaternion);
+                spawnX = playerGrp.position.x + spawnOffset.x;
+                spawnZ = playerGrp.position.z + spawnOffset.z;
+            }
+
+            // Auto-scale to fit a height of ~4.5 units
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const baseScale = maxDim > 0 ? (4.5 / maxDim) : 1.0;
+
+            // Configure initial userData
+            model.userData = {
+                baseScale: baseScale,
+                scaleMult: 1.0,
+                offsetX: spawnX,
+                offsetY: 0.0,
+                offsetZ: spawnZ,
+                rotationY: 0.0
+            };
+
+            loadedCustomModels.push(model);
+            selectedModelIndex = loadedCustomModels.length - 1;
+
+            window.updateCustomModelTransform(model);
+            window.rebuildModelDropdown();
+            window.syncSlidersToSelectedModel();
+
+            if (customModelFolder) customModelFolder.open();
+            scene.add(model);
+
+            URL.revokeObjectURL(url);
+        }, undefined, (error) => {
+            console.error("Custom GLTF load error:", error);
+            alert("Failed to load the custom GLTF model. Check console for error details.");
+            URL.revokeObjectURL(url);
+        });
+    };
+
+    // Add drag and drop listeners
+    window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+    });
+    window.addEventListener('drop', (e) => {
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
+            e.preventDefault();
+            window.loadCustomModelInGame(file);
+        }
+    });
 
     // ==========================================
     // GLB Pine Tree Loader — Merged Single Draw Call
@@ -3614,7 +4023,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             playerPhysics = new PlayerPhysics(playerGrp);
             cameraManager = new CameraManager(camera, cameraBase, cameraZoomDist);
         }
-    
         lastAnimTime = nowAnimTime;
         if (rawDt > 0.1 || rawDt <= 0) rawDt = 0.0166;
         smoothedDt = smoothedDt * 0.7 + rawDt * 0.3;
@@ -3622,9 +4030,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         const time = clock.getElapsedTime();
         
-
-        
         waterUniforms.uTime.value = time;
+        if (animeWaterSystem && animeWaterSystem.visible) {
+            const activeCam = isGodMode ? godCamera : camera;
+            animeWaterSystem.update(dt, time, activeCam);
+        }
         if (typeof terrainUniforms !== 'undefined') {
             terrainUniforms.uTime.value = time;
             if (typeof dirLight !== 'undefined') {
@@ -3905,12 +4315,13 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // Update God Rays sun screen position
         if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
-            tempVecSunFwd.copy(staticSun.position).sub(camera.position).normalize();
-            camera.getWorldDirection(tempVec1);
+            const activeCam = isGodMode ? godCamera : camera;
+            tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
+            activeCam.getWorldDirection(tempVec1);
             const dotFwd = tempVec1.dot(tempVecSunFwd);
 
             if (dotFwd > -0.2) {
-                tempVec2.copy(staticSun.position).project(camera);
+                tempVec2.copy(staticSun.position).project(activeCam);
                 const sunScreenX = (tempVec2.x + 1.0) * 0.5;
                 const sunScreenY = (tempVec2.y + 1.0) * 0.5;
                 godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
@@ -4401,41 +4812,130 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             oldCloudColors[idx] = newHexVal;
         }
 
-        const cloudFolder = envFolder.addFolder('Cloud Editor');
-        cloudFolder.add(cloudParams, 'enableClouds').name('☁️ Show Clouds').onChange(v => {
+        const cloudFolder = gui.addFolder('☁️ Cloud Editor');
+        
+        // Show All Clouds Toggle
+        cloudFolder.add(params, 'showClouds').name('Show All Clouds').onChange(v => {
+            params.showCloudsRegular = v;
+            params.showCloudsHigh = v;
+            params.showCloudsWispy = v;
+            params.showCloudsMega = v;
             if (typeof instClouds !== 'undefined') instClouds.visible = v;
             if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v;
-            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v;
             if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v;
+            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v;
+            cloudFolder.controllersRecursive().forEach(c => {
+                if (c.property && c.property.startsWith('showClouds')) c.updateDisplay();
+            });
         });
-        cloudFolder.add(cloudParams, 'density', 0.1, 2.5, 0.05).name('☁️ Cloud Density').onChange(v => {
-            if (typeof instClouds !== 'undefined' && typeof CLOUD_COUNT !== 'undefined') {
-                instClouds.count = Math.max(1, Math.min(CLOUD_COUNT, Math.floor(CLOUD_COUNT * v)));
+
+        // Global density multiplier
+        cloudFolder.add(cloudParams, 'density', 0.1, 2.5, 0.05).name('Overall Density').onChange(v => {
+            if (typeof instClouds !== 'undefined') {
+                instClouds.count = Math.max(1, Math.min(MAX_CLOUD_COUNT, Math.floor(params.cloudCountRegular * v)));
                 if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
             }
-            if (typeof instHighClouds !== 'undefined' && typeof HIGH_CLOUD_COUNT !== 'undefined') {
-                instHighClouds.count = Math.max(1, Math.min(HIGH_CLOUD_COUNT, Math.floor(HIGH_CLOUD_COUNT * v)));
+            if (typeof instHighClouds !== 'undefined') {
+                instHighClouds.count = Math.max(1, Math.min(MAX_HIGH_CLOUD_COUNT, Math.floor(params.cloudCountHigh * v)));
                 if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
             }
-            if (typeof instMegaClouds !== 'undefined' && typeof MEGA_CLOUD_COUNT !== 'undefined') {
-                instMegaClouds.count = Math.max(1, Math.min(MEGA_CLOUD_COUNT, Math.floor(MEGA_CLOUD_COUNT * v)));
+            if (typeof instWispyClouds !== 'undefined') {
+                instWispyClouds.count = Math.max(1, Math.min(MAX_WISPY_CLOUD_COUNT, Math.floor(params.cloudCountWispy * v)));
+                if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
+            }
+            if (typeof instMegaClouds !== 'undefined') {
+                instMegaClouds.count = Math.max(1, Math.min(MAX_MEGA_CLOUD_COUNT, Math.floor(params.cloudCountMega * v)));
                 if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
             }
         });
-        cloudFolder.add(cloudParams, 'cloudScale', 0.5, 3.0, 0.1).name('☁️ Cloud Size').onChange(v => {
-            [instClouds, instHighClouds, instMegaClouds].forEach(mesh => {
+
+        // Global scale multiplier
+        cloudFolder.add(cloudParams, 'cloudScale', 0.5, 3.0, 0.1).name('Overall Size').onChange(v => {
+            [instClouds, instHighClouds, instWispyClouds, instMegaClouds].forEach(mesh => {
                 if (mesh) mesh.scale.set(v, v, v);
             });
         });
-        cloudFolder.addColor(cloudParams, 'c0').name('Color 1').onChange(v => updateCloudColorForIndex(0, v));
-        cloudFolder.addColor(cloudParams, 'c1').name('Color 2').onChange(v => updateCloudColorForIndex(1, v));
-        cloudFolder.addColor(cloudParams, 'c2').name('Color 3').onChange(v => updateCloudColorForIndex(2, v));
-        cloudFolder.addColor(cloudParams, 'c3').name('Color 4').onChange(v => updateCloudColorForIndex(3, v));
-        cloudFolder.addColor(cloudParams, 'c4').name('Color 5').onChange(v => updateCloudColorForIndex(4, v));
-        cloudFolder.add(cloudParams, 'opBase', 0, 1).name('Base Opacity').onChange(v => matCloud.opacity = v);
-        cloudFolder.add(cloudParams, 'opHigh', 0, 1).name('High Opacity').onChange(v => highCloudMat.opacity = v);
-        cloudFolder.add(cloudParams, 'opWispy', 0, 1).name('Wispy Opacity').onChange(v => matWispyCloud.opacity = v);
-        cloudFolder.add(cloudParams, 'opMega', 0, 1).name('Mega Opacity').onChange(v => megaCloudMat.opacity = v);
+
+        // Pastel color palette subfolder
+        const paletteFolder = cloudFolder.addFolder('🎨 Pastel Colors');
+        paletteFolder.addColor(cloudParams, 'c0').name('Color 1').onChange(v => updateCloudColorForIndex(0, v));
+        paletteFolder.addColor(cloudParams, 'c1').name('Color 2').onChange(v => updateCloudColorForIndex(1, v));
+        paletteFolder.addColor(cloudParams, 'c2').name('Color 3').onChange(v => updateCloudColorForIndex(2, v));
+        paletteFolder.addColor(cloudParams, 'c3').name('Color 4').onChange(v => updateCloudColorForIndex(3, v));
+        paletteFolder.addColor(cloudParams, 'c4').name('Color 5').onChange(v => updateCloudColorForIndex(4, v));
+        paletteFolder.close();
+
+        // 1. Regular Clouds Subfolder
+        const regFolder = cloudFolder.addFolder('🌥️ Regular (Cumulus)');
+        regFolder.add(params, 'showCloudsRegular').name('Show').onChange(v => { if (instClouds) instClouds.visible = v; });
+        regFolder.add(params, 'cloudCountRegular', 0, 300, 1).name('Count').onChange(v => {
+            CLOUD_COUNT = v;
+            if (instClouds) {
+                instClouds.count = Math.floor(v * cloudParams.density);
+                if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
+            }
+        });
+        let prevRegScale = 1.0;
+        regFolder.add(params, 'cloudScaleRegular', 0.1, 5.0, 0.05).name('Scale').onChange(v => {
+            updateCloudScale(instClouds, v, prevRegScale);
+            prevRegScale = v;
+        });
+        regFolder.add(cloudParams, 'opBase', 0, 1, 0.01).name('Opacity').onChange(v => matCloud.opacity = v);
+        regFolder.close();
+
+        // 2. Cumulonimbus Clouds Subfolder
+        const highFolder = cloudFolder.addFolder('🌩️ Cumulonimbus');
+        highFolder.add(params, 'showCloudsHigh').name('Show').onChange(v => { if (instHighClouds) instHighClouds.visible = v; });
+        highFolder.add(params, 'cloudCountHigh', 0, 100, 1).name('Count').onChange(v => {
+            HIGH_CLOUD_COUNT = v;
+            if (instHighClouds) {
+                instHighClouds.count = Math.floor(v * cloudParams.density);
+                if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
+            }
+        });
+        let prevHighScale = 1.0;
+        highFolder.add(params, 'cloudScaleHigh', 0.1, 5.0, 0.05).name('Scale').onChange(v => {
+            updateCloudScale(instHighClouds, v, prevHighScale);
+            prevHighScale = v;
+        });
+        highFolder.add(cloudParams, 'opHigh', 0, 1, 0.01).name('Opacity').onChange(v => highCloudMat.opacity = v);
+        highFolder.close();
+
+        // 3. Wispy Clouds Subfolder
+        const wispyFolder = cloudFolder.addFolder('🌫️ Wispy Clouds');
+        wispyFolder.add(params, 'showCloudsWispy').name('Show').onChange(v => { if (instWispyClouds) instWispyClouds.visible = v; });
+        wispyFolder.add(params, 'cloudCountWispy', 0, 100, 1).name('Count').onChange(v => {
+            WISPY_CLOUD_COUNT = v;
+            if (instWispyClouds) {
+                instWispyClouds.count = Math.floor(v * cloudParams.density);
+                if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
+            }
+        });
+        let prevWispyScale = 1.0;
+        wispyFolder.add(params, 'cloudScaleWispy', 0.1, 5.0, 0.05).name('Scale').onChange(v => {
+            updateCloudScale(instWispyClouds, v, prevWispyScale);
+            prevWispyScale = v;
+        });
+        wispyFolder.add(cloudParams, 'opWispy', 0, 1, 0.01).name('Opacity').onChange(v => matWispyCloud.opacity = v);
+        wispyFolder.close();
+
+        // 4. Mega Clouds Subfolder
+        const megaFolder = cloudFolder.addFolder('🌌 Mega Clouds');
+        megaFolder.add(params, 'showCloudsMega').name('Show').onChange(v => { if (instMegaClouds) instMegaClouds.visible = v; });
+        megaFolder.add(params, 'cloudCountMega', 0, 100, 1).name('Count').onChange(v => {
+            MEGA_CLOUD_COUNT = v;
+            if (instMegaClouds) {
+                instMegaClouds.count = Math.floor(v * cloudParams.density);
+                if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
+            }
+        });
+        let prevMegaScale = 1.0;
+        megaFolder.add(params, 'cloudScaleMega', 0.1, 5.0, 0.05).name('Scale').onChange(v => {
+            updateCloudScale(instMegaClouds, v, prevMegaScale);
+            prevMegaScale = v;
+        });
+        megaFolder.add(cloudParams, 'opMega', 0, 1, 0.01).name('Opacity').onChange(v => megaCloudMat.opacity = v);
+        megaFolder.close();
 
         // Tree Editor
         const treeGreenVariations = [0x52c439, 0x38b000, 0x2d8028, 0x76e054, 0x6e4a32];

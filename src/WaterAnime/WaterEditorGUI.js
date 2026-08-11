@@ -16,7 +16,7 @@ export class WaterEditorGUI {
         
         // Water Floor
         const wf = this.gui.addFolder('Water Floor');
-        wf.add(ctrls, 'waterScale', 0.001, 0.05, 0.001).name('Scale');
+        wf.add(ctrls, 'waterScale', 0.0001, 0.2, 0.0001).name('Scale');
         wf.add(ctrls, 'cellSmoothness', 0, 2, 0.01).name('Cell Smoothness');
         wf.add(ctrls, 'edgeThreshold', 0, 0.3, 0.005).name('Edge Threshold');
         wf.add(ctrls, 'edgeSoftness', 0, 0.1, 0.005).name('Edge Softness');
@@ -39,7 +39,7 @@ export class WaterEditorGUI {
         // Seabed
         const sb = this.gui.addFolder('Seabed');
         sb.add(ctrls, 'seabedDepth', -100, -1, 1).name('Depth Y');
-        sb.add(ctrls, 'seabedScale', 0.001, 0.02, 0.001).name('Scale');
+        sb.add(ctrls, 'seabedScale', 0.0001, 0.1, 0.0001).name('Scale');
         sb.add(ctrls, 'seabedCellSpeed', 0, 2, 0.01).name('Cell Speed');
         sb.add(ctrls, 'seabedFlowX', -0.5, 0.5, 0.005).name('Flow X');
         sb.add(ctrls, 'seabedFlowZ', -0.5, 0.5, 0.005).name('Flow Z');
