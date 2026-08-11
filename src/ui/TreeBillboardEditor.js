@@ -161,8 +161,8 @@ export function applyMatHSL(mat, origMat, hShift, sShift, lShift) {
     return applySingleMatHSL(mat, origMat || mat, hShift, sShift, lShift);
 }
 
-// Helper: Apply HSL shift to HTML5 Canvas ImageData
-export function applyHSLToCanvas(sourceImg, targetCanvas, hueShiftDeg, satShiftPct, litShiftPct) {
+// Helper: Apply separate HSL shifts to HTML5 Canvas ImageData for Leaves and Bark
+export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatShift, leafLitShift, barkHueShift, barkSatShift, barkLitShift) {
     const ctx = targetCanvas.getContext('2d');
     const width = sourceImg.naturalWidth || sourceImg.width || 512;
     const height = sourceImg.naturalHeight || sourceImg.height || 512;
@@ -173,16 +173,21 @@ export function applyHSLToCanvas(sourceImg, targetCanvas, hueShiftDeg, satShiftP
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(sourceImg, 0, 0, width, height);
 
-    if (hueShiftDeg === 0 && satShiftPct === 0 && litShiftPct === 0) {
+    if (leafHueShift === 0 && leafSatShift === 0 && leafLitShift === 0 &&
+        barkHueShift === 0 && barkSatShift === 0 && barkLitShift === 0) {
         return;
     }
 
     const imgData = ctx.getImageData(0, 0, width, height);
     const data = imgData.data;
 
-    const hShift = hueShiftDeg / 360.0;
-    const sShift = satShiftPct / 100.0;
-    const lShift = litShiftPct / 100.0;
+    const lhShift = leafHueShift / 360.0;
+    const lsShift = leafSatShift / 100.0;
+    const llShift = leafLitShift / 100.0;
+
+    const bhShift = barkHueShift / 360.0;
+    const bsShift = barkSatShift / 100.0;
+    const blShift = barkLitShift / 100.0;
 
     for (let i = 0; i < data.length; i += 4) {
         const alpha = data[i + 3];
@@ -193,6 +198,14 @@ export function applyHSLToCanvas(sourceImg, targetCanvas, hueShiftDeg, satShiftP
         const b = data[i + 2] / 255.0;
 
         const [h, s, l] = rgbToHsl(r, g, b);
+
+        // Classification: Green/yellowish/redish colors are leaves, others are bark
+        // The green leaves in presets have hues in range [0.12, 0.55]
+        const isLeaf = (h >= 0.12 && h <= 0.55);
+
+        const hShift = isLeaf ? lhShift : bhShift;
+        const sShift = isLeaf ? lsShift : bsShift;
+        const lShift = isLeaf ? llShift : blShift;
 
         let nh = (h + hShift) % 1.0;
         if (nh < 0) nh += 1.0;
@@ -224,24 +237,27 @@ export class TreeBillboardEditor {
         this.gltfLoader = gltfLoader || new GLTFLoader();
 
         this.currentPresetKey = TREE_PRESETS[0].key;
-        this.hueShift = 0;
-        this.satShift = 0;
-        this.litShift = 0;
+        this.leafHueShift = 0;
+        this.leafSatShift = 0;
+        this.leafLitShift = 0;
+        this.barkHueShift = 0;
+        this.barkSatShift = 0;
+        this.barkLitShift = 0;
 
         // Map storing variants: presetKey -> Array of variant objects (max 4)
         this.variantsMap = new Map();
         TREE_PRESETS.forEach(preset => {
             const defaultColor = new THREE.Color(preset.baseColorHex);
-            const defaultHSL = { h: 0, s: 0, l: 0 };
-            defaultColor.getHSL(defaultHSL);
-
             this.variantsMap.set(preset.key, [
                 {
                     id: 'orig_' + preset.key,
                     name: 'Original Base',
-                    hueShift: 0,
-                    satShift: 0,
-                    litShift: 0,
+                    leafHueShift: 0,
+                    leafSatShift: 0,
+                    leafLitShift: 0,
+                    barkHueShift: 0,
+                    barkSatShift: 0,
+                    barkLitShift: 0,
                     colorHex: preset.baseColorHex,
                     colorObj: defaultColor.clone(),
                     isDefault: true
@@ -458,21 +474,40 @@ export class TreeBillboardEditor {
             </select>
 
             <div class="tbe-box">
-                <span class="tbe-label">&gt; MATERIAL_COLOR_SHIFT (HSL):</span>
+                <span class="tbe-label">&gt; LEAVES_COLOR_SHIFT (HSL):</span>
                 <div class="tbe-slider-row">
                     <span>Hue Shift:</span>
-                    <input type="range" id="tbe-hue" class="tbe-slider" min="-180" max="180" value="0">
-                    <span id="tbe-hue-val" class="tbe-val">0°</span>
+                    <input type="range" id="tbe-leaf-hue" class="tbe-slider" min="-180" max="180" value="0">
+                    <span id="tbe-leaf-hue-val" class="tbe-val">0°</span>
                 </div>
                 <div class="tbe-slider-row">
                     <span>Saturation:</span>
-                    <input type="range" id="tbe-sat" class="tbe-slider" min="-100" max="100" value="0">
-                    <span id="tbe-sat-val" class="tbe-val">0%</span>
+                    <input type="range" id="tbe-leaf-sat" class="tbe-slider" min="-100" max="100" value="0">
+                    <span id="tbe-leaf-sat-val" class="tbe-val">0%</span>
                 </div>
                 <div class="tbe-slider-row">
                     <span>Lightness:</span>
-                    <input type="range" id="tbe-lit" class="tbe-slider" min="-100" max="100" value="0">
-                    <span id="tbe-lit-val" class="tbe-val">0%</span>
+                    <input type="range" id="tbe-leaf-lit" class="tbe-slider" min="-100" max="100" value="0">
+                    <span id="tbe-leaf-lit-val" class="tbe-val">0%</span>
+                </div>
+            </div>
+
+            <div class="tbe-box">
+                <span class="tbe-label">&gt; TRUNK_COLOR_SHIFT (HSL):</span>
+                <div class="tbe-slider-row">
+                    <span>Hue Shift:</span>
+                    <input type="range" id="tbe-bark-hue" class="tbe-slider" min="-180" max="180" value="0">
+                    <span id="tbe-bark-hue-val" class="tbe-val">0°</span>
+                </div>
+                <div class="tbe-slider-row">
+                    <span>Saturation:</span>
+                    <input type="range" id="tbe-bark-sat" class="tbe-slider" min="-100" max="100" value="0">
+                    <span id="tbe-bark-sat-val" class="tbe-val">0%</span>
+                </div>
+                <div class="tbe-slider-row">
+                    <span>Lightness:</span>
+                    <input type="range" id="tbe-bark-lit" class="tbe-slider" min="-100" max="100" value="0">
+                    <span id="tbe-bark-lit-val" class="tbe-val">0%</span>
                 </div>
             </div>
 
@@ -496,12 +531,20 @@ export class TreeBillboardEditor {
 
         this.panelEl = panel;
         this.selectEl = document.getElementById('tbe-tree-select');
-        this.hueInput = document.getElementById('tbe-hue');
-        this.satInput = document.getElementById('tbe-sat');
-        this.litInput = document.getElementById('tbe-lit');
-        this.hueValEl = document.getElementById('tbe-hue-val');
-        this.satValEl = document.getElementById('tbe-sat-val');
-        this.litValEl = document.getElementById('tbe-lit-val');
+        this.leafHueInput = document.getElementById('tbe-leaf-hue');
+        this.leafSatInput = document.getElementById('tbe-leaf-sat');
+        this.leafLitInput = document.getElementById('tbe-leaf-lit');
+        this.leafHueValEl = document.getElementById('tbe-leaf-hue-val');
+        this.leafSatValEl = document.getElementById('tbe-leaf-sat-val');
+        this.leafLitValEl = document.getElementById('tbe-leaf-lit-val');
+
+        this.barkHueInput = document.getElementById('tbe-bark-hue');
+        this.barkSatInput = document.getElementById('tbe-bark-sat');
+        this.barkLitInput = document.getElementById('tbe-bark-lit');
+        this.barkHueValEl = document.getElementById('tbe-bark-hue-val');
+        this.barkSatValEl = document.getElementById('tbe-bark-sat-val');
+        this.barkLitValEl = document.getElementById('tbe-bark-lit-val');
+
         this.varCountEl = document.getElementById('tbe-var-count');
         this.varListEl = document.getElementById('tbe-variants-list');
         this.viewportContainer = document.getElementById('tbe-viewport');
@@ -516,20 +559,30 @@ export class TreeBillboardEditor {
         };
 
         const onSliderChange = () => {
-            this.hueShift = parseInt(this.hueInput.value, 10);
-            this.satShift = parseInt(this.satInput.value, 10);
-            this.litShift = parseInt(this.litInput.value, 10);
+            this.leafHueShift = parseInt(this.leafHueInput.value, 10);
+            this.leafSatShift = parseInt(this.leafSatInput.value, 10);
+            this.leafLitShift = parseInt(this.leafLitInput.value, 10);
+            this.barkHueShift = parseInt(this.barkHueInput.value, 10);
+            this.barkSatShift = parseInt(this.barkSatInput.value, 10);
+            this.barkLitShift = parseInt(this.barkLitInput.value, 10);
 
-            this.hueValEl.textContent = `${this.hueShift}°`;
-            this.satValEl.textContent = `${this.satShift}%`;
-            this.litValEl.textContent = `${this.litShift}%`;
+            this.leafHueValEl.textContent = `${this.leafHueShift}°`;
+            this.leafSatValEl.textContent = `${this.leafSatShift}%`;
+            this.leafLitValEl.textContent = `${this.leafLitShift}%`;
+
+            this.barkHueValEl.textContent = `${this.barkHueShift}°`;
+            this.barkSatValEl.textContent = `${this.barkSatShift}%`;
+            this.barkLitValEl.textContent = `${this.barkLitShift}%`;
 
             this.updatePreviews();
         };
 
-        this.hueInput.oninput = onSliderChange;
-        this.satInput.oninput = onSliderChange;
-        this.litInput.oninput = onSliderChange;
+        this.leafHueInput.oninput = onSliderChange;
+        this.leafSatInput.oninput = onSliderChange;
+        this.leafLitInput.oninput = onSliderChange;
+        this.barkHueInput.oninput = onSliderChange;
+        this.barkSatInput.oninput = onSliderChange;
+        this.barkLitInput.oninput = onSliderChange;
 
         document.getElementById('tbe-reset-btn').onclick = () => {
             this.resetSliders();
@@ -612,15 +665,26 @@ export class TreeBillboardEditor {
     }
 
     resetSliders() {
-        this.hueShift = 0;
-        this.satShift = 0;
-        this.litShift = 0;
-        this.hueInput.value = 0;
-        this.satInput.value = 0;
-        this.litInput.value = 0;
-        this.hueValEl.textContent = '0°';
-        this.satValEl.textContent = '0%';
-        this.litValEl.textContent = '0%';
+        this.leafHueShift = 0;
+        this.leafSatShift = 0;
+        this.leafLitShift = 0;
+        this.barkHueShift = 0;
+        this.barkSatShift = 0;
+        this.barkLitShift = 0;
+
+        this.leafHueInput.value = 0;
+        this.leafSatInput.value = 0;
+        this.leafLitInput.value = 0;
+        this.barkHueInput.value = 0;
+        this.barkSatInput.value = 0;
+        this.barkLitInput.value = 0;
+
+        this.leafHueValEl.textContent = '0°';
+        this.leafSatValEl.textContent = '0%';
+        this.leafLitValEl.textContent = '0%';
+        this.barkHueValEl.textContent = '0°';
+        this.barkSatValEl.textContent = '0%';
+        this.barkLitValEl.textContent = '0%';
     }
 
     togglePanel(visible) {
@@ -708,13 +772,17 @@ export class TreeBillboardEditor {
 
         // 1. Update 3D Model Materials (Requirement 2)
         if (this.current3DMesh) {
-            const hShift = this.hueShift / 360.0;
-            const sShift = this.satShift / 100.0;
-            const lShift = this.litShift / 100.0;
-
             this.current3DMesh.traverse((child) => {
                 if (child.isMesh && child.material) {
+                    const childName = (child.name || '').toLowerCase();
                     const origMat = child.userData.origMaterial || child.material;
+                    const matName = (origMat && origMat.name) ? origMat.name.toLowerCase() : '';
+                    const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || childName.includes('bark') || childName.includes('trunk') || childName.includes('wood');
+
+                    const hShift = (isBark ? this.barkHueShift : this.leafHueShift) / 360.0;
+                    const sShift = (isBark ? this.barkSatShift : this.leafSatShift) / 100.0;
+                    const lShift = (isBark ? this.barkLitShift : this.leafLitShift) / 100.0;
+
                     child.material = applyMatHSL(child.material, origMat, hShift, sShift, lShift);
 
                     if (child.geometry && child.geometry.attributes.color && child.userData.origVertexColors) {
@@ -740,7 +808,12 @@ export class TreeBillboardEditor {
         // 2. Update 2D Billboard Canvas (Requirement 3)
         const billboardImg = this.loadedBillboards.get(preset.billboardPath);
         if (billboardImg) {
-            applyHSLToCanvas(billboardImg, this.offscreenCanvas, this.hueShift, this.satShift, this.litShift);
+            applyHSLToCanvas(
+                billboardImg, 
+                this.offscreenCanvas, 
+                this.leafHueShift, this.leafSatShift, this.leafLitShift,
+                this.barkHueShift, this.barkSatShift, this.barkLitShift
+            );
             if (this.billboardCanvasTexture) {
                 this.billboardCanvasTexture.needsUpdate = true;
             }
@@ -759,10 +832,10 @@ export class TreeBillboardEditor {
         const baseHSL = { h: 0, s: 0, l: 0 };
         baseColor.getHSL(baseHSL);
 
-        let nh = (baseHSL.h + this.hueShift / 360.0) % 1.0;
+        let nh = (baseHSL.h + this.leafHueShift / 360.0) % 1.0;
         if (nh < 0) nh += 1.0;
-        let ns = Math.max(0.0, Math.min(1.0, baseHSL.s + this.satShift / 100.0));
-        let nl = Math.max(0.0, Math.min(1.0, baseHSL.l + this.litShift / 100.0));
+        let ns = Math.max(0.0, Math.min(1.0, baseHSL.s + this.leafSatShift / 100.0));
+        let nl = Math.max(0.0, Math.min(1.0, baseHSL.l + this.leafLitShift / 100.0));
 
         const varColorObj = new THREE.Color().setHSL(nh, ns, nl);
         const varColorHex = '#' + varColorObj.getHexString();
@@ -770,9 +843,12 @@ export class TreeBillboardEditor {
         const newVariant = {
             id: 'var_' + Date.now(),
             name: `Variant ${variants.length}`,
-            hueShift: this.hueShift,
-            satShift: this.satShift,
-            litShift: this.litShift,
+            leafHueShift: this.leafHueShift,
+            leafSatShift: this.leafSatShift,
+            leafLitShift: this.leafLitShift,
+            barkHueShift: this.barkHueShift,
+            barkSatShift: this.barkSatShift,
+            barkLitShift: this.barkLitShift,
             colorHex: varColorHex,
             colorObj: varColorObj.clone(),
             isDefault: false
@@ -803,7 +879,7 @@ export class TreeBillboardEditor {
             item.innerHTML = `
                 <div>
                     <span class="tbe-swatch" style="background:${v.colorHex};"></span>
-                    <span>${v.name} ${v.isDefault ? '(Original)' : `[H:${v.hueShift}° S:${v.satShift}% L:${v.litShift}%]`}</span>
+                    <span>${v.name} ${v.isDefault ? '(Original)' : `[L: H:${v.leafHueShift}° S:${v.leafSatShift}% L:${v.leafLitShift}%] [B: H:${v.barkHueShift}° S:${v.barkSatShift}% L:${v.barkLitShift}%]`}</span>
                 </div>
                 ${!v.isDefault ? `<button class="tbe-del-btn" data-id="${v.id}">DEL</button>` : ''}
             `;

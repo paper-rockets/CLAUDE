@@ -716,46 +716,68 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
 
 
-    const fsToggleBtn = document.getElementById('fullscreen-toggle');
-    if (fsToggleBtn) {
-        fsToggleBtn.addEventListener('click', () => {
-          if (!document.fullscreenElement) {
-            document.body.requestFullscreen().catch(err => {
-              console.error(`Error attempting to enable fullscreen: ${err.message}`);
-            });
-          } else {
-            document.exitFullscreen();
-          }
+    document.getElementById('fullscreen-toggle').addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.body.requestFullscreen().catch(err => {
+          console.error(`Error attempting to enable fullscreen: ${err.message}`);
         });
-    }
+      } else {
+        document.exitFullscreen();
+      }
+    });
     
-    const menuIcon = document.getElementById('menu-icon');
-    const sysDrawer = document.getElementById('systems-drawer');
-    if (menuIcon && sysDrawer) {
-        let drawerOpen = false;
-        menuIcon.addEventListener('click', (e) => {
+    // Mobile Drawer Event Handlers
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const mobileDrawer = document.getElementById('mobile-drawer');
+    const drawerMusicBtn = document.getElementById('drawer-music-btn');
+    const drawerGodBtn = document.getElementById('drawer-god-btn');
+    const normalGodBtn = document.getElementById('god-mode-btn');
+    const musicToggleBtn = document.getElementById('music-toggle');
+    
+    if (mobileMenuBtn && mobileDrawer) {
+        mobileMenuBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            drawerOpen = !drawerOpen;
-            sysDrawer.style.transform = drawerOpen ? 'translateX(0)' : 'translateX(100%)';
-            menuIcon.innerText = drawerOpen ? '✕' : '☰';
+            mobileDrawer.classList.toggle('open');
+            mobileMenuBtn.innerText = mobileDrawer.classList.contains('open') ? '✕' : '⚙️';
         });
+
         document.addEventListener('click', (e) => {
-            if (drawerOpen && !sysDrawer.contains(e.target) && e.target !== menuIcon) {
-                drawerOpen = false;
-                sysDrawer.style.transform = 'translateX(100%)';
-                menuIcon.innerText = '☰';
+            if (mobileDrawer.classList.contains('open') && !mobileDrawer.contains(e.target) && e.target !== mobileMenuBtn) {
+                mobileDrawer.classList.remove('open');
+                mobileMenuBtn.innerText = '⚙️';
             }
         });
     }
 
-    const controlsHintBtn = document.getElementById('controls-hint-btn');
-    const pcControlsHint = document.getElementById('pc-controls-hint');
-    if (controlsHintBtn && pcControlsHint) {
-        controlsHintBtn.addEventListener('click', () => {
-            pcControlsHint.style.display = 'block';
-            pcControlsHint.style.opacity = '1';
-            pcControlsHint.innerText = 'Controls: Joystick to move, Boost to fly faster. Pinch to Zoom.';
-            setTimeout(() => { pcControlsHint.style.opacity = '0'; }, 5000);
+    if (drawerMusicBtn && musicToggleBtn) {
+        setTimeout(() => {
+            drawerMusicBtn.innerText = musicToggleBtn.innerText;
+        }, 1000);
+
+        drawerMusicBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            musicToggleBtn.click();
+            setTimeout(() => {
+                drawerMusicBtn.innerText = musicToggleBtn.innerText;
+            }, 50);
+        });
+    }
+
+    if (drawerGodBtn && normalGodBtn) {
+        setTimeout(() => {
+            const isGod = isGodMode;
+            drawerGodBtn.innerText = isGod ? '👁️ God Mode: ON' : '👁️ God Mode: OFF';
+            drawerGodBtn.style.color = isGod ? '#ff4444' : '#ffaa00';
+        }, 1000);
+
+        drawerGodBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            normalGodBtn.click();
+            setTimeout(() => {
+                const isGod = isGodMode;
+                drawerGodBtn.innerText = isGod ? '👁️ God Mode: ON' : '👁️ God Mode: OFF';
+                drawerGodBtn.style.color = isGod ? '#ff4444' : '#ffaa00';
+            }, 50);
         });
     }
     
@@ -763,7 +785,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     document.getElementById('pause-toggle').addEventListener('click', () => {
         isFlightPaused = !isFlightPaused;
-        document.getElementById('pause-toggle').innerText = isFlightPaused ? 'Play' : 'Pause';
+        document.getElementById('pause-toggle').innerText = isFlightPaused ? '▶' : '⏸';
     });
 
     document.getElementById('god-mode-btn').addEventListener('click', () => {
@@ -1698,7 +1720,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const billboardMat = new THREE.MeshToonMaterial({
         map: billboardTex,
         alphaTest: 0.25,
-        transparent: true,
+        transparent: false,
         side: THREE.DoubleSide,
         dithering: true,
         gradientMap: gradientMap
@@ -1706,36 +1728,151 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
     billboardMat.onBeforeCompile = (shader) => {
         shader.vertexShader = shader.vertexShader.replace(
-            '#include <begin_vertex>',
+            'void main() {',
             `
-            #include <begin_vertex>
+            attribute vec3 aLeafHslShift;
+            attribute vec3 aBarkHslShift;
+            varying vec3 vLeafHslShift;
+            varying vec3 vBarkHslShift;
+            void main() {
+                vLeafHslShift = aLeafHslShift;
+                vBarkHslShift = aBarkHslShift;
+            `
+        ).replace(
+            '#include <beginnormal_vertex>',
+            `
+            #include <beginnormal_vertex>
             vec3 instancePos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
             vec3 worldInstPos = (modelMatrix * vec4(instancePos, 1.0)).xyz;
             vec3 dirToCam = cameraPosition - worldInstPos;
             dirToCam.y = 0.0;
             float lenDir = length(dirToCam);
-            dirToCam = lenDir > 0.001 ? dirToCam / lenDir : vec3(0.0, 0.0, 1.0);
-            vec3 fwd = dirToCam;
+            vec3 fwd = lenDir > 0.001 ? dirToCam / lenDir : vec3(0.0, 0.0, 1.0);
             vec3 right = vec3(fwd.z, 0.0, -fwd.x);
+            
+            objectNormal = right * normal.x + vec3(0.0, normal.y, 0.0) + fwd * normal.z;
+            objectNormal = normalize(objectNormal);
+            `
+        ).replace(
+            '#include <begin_vertex>',
+            `
+            #include <begin_vertex>
+            vec3 instancePos_v = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+            vec3 worldInstPos_v = (modelMatrix * vec4(instancePos_v, 1.0)).xyz;
+            vec3 dirToCam_v = cameraPosition - worldInstPos_v;
+            dirToCam_v.y = 0.0;
+            float lenDir_v = length(dirToCam_v);
+            vec3 fwd_v = lenDir_v > 0.001 ? dirToCam_v / lenDir_v : vec3(0.0, 0.0, 1.0);
+            vec3 right_v = vec3(fwd_v.z, 0.0, -fwd_v.x);
             
             float scaleX = length(vec3(instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2]));
             float scaleY = length(vec3(instanceMatrix[1][0], instanceMatrix[1][1], instanceMatrix[1][2]));
             float scaleZ = length(vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2]));
             
-            transformed = right * (position.x * scaleX) + vec3(0.0, position.y * scaleY, 0.0) + fwd * (position.z * scaleZ);
+            transformed = right_v * (position.x * scaleX) + vec3(0.0, position.y * scaleY, 0.0) + fwd_v * (position.z * scaleZ);
             `
         ).replace(
             '#include <project_vertex>',
             `
-            vec4 mvPosition = vec4( transformed + instancePos, 1.0 );
+            vec3 instancePos_proj = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+            vec4 mvPosition = vec4( transformed + instancePos_proj, 1.0 );
             mvPosition = modelViewMatrix * mvPosition;
             gl_Position = projectionMatrix * mvPosition;
+            vViewPosition = -mvPosition.xyz;
+            `
+        );
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+            'void main() {',
+            `
+            varying vec3 vLeafHslShift;
+            varying vec3 vBarkHslShift;
+            
+            // RGB to HSL GLSL functions
+            vec3 rgb2hsl(vec3 c) {
+                float maxVal = max(c.r, max(c.g, c.b));
+                float minVal = min(c.r, min(c.g, c.b));
+                float h = 0.0;
+                float s = 0.0;
+                float l = (maxVal + minVal) / 2.0;
+
+                if (maxVal != minVal) {
+                    float d = maxVal - minVal;
+                    s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
+                    if (maxVal == c.r) {
+                        h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+                    } else if (maxVal == c.g) {
+                        h = (c.b - c.r) / d + 2.0;
+                    } else if (maxVal == c.b) {
+                        h = (c.r - c.g) / d + 4.0;
+                    }
+                    h /= 6.0;
+                }
+                return vec3(h, s, l);
+            }
+
+            float hue2rgb(float p, float q, float t) {
+                if (t < 0.0) t += 1.0;
+                if (t > 1.0) t -= 1.0;
+                if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
+                if (t < 1.0/2.0) return q;
+                if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
+                return p;
+            }
+
+            vec3 hsl2rgb(vec3 hsl) {
+                float h = hsl.x;
+                float s = hsl.y;
+                float l = hsl.z;
+                vec3 rgb;
+
+                if (s == 0.0) {
+                    rgb = vec3(l);
+                } else {
+                    float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+                    float p = 2.0 * l - q;
+                    rgb.r = hue2rgb(p, q, h + 1.0/3.0);
+                    rgb.g = hue2rgb(p, q, h);
+                    rgb.b = hue2rgb(p, q, h - 1.0/3.0);
+                }
+                return rgb;
+            }
+            
+            void main() {
+            `
+        ).replace(
+            '#include <map_fragment>',
+            `
+            #include <map_fragment>
+            
+            // Shift HSL on the read texture pixel
+            if (diffuseColor.a > 0.05) {
+                vec3 hsl = rgb2hsl(diffuseColor.rgb);
+                bool isLeaf = (hsl.x >= 0.12 && hsl.x <= 0.55);
+                vec3 shift = isLeaf ? vLeafHslShift : vBarkHslShift;
+                
+                hsl.x = mod(hsl.x + shift.x, 1.0);
+                if (hsl.x < 0.0) hsl.x += 1.0;
+                hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
+                hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
+                
+                diffuseColor.rgb = hsl2rgb(hsl);
+            }
             `
         );
     };
 
     const billboardGeo = new THREE.PlaneGeometry(12, 21.6);
     billboardGeo.translate(0, 10.8, 0);
+
+    // Initialize instanced buffer attributes on billboardGeo for HSL shifts
+    const bbCount_init = BILLBOARD_TREE_COUNT;
+    const bbLeafHslArr = new Float32Array(bbCount_init * 3);
+    const bbBarkHslArr = new Float32Array(bbCount_init * 3);
+    const aBBLeafHslShift = new THREE.InstancedBufferAttribute(bbLeafHslArr, 3);
+    const aBBBarkHslShift = new THREE.InstancedBufferAttribute(bbBarkHslArr, 3);
+    billboardGeo.setAttribute('aLeafHslShift', aBBLeafHslShift);
+    billboardGeo.setAttribute('aBarkHslShift', aBBBarkHslShift);
 
     const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, BILLBOARD_TREE_COUNT);
     scene.add(instBillboardTrees);
@@ -2639,12 +2776,25 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             let baseS = 0.92 + Math.random() * 0.45;
                             dummy.scale.set(baseS * (0.92 + Math.random() * 0.16), baseS * (0.94 + Math.random() * 0.12), baseS * (0.92 + Math.random() * 0.16));
 
-                            if (window.treeBillboardEditor) {
-                                const activeVars = window.treeBillboardEditor.getActiveVariants();
-                                if (activeVars.length > 0) {
-                                    const v = activeVars[Math.floor(Math.random() * activeVars.length)];
-                                    instMesh.setColorAt(i, v.colorObj);
+                            const leafHslAttr = instMesh.geometry.getAttribute('aLeafHslShift');
+                            const barkHslAttr = instMesh.geometry.getAttribute('aBarkHslShift');
+                            if (leafHslAttr && barkHslAttr) {
+                                if (window.treeBillboardEditor) {
+                                    const activeVars = window.treeBillboardEditor.getActiveVariants();
+                                    if (activeVars.length > 0) {
+                                        const v = activeVars[Math.floor(Math.random() * activeVars.length)];
+                                        leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
+                                        barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
+                                    } else {
+                                        leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                        barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                    }
+                                } else {
+                                    leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                    barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
                                 }
+                                leafHslAttr.needsUpdate = true;
+                                barkHslAttr.needsUpdate = true;
                             }
                         } else {
                             dummy.position.set(0, -1000, 0); 
@@ -2697,18 +2847,42 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         dummy.updateMatrix();
                         instBillboardTrees.setMatrixAt(i, dummy.matrix);
 
-                        // Color variation from active variants (or default billboardTints)
-                        let tint;
-                        if (window.treeBillboardEditor) {
-                            const activeVars = window.treeBillboardEditor.getActiveVariants();
-                            tint = activeVars.length > 0 ? activeVars[Math.floor(Math.random() * activeVars.length)].colorObj : billboardTints[Math.floor(Math.random() * billboardTints.length)];
-                        } else {
-                            tint = billboardTints[Math.floor(Math.random() * billboardTints.length)];
+                        // HSL variation from active variants (or default billboardTints)
+                        const leafHslAttr = instBillboardTrees.geometry.getAttribute('aLeafHslShift');
+                        const barkHslAttr = instBillboardTrees.geometry.getAttribute('aBarkHslShift');
+                        
+                        if (leafHslAttr && barkHslAttr) {
+                            if (window.treeBillboardEditor) {
+                                const activeVars = window.treeBillboardEditor.getActiveVariants();
+                                if (activeVars.length > 0) {
+                                    const v = activeVars[Math.floor(Math.random() * activeVars.length)];
+                                    leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
+                                    barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
+                                } else {
+                                    // Fallback to random default tints (leaves only, trunk is 0)
+                                    const defaultTint = billboardTints[Math.floor(Math.random() * billboardTints.length)];
+                                    const preset = window.treeBillboardEditor.getCurrentPreset();
+                                    const baseColor = new THREE.Color(preset.baseColorHex);
+                                    const baseHSL = { h: 0, s: 0, l: 0 };
+                                    baseColor.getHSL(baseHSL);
+                                    const tintHSL = { h: 0, s: 0, l: 0 };
+                                    defaultTint.getHSL(tintHSL);
+                                    
+                                    let dh = tintHSL.h - baseHSL.h;
+                                    let ds = tintHSL.s - baseHSL.s;
+                                    let dl = tintHSL.l - baseHSL.l;
+                                    leafHslAttr.setXYZ(i, dh, ds, dl);
+                                    barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                }
+                            } else {
+                                leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                                barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
+                            }
+                            leafHslAttr.needsUpdate = true;
+                            barkHslAttr.needsUpdate = true;
                         }
-                        instBillboardTrees.setColorAt(i, tint);
 
                         billboardUpdated = true;
-                        billboardColorUpdated = true;
                     } else {
                         dummy.position.set(0, -1000, 0);
                         dummy.updateMatrix();
@@ -2720,9 +2894,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             if (billboardUpdated) {
                 instBillboardTrees.instanceMatrix.needsUpdate = true;
-            }
-            if (billboardColorUpdated && instBillboardTrees.instanceColor) {
-                instBillboardTrees.instanceColor.needsUpdate = true;
             }
             }
 
@@ -2851,7 +3022,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 if (g.attributes.color) g.deleteAttribute('color');
 
                 const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
-                const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || idx === 0;
+                const childName = (m.name || '').toLowerCase();
+                const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || childName.includes('bark') || childName.includes('trunk') || childName.includes('wood') || idx === 0;
 
                 const vertCount = g.attributes.position.count;
                 const colors = new Float32Array(vertCount * 3);
@@ -2863,6 +3035,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     colors[i * 3 + 2] = c.b;
                 }
                 g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+                // Add aIsBark vertex attribute (1.0 for bark, 0.0 for leaves)
+                const isBarkArr = new Float32Array(vertCount);
+                isBarkArr.fill(isBark ? 1.0 : 0.0);
+                g.setAttribute('aIsBark', new THREE.BufferAttribute(isBarkArr, 1));
 
                 if (!g.index) {
                     const indices = new Uint32Array(vertCount);
@@ -2880,12 +3057,113 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             mergedGeom.computeBoundingBox();
             mergedGeom.computeBoundingSphere();
 
+            // Initialize instanced buffer attributes for HSL shifts
+            const count = instMesh.count;
+            const leafHslArr = new Float32Array(count * 3);
+            const barkHslArr = new Float32Array(count * 3);
+            
+            const aLeafHslShift = new THREE.InstancedBufferAttribute(leafHslArr, 3);
+            const aBarkHslShift = new THREE.InstancedBufferAttribute(barkHslArr, 3);
+            
+            mergedGeom.setAttribute('aLeafHslShift', aLeafHslShift);
+            mergedGeom.setAttribute('aBarkHslShift', aBarkHslShift);
+
             const mergedMat = new THREE.MeshToonMaterial({
                 vertexColors: true,
                 gradientMap: gradientMap,
                 side: THREE.DoubleSide,
                 dithering: true
             });
+
+            mergedMat.onBeforeCompile = (shader) => {
+                shader.vertexShader = shader.vertexShader.replace(
+                    'void main() {',
+                    `
+                    attribute float aIsBark;
+                    attribute vec3 aLeafHslShift;
+                    attribute vec3 aBarkHslShift;
+                    
+                    varying float vIsBark;
+                    varying vec3 vLeafHslShift;
+                    varying vec3 vBarkHslShift;
+                    
+                    void main() {
+                        vIsBark = aIsBark;
+                        vLeafHslShift = aLeafHslShift;
+                        vBarkHslShift = aBarkHslShift;
+                    `
+                );
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <color_vertex>',
+                    `
+                    #include <color_vertex>
+                    
+                    // RGB to HSL GLSL functions
+                    vec3 rgb2hsl_vert(vec3 c) {
+                        float maxVal = max(c.r, max(c.g, c.b));
+                        float minVal = min(c.r, min(c.g, c.b));
+                        float h = 0.0;
+                        float s = 0.0;
+                        float l = (maxVal + minVal) / 2.0;
+
+                        if (maxVal != minVal) {
+                            float d = maxVal - minVal;
+                            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
+                            if (maxVal == c.r) {
+                                h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+                            } else if (maxVal == c.g) {
+                                h = (c.b - c.r) / d + 2.0;
+                            } else if (maxVal == c.b) {
+                                h = (c.r - c.g) / d + 4.0;
+                            }
+                            h /= 6.0;
+                        }
+                        return vec3(h, s, l);
+                    }
+
+                    float hue2rgb_vert(float p, float q, float t) {
+                        if (t < 0.0) t += 1.0;
+                        if (t > 1.0) t -= 1.0;
+                        if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
+                        if (t < 1.0/2.0) return q;
+                        if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
+                        return p;
+                    }
+
+                    vec3 hsl2rgb_vert(vec3 hsl) {
+                        float h = hsl.x;
+                        float s = hsl.y;
+                        float l = hsl.z;
+                        vec3 rgb;
+
+                        if (s == 0.0) {
+                            rgb = vec3(l);
+                        } else {
+                            float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+                            float p = 2.0 * l - q;
+                            rgb.r = hue2rgb_vert(p, q, h + 1.0/3.0);
+                            rgb.g = hue2rgb_vert(p, q, h);
+                            rgb.b = hue2rgb_vert(p, q, h - 1.0/3.0);
+                        }
+                        return rgb;
+                    }
+                    
+                    // Shift HSL based on whether it is bark or leaves
+                    vec3 baseCol = vColor.xyz;
+                    vec3 hsl = rgb2hsl_vert(baseCol);
+                    vec3 shift = (aIsBark > 0.5) ? aBarkHslShift : aLeafHslShift;
+                    
+                    // Apply HSL shift
+                    hsl.x = mod(hsl.x + shift.x, 1.0);
+                    if (hsl.x < 0.0) hsl.x += 1.0;
+                    hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
+                    hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
+                    
+                    vColor.xyz = hsl2rgb_vert(hsl);
+                    `
+                );
+            };
 
             instMesh.geometry = mergedGeom;
             instMesh.material = mergedMat;
@@ -2906,14 +3184,30 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         gltfLoader.load(preset.glbPath, (gltf) => {
             applyGLBPineTree(gltf, [instTree1], preset.targetHeight);
             
-            // Randomly assign active variant colors to 3D tree instances
+            // Randomly assign active variant colors to 3D tree instances via HSL shift attributes
             if (variants && variants.length > 0) {
                 const count = instTree1.count;
-                for (let i = 0; i < count; i++) {
-                    const v = variants[Math.floor(Math.random() * variants.length)];
-                    instTree1.setColorAt(i, v.colorObj);
+                const leafHslAttr = instTree1.geometry.getAttribute('aLeafHslShift');
+                const barkHslAttr = instTree1.geometry.getAttribute('aBarkHslShift');
+                if (leafHslAttr && barkHslAttr) {
+                    for (let i = 0; i < count; i++) {
+                        const v = variants[Math.floor(Math.random() * variants.length)];
+                        leafHslAttr.setXYZ(
+                            i, 
+                            v.leafHueShift / 360.0, 
+                            v.leafSatShift / 100.0, 
+                            v.leafLitShift / 100.0
+                        );
+                        barkHslAttr.setXYZ(
+                            i, 
+                            v.barkHueShift / 360.0, 
+                            v.barkSatShift / 100.0, 
+                            v.barkLitShift / 100.0
+                        );
+                    }
+                    leafHslAttr.needsUpdate = true;
+                    barkHslAttr.needsUpdate = true;
                 }
-                if (instTree1.instanceColor) instTree1.instanceColor.needsUpdate = true;
             }
         });
 
@@ -2925,11 +3219,27 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             if (variants && variants.length > 0) {
                 const count = instBillboardTrees.count;
-                for (let i = 0; i < count; i++) {
-                    const v = variants[Math.floor(Math.random() * variants.length)];
-                    instBillboardTrees.setColorAt(i, v.colorObj);
+                const leafHslAttr = instBillboardTrees.geometry.getAttribute('aLeafHslShift');
+                const barkHslAttr = instBillboardTrees.geometry.getAttribute('aBarkHslShift');
+                if (leafHslAttr && barkHslAttr) {
+                    for (let i = 0; i < count; i++) {
+                        const v = variants[Math.floor(Math.random() * variants.length)];
+                        leafHslAttr.setXYZ(
+                            i, 
+                            v.leafHueShift / 360.0, 
+                            v.leafSatShift / 100.0, 
+                            v.leafLitShift / 100.0
+                        );
+                        barkHslAttr.setXYZ(
+                            i, 
+                            v.barkHueShift / 360.0, 
+                            v.barkSatShift / 100.0, 
+                            v.barkLitShift / 100.0
+                        );
+                    }
+                    leafHslAttr.needsUpdate = true;
+                    barkHslAttr.needsUpdate = true;
                 }
-                if (instBillboardTrees.instanceColor) instBillboardTrees.instanceColor.needsUpdate = true;
             }
         });
     });
@@ -3338,8 +3648,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             lastFpsTime = now;
             // Only update DOM text once per second to prevent browser layout thrashing!
             const currZn = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            let timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
-            document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${currentAlt}m | BIO: ${currZn.name} | TOD: ${timeStr}`;
+            const isMobileUser = document.documentElement.classList.contains('mobile-user');
+            if (isMobileUser) {
+                const timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
+                document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${currentAlt}m | BIO: ${currZn.name} | TOD: ${timeStr}`;
+            } else {
+                document.getElementById('fps-counter').innerText = currentFps + ' FPS | ALT: ' + currentAlt + 'm';
+                document.getElementById('biome-label').innerText = '| BIOME: ' + currZn.name;
+            }
         }
 
         
@@ -3633,12 +3949,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     if (timeToggleBtn) {
         timeToggleBtn.addEventListener('click', () => {
             timePhase = (timePhase + 1) % 3;
-            if (timePhase === 0) timeToggleBtn.innerText = 'Time: Morning';
-            else if (timePhase === 1) timeToggleBtn.innerText = 'Time: Sunset';
-            else timeToggleBtn.innerText = 'Time: Night';
-            
-            let timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
-            document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${Math.max(0, Math.round(playerGrp.position.y - getWorldHeight(playerGrp.position.x, playerGrp.position.z)))}m | BIO: ${getBiomeAt(playerGrp.position.x, playerGrp.position.z).name} | TOD: ${timeStr}`;
+            if (timePhase === 0) timeToggleBtn.innerText = '☀️';
+            else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
+            else timeToggleBtn.innerText = '🌙';
         });
     }
 
@@ -3926,11 +4239,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             arpIndex = 0;
             nextNoteTime = audioCtx.currentTime + 0.1;
             scheduleNotes();
-            document.getElementById('music-toggle').innerText = "Music: ON";
+            document.getElementById('music-toggle').innerText = "⏸ Music";
             trackBtn.style.display = "block";
         } else {
             clearTimeout(musicTimerID);
-            document.getElementById('music-toggle').innerText = "Music: OFF";
+            document.getElementById('music-toggle').innerText = "▶ Music";
             trackBtn.style.display = "none";
         }
     });
