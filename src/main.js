@@ -3812,7 +3812,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         const bbox = new THREE.Box3().setFromObject(gltf.scene);
         const modelHeight = bbox.max.y - bbox.min.y;
         const targetHeight = 36.0;
-        const sinkingDepth = 14.5;
+        const sinkingDepth = 7.0;
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
 
@@ -3820,7 +3820,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             // Clone the geometry and bake parent matrices, translations, and scaling into it
             const g = m.geometry.clone();
             g.applyMatrix4(m.matrixWorld);
-            // Translate the geometry down by 14.5 units in world space (14.5 / sc) so that the entire root cage is buried underground
+            // Translate the geometry down by 7.0 units in world space (7.0 / sc) so the root base sits at terrain level
             g.translate(0, offsetY - sinkingDepth / sc, 0);
             g.scale(sc, sc, sc);
 
