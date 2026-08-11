@@ -2020,6 +2020,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     billboardGeo.setAttribute('aBarkHslShift', aBBBarkHslShift);
 
     const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 3500);
+    instBillboardTrees.frustumCulled = false;
     scene.add(instBillboardTrees);
 
     // Initialize Jungle Billboard trees
@@ -2038,6 +2039,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     jungleBillboardMat.onBeforeCompile = billboardMat.onBeforeCompile;
 
     const instJungleBillboardTrees = new THREE.InstancedMesh(jungleBillboardGeo, jungleBillboardMat, 1500);
+    instJungleBillboardTrees.frustumCulled = false;
     scene.add(instJungleBillboardTrees);
 
     // Exact color matching palette derived directly from 3D GLB Pine tree foliage colors
@@ -3721,7 +3723,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             g.computeBoundingSphere();
 
             // Set up HSL shift attributes for this geometry
-            const count = 600;
+            const count = 180;
             const leafHslArr = new Float32Array(count * 3);
             const barkHslArr = new Float32Array(count * 3);
             const aLeafHslShift = new THREE.InstancedBufferAttribute(leafHslArr, 3);
@@ -3844,14 +3846,15 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 );
             };
 
-            const instMesh = new THREE.InstancedMesh(g, toonMat, 600);
+            const instMesh = new THREE.InstancedMesh(g, toonMat, 180);
             instMesh.castShadow = true;
             instMesh.receiveShadow = true;
+            instMesh.frustumCulled = false;
             
             // Initialize positions to hidden
             const dummyMatrix = new THREE.Matrix4();
             dummyMatrix.setPosition(0, -1000, 0);
-            for(let i=0; i<600; i++) {
+            for(let i=0; i<180; i++) {
                 instMesh.setMatrixAt(i, dummyMatrix);
             }
             instMesh.instanceMatrix.needsUpdate = true;
