@@ -344,6 +344,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         showWater: true,
         showTrees: true,
         showClouds: true,
+        cloudScaleRegular: 1.0,
+        cloudScaleHigh: 1.0,
+        cloudScaleWispy: 1.0,
+        cloudScaleMega: 1.0,
         showBirds: true,
         showFogPlanes: true,
         showCrystals: true,
@@ -611,7 +615,33 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     debugWaterDropdownController = waterShaderFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Active Mode').onChange(v => activateWaterShader(v, true));
 
     debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; });
-    debugFolder.add(params, 'showClouds').name('Clouds').onChange(v => { instClouds.visible = v; if(typeof instHighClouds !== 'undefined') instHighClouds.visible = v; if(typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
+    const cloudFolder = gui.addFolder('☁️ Cloud Editor');
+    cloudFolder.add(params, 'showClouds').name('Show All Clouds').onChange(v => { 
+        if(typeof instClouds !== 'undefined') instClouds.visible = v; 
+        if(typeof instHighClouds !== 'undefined') instHighClouds.visible = v; 
+        if(typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; 
+        if(typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; 
+    });
+    
+    function updateCloudScale(instMesh, newMulti, oldMulti) {
+        if (typeof instMesh === 'undefined') return;
+        const ratio = newMulti / oldMulti;
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < instMesh.count; i++) {
+            instMesh.getMatrixAt(i, dummy.matrix);
+            dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+            dummy.scale.multiplyScalar(ratio);
+            dummy.updateMatrix();
+            instMesh.setMatrixAt(i, dummy.matrix);
+        }
+        instMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    let prevCloudScale = { regular: 1.0, high: 1.0, wispy: 1.0, mega: 1.0 };
+    cloudFolder.add(params, 'cloudScaleRegular', 0.1, 5.0).name('Regular Size').onChange(v => { updateCloudScale(instClouds, v, prevCloudScale.regular); prevCloudScale.regular = v; });
+    cloudFolder.add(params, 'cloudScaleHigh', 0.1, 5.0).name('Cumulonimbus Size').onChange(v => { updateCloudScale(instHighClouds, v, prevCloudScale.high); prevCloudScale.high = v; });
+    cloudFolder.add(params, 'cloudScaleWispy', 0.1, 5.0).name('Wispy Size').onChange(v => { updateCloudScale(instWispyClouds, v, prevCloudScale.wispy); prevCloudScale.wispy = v; });
+    cloudFolder.add(params, 'cloudScaleMega', 0.1, 5.0).name('Mega Size').onChange(v => { updateCloudScale(instMegaClouds, v, prevCloudScale.mega); prevCloudScale.mega = v; });
     debugFolder.add(params, 'showBirds').name('Birds').onChange(v => { if(typeof instBirds !== 'undefined') instBirds.visible = v; if(typeof flockGrp !== 'undefined') flockGrp.visible = v; });
     debugFolder.add(params, 'showFogPlanes').name('Fog Planes').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     debugFolder.add(params, 'showCrystals').name('Crystals').onChange(v => { instCrystals.visible = v; });
@@ -686,21 +716,54 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
 
 
-    document.getElementById('fullscreen-toggle').addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        document.body.requestFullscreen().catch(err => {
-          console.error(`Error attempting to enable fullscreen: ${err.message}`);
+    const fsToggleBtn = document.getElementById('fullscreen-toggle');
+    if (fsToggleBtn) {
+        fsToggleBtn.addEventListener('click', () => {
+          if (!document.fullscreenElement) {
+            document.body.requestFullscreen().catch(err => {
+              console.error(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+          } else {
+            document.exitFullscreen();
+          }
         });
-      } else {
-        document.exitFullscreen();
-      }
-    });
+    }
+    
+    const menuIcon = document.getElementById('menu-icon');
+    const sysDrawer = document.getElementById('systems-drawer');
+    if (menuIcon && sysDrawer) {
+        let drawerOpen = false;
+        menuIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            drawerOpen = !drawerOpen;
+            sysDrawer.style.transform = drawerOpen ? 'translateX(0)' : 'translateX(100%)';
+            menuIcon.innerText = drawerOpen ? '✕' : '☰';
+        });
+        document.addEventListener('click', (e) => {
+            if (drawerOpen && !sysDrawer.contains(e.target) && e.target !== menuIcon) {
+                drawerOpen = false;
+                sysDrawer.style.transform = 'translateX(100%)';
+                menuIcon.innerText = '☰';
+            }
+        });
+    }
+
+    const controlsHintBtn = document.getElementById('controls-hint-btn');
+    const pcControlsHint = document.getElementById('pc-controls-hint');
+    if (controlsHintBtn && pcControlsHint) {
+        controlsHintBtn.addEventListener('click', () => {
+            pcControlsHint.style.display = 'block';
+            pcControlsHint.style.opacity = '1';
+            pcControlsHint.innerText = 'Controls: Joystick to move, Boost to fly faster. Pinch to Zoom.';
+            setTimeout(() => { pcControlsHint.style.opacity = '0'; }, 5000);
+        });
+    }
     
 
     
     document.getElementById('pause-toggle').addEventListener('click', () => {
         isFlightPaused = !isFlightPaused;
-        document.getElementById('pause-toggle').innerText = isFlightPaused ? '▶' : '⏸';
+        document.getElementById('pause-toggle').innerText = isFlightPaused ? 'Play' : 'Pause';
     });
 
     document.getElementById('god-mode-btn').addEventListener('click', () => {
@@ -2412,7 +2475,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     playerZ + Math.sin(angle) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
-                let s = 1.3 + Math.random() * 2.2;
+                let s = (1.3 + Math.random() * 2.2) * params.cloudScaleRegular;
                 dummy.scale.set(s * (0.8 + Math.random() * 0.8), s * (0.5 + Math.random() * 0.6), s * (0.8 + Math.random() * 0.8));
             }
             dummy.position.x += 4.0 * dt;
@@ -2437,7 +2500,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     playerZ + Math.sin(angle) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
-                dummy.scale.set(1.5 + Math.random() * 2.0, 0.8 + Math.random() * 1.0, 1.5 + Math.random() * 2.0);
+                dummy.scale.set((1.5 + Math.random() * 2.0) * params.cloudScaleHigh, (0.8 + Math.random() * 1.0) * params.cloudScaleHigh, (1.5 + Math.random() * 2.0) * params.cloudScaleHigh);
             }
             dummy.position.x += 1.5 * dt;
             dummy.updateMatrix();
@@ -2460,7 +2523,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     playerZ + Math.sin(angle) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
-                dummy.scale.set(2.0 + Math.random() * 1.5, 0.4 + Math.random() * 0.4, 1.8 + Math.random() * 1.5);
+                dummy.scale.set((2.0 + Math.random() * 1.5) * params.cloudScaleWispy, (0.4 + Math.random() * 0.4) * params.cloudScaleWispy, (1.8 + Math.random() * 1.5) * params.cloudScaleWispy);
             }
             dummy.position.x += 5.0 * dt;
             dummy.updateMatrix();
@@ -2483,7 +2546,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     playerZ + Math.sin(ang) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
-                dummy.scale.set(3.0 + Math.random() * 2.5, 1.4 + Math.random() * 1.2, 3.0 + Math.random() * 2.5);
+                dummy.scale.set((3.0 + Math.random() * 2.5) * params.cloudScaleMega, (1.4 + Math.random() * 1.2) * params.cloudScaleMega, (3.0 + Math.random() * 2.5) * params.cloudScaleMega);
             }
             dummy.position.x += 0.8 * dt;
             dummy.updateMatrix();
@@ -3041,8 +3104,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             cameraZoomDist = initialZoomDist * (initialPinchDist / newDist);
             cameraZoomDist = Math.max(5.0, Math.min(100.0, cameraZoomDist));
             
-            if (cameraZoomDist > 25.0) document.getElementById('zoom-toggle').innerText = 'Zoom In';
-            else document.getElementById('zoom-toggle').innerText = 'Zoom Out';
+            const zoomToggleBtn = document.getElementById('zoom-toggle');
+            if (zoomToggleBtn) {
+                if (cameraZoomDist > 25.0) zoomToggleBtn.innerText = 'Zoom In';
+                else zoomToggleBtn.innerText = 'Zoom Out';
+            }
         } else {
             for(let touch of e.changedTouches) {
                 if(touch.identifier === activeTouchId) updateJoystick(touch);
@@ -3177,7 +3243,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     };
 
     const onPointerMove = (event) => {
-        if (!isDragging) return;
+        if (!isDragging || isGodMode) return;
         const deltaX = event.clientX - previousPointerPos.x;
         const deltaY = event.clientY - previousPointerPos.y;
 
@@ -3271,9 +3337,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             framesThisSecond = 0;
             lastFpsTime = now;
             // Only update DOM text once per second to prevent browser layout thrashing!
-            document.getElementById('fps-counter').innerText = currentFps + ' FPS | ALT: ' + currentAlt + 'm';
             const currZn = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            document.getElementById('biome-label').innerText = '| BIOME: ' + currZn.name;
+            let timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
+            document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${currentAlt}m | BIO: ${currZn.name} | TOD: ${timeStr}`;
         }
 
         
@@ -3567,9 +3633,12 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     if (timeToggleBtn) {
         timeToggleBtn.addEventListener('click', () => {
             timePhase = (timePhase + 1) % 3;
-            if (timePhase === 0) timeToggleBtn.innerText = '☀️';
-            else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
-            else timeToggleBtn.innerText = '🌙';
+            if (timePhase === 0) timeToggleBtn.innerText = 'Time: Morning';
+            else if (timePhase === 1) timeToggleBtn.innerText = 'Time: Sunset';
+            else timeToggleBtn.innerText = 'Time: Night';
+            
+            let timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
+            document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${Math.max(0, Math.round(playerGrp.position.y - getWorldHeight(playerGrp.position.x, playerGrp.position.z)))}m | BIO: ${getBiomeAt(playerGrp.position.x, playerGrp.position.z).name} | TOD: ${timeStr}`;
         });
     }
 
@@ -3857,11 +3926,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             arpIndex = 0;
             nextNoteTime = audioCtx.currentTime + 0.1;
             scheduleNotes();
-            document.getElementById('music-toggle').innerText = "⏸ Music";
+            document.getElementById('music-toggle').innerText = "Music: ON";
             trackBtn.style.display = "block";
         } else {
             clearTimeout(musicTimerID);
-            document.getElementById('music-toggle').innerText = "▶ Music";
+            document.getElementById('music-toggle').innerText = "Music: OFF";
             trackBtn.style.display = "none";
         }
     });
