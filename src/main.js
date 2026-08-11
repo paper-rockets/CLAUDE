@@ -3087,18 +3087,6 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     varying vec3 vLeafHslShift;
                     varying vec3 vBarkHslShift;
                     
-                    void main() {
-                        vIsBark = aIsBark;
-                        vLeafHslShift = aLeafHslShift;
-                        vBarkHslShift = aBarkHslShift;
-                    `
-                );
-                
-                shader.vertexShader = shader.vertexShader.replace(
-                    '#include <color_vertex>',
-                    `
-                    #include <color_vertex>
-                    
                     // RGB to HSL GLSL functions
                     vec3 rgb2hsl_vert(vec3 c) {
                         float maxVal = max(c.r, max(c.g, c.b));
@@ -3148,6 +3136,18 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         }
                         return rgb;
                     }
+                    
+                    void main() {
+                        vIsBark = aIsBark;
+                        vLeafHslShift = aLeafHslShift;
+                        vBarkHslShift = aBarkHslShift;
+                    `
+                );
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <color_vertex>',
+                    `
+                    #include <color_vertex>
                     
                     // Shift HSL based on whether it is bark or leaves
                     vec3 baseCol = vColor.xyz;
