@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getWorldHeight } from '../world/TerrainGenerator.js';
+import { getWorldHeight, getBiomeAt } from '../world/TerrainGenerator.js';
 
 export class PlayerPhysics {
     constructor(characterGroup) {
@@ -79,71 +79,26 @@ export class PlayerPhysics {
         const groundY = getWorldHeight(this.character.position.x, this.character.position.z);
         const minimumFlightHeight = 18;
         
+        // In Lush Jungle, raise the floor so Kiki flies above the canopy (trees are ~36m tall)
+        const biome = getBiomeAt(this.character.position.x, this.character.position.z);
+        const inJungle = biome && biome.name && biome.name.toLowerCase().includes('jungle');
+        const canopyHeight = inJungle ? 42 : 15; // 42m clears the 36m canopy with breathing room
+
         // Auto-swoop to avoid terrain collisions
-        const targetMinY = groundY + 55; 
+        const targetMinY = groundY + (inJungle ? 65 : 55);
         if (this.character.position.y < targetMinY) {
             const depth = targetMinY - this.character.position.y;
             const swoopPitch = Math.min(Math.PI / 4, depth / 40.0);
             this.currentPitch = THREE.MathUtils.lerp(this.currentPitch, swoopPitch, 1.0 - Math.exp(-3.0 * delta));
             this.character.rotation.set(this.currentPitch, this.currentYaw, 0, 'YXZ');
             
-            if (this.character.position.y < groundY + 15) {
-                this.character.position.y += (groundY + 15 - this.character.position.y) * (1.0 - Math.exp(-5.0 * delta));
+            if (this.character.position.y < groundY + canopyHeight) {
+                this.character.position.y += (groundY + canopyHeight - this.character.position.y) * (1.0 - Math.exp(-5.0 * delta));
             }
         }
         
         this.character.position.y = Math.min(Math.max(this.character.position.y, minimumFlightHeight), 3500);
 
-        // Tree Collisions (Soft sliding physics)
-        if (treeGrid) {
-            const px = this.character.position.x;
-            const pz = this.character.position.z;
-            const py = this.character.position.y;
-            
-            const TREE_CELL_SIZE = 15;
-            const cx = (Math.floor(px / TREE_CELL_SIZE) + 32768) & 0xFFFF;
-            const cz = (Math.floor(pz / TREE_CELL_SIZE) + 32768) & 0xFFFF;
-            
-            // Check 3x3 neighbor cells
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dz = -1; dz <= 1; dz++) {
-                    const ncx = (cx + dx) & 0xFFFF;
-                    const ncz = (cz + dz) & 0xFFFF;
-                    const cellKey = (ncx << 16) | ncz;
-                    const tree = treeGrid.get(cellKey);
-                    
-                    if (tree) {
-                        const tx = tree.x;
-                        const tz = tree.z;
-                        const ty = getWorldHeight(tx, tz);
-                        
-                        // We sink jungle trees by 7.0m
-                        // Max tree height is around 36.0m
-                        const treeBottom = ty - 8.0;
-                        const treeTop = ty + 28.5;
-                        
-                        if (py >= treeBottom && py <= treeTop) {
-                            const dX = px - tx;
-                            const dZ = pz - tz;
-                            const distSq = dX * dX + dZ * dZ;
-                            const dist = Math.sqrt(distSq);
-                            
-                            // Foliage vs Trunk radius based on height
-                            const isFoliageZone = py > (ty + 10.0);
-                            const collRad = isFoliageZone ? 12.0 : 2.5;
-                            
-                            if (dist < collRad && dist > 0.001) {
-                                const overlap = collRad - dist;
-                                // Push the player out
-                                this.character.position.x += (dX / dist) * overlap;
-                                this.character.position.z += (dZ / dist) * overlap;
-                                // Slow down the flight
-                                this.velocity *= 0.65;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Tree Collisions disabled - Kiki flies above the jungle canopy
     }
 }
