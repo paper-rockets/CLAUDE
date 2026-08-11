@@ -2814,7 +2814,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 const r = cloudDist * (0.6 + Math.random() * 0.38);
                 dummy.position.set(
                     playerX + Math.cos(angle) * r,
-                    150 + Math.random() * 100,
+                    280 + Math.random() * 120,
                     playerZ + Math.sin(angle) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
@@ -2862,7 +2862,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 const r = wispyDist * (0.6 + Math.random() * 0.38);
                 dummy.position.set(
                     playerX + Math.cos(angle) * r,
-                    100 + Math.random() * 160,
+                    230 + Math.random() * 150,
                     playerZ + Math.sin(angle) * r
                 );
                 dummy.rotation.set(0, Math.random() * Math.PI, 0);
@@ -2910,6 +2910,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             const billboardMaxDist = 800;
 
             if (params.showTrees) {
+                const playerBiomeName = getBiomeAt(playerX, playerZ).name;
+                const playerInJungle = playerBiomeName.toLowerCase().includes('jungle');
+
                 // 1. Update standard pine trees (instTree1)
                 const count1 = instTree1.maxCount || instTree1.count;
                 let tree1Updated = false;
@@ -2917,7 +2920,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     instTree1.getMatrixAt(i, dummy.matrix);
                     dummy.position.setFromMatrixPosition(dummy.matrix);
 
-                    if (Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
+                    if (playerInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
                         if (dummy.position.y > 0) {
                             treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
                         }
@@ -2926,17 +2929,18 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         let nx, nz, h, pathVal, bName = '';
                         let attempts = 0;
 
-                        while(!valid && attempts < 12) {
-                            nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                            nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                            h = getWorldHeight(nx, nz);
-                            pathVal = getPathStrength(nx, nz);
-                            bName = getBiomeAt(nx, nz).name;
+                        if (!playerInJungle) {
+                            while(!valid && attempts < 12) {
+                                nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                h = getWorldHeight(nx, nz);
+                                pathVal = getPathStrength(nx, nz);
+                                bName = getBiomeAt(nx, nz).name;
 
-                            let isForest = true;
-                            let biomeMatch = !bName.includes('Jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
-                            let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                            let elevationValid = (h >= 6.8 && h <= 55.0) && islandMaskOk;
+                                let isForest = true;
+                                let biomeMatch = !bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
+                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                let elevationValid = (h >= 6.8 && h <= 55.0) && islandMaskOk;
 
                             if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
                                 let cx = Math.floor(nx / TREE_CELL_SIZE);
@@ -2956,8 +2960,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             }
                             attempts++;
                         }
+                    }
 
-                        if (valid) {
+                    if (valid) {
                             treeGrid.set(getTreeCell(nx, nz), {x: nx, z: nz});
                             dummy.position.set(nx, h, nz);
                             dummy.rotation.set(0, Math.random() * Math.PI * 2.0, 0);
@@ -3103,20 +3108,35 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     const dSq = dX * dX + dZ * dZ;
 
                     // Despawn only if inside 360m (after 3D tree is already spawned) or beyond 830m
-                    if (dSq < 360 * 360 || dSq > 830 * 830 || dummy.position.y < -500) {
-                        const ang = Math.random() * Math.PI * 2.0;
-                        const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
-                        const nx = focusX + Math.cos(ang) * r;
-                        const nz = focusZ + Math.sin(ang) * r;
-                        const h = getWorldHeight(nx, nz);
+                    if (playerInJungle || dSq < 360 * 360 || dSq > 830 * 830 || dummy.position.y < -500) {
+                        let valid = false;
+                        let nx, nz, h, bName = '';
+                        let attempts = 0;
 
-                        let bName = getBiomeAt(nx, nz).name;
-                        let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                        if (!(playerInJungle && bbIdx === 0)) {
+                            while(!valid && attempts < 15) {
+                                const ang = Math.random() * Math.PI * 2.0;
+                                const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
+                                nx = focusX + Math.cos(ang) * r;
+                                nz = focusZ + Math.sin(ang) * r;
+                                h = getWorldHeight(nx, nz);
+                                bName = getBiomeAt(nx, nz).name;
 
-                        let isJungle = bName.includes('Jungle');
-                        let biomeMatch = (bbIdx === 1) ? isJungle : !isJungle;
+                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                let isJungle = bName.toLowerCase().includes('jungle');
+                                let biomeMatch = playerInJungle ? (bbIdx === 1) : ((bbIdx === 1) ? isJungle : !isJungle);
 
-                        if (h >= 6.5 && h <= 55.0 && islandMaskOk && getPathStrength(nx, nz) < 0.20 && isTreeZone(nx, nz) && biomeMatch && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty')) {
+                                // Distant billboard heights should match their 3D tree counter-parts
+                                let maxBBH = (bbIdx === 1) ? 110.0 : 55.0;
+
+                                if (h >= 6.5 && h <= maxBBH && islandMaskOk && getPathStrength(nx, nz) < 0.20 && isTreeZone(nx, nz) && biomeMatch && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty')) {
+                                    valid = true;
+                                }
+                                attempts++;
+                            }
+                        }
+
+                        if (valid) {
                             dummy.position.set(nx, h, nz);
                             dummy.rotation.set(0, 0, 0);
                             
@@ -3701,7 +3721,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         const bbox = new THREE.Box3().setFromObject(gltf.scene);
         const modelHeight = bbox.max.y - bbox.min.y;
-        const targetHeight = 35.0;
+        const targetHeight = 28.0;
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
 
@@ -3709,8 +3729,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             // Clone the geometry and bake parent matrices, translations, and scaling into it
             const g = m.geometry.clone();
             g.applyMatrix4(m.matrixWorld);
-            // Translate the geometry down by 4.0 units in world space (4.0 / sc) so that the roots sink fully into the ground
-            g.translate(0, offsetY - 4.0 / sc, 0);
+            // Translate the geometry down by 9.5 units in world space (9.5 / sc) so that the roots sink fully into the ground
+            g.translate(0, offsetY - 9.5 / sc, 0);
             g.scale(sc, sc, sc);
 
             // Compute indices if not present
@@ -4485,7 +4505,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         };
 
         if (playerPhysics) {
-            playerPhysics.update(dt, inputState, isBraking, isBoosting, isFlightPaused);
+            playerPhysics.update(dt, inputState, isBraking, isBoosting, isFlightPaused, treeGrid);
             
             if (cameraManager) {
                 cameraManager.update(dt, playerGrp, playerPhysics.currentYaw, isBoosting);

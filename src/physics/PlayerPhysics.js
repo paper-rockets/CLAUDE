@@ -21,7 +21,7 @@ export class PlayerPhysics {
         this.tempVec1 = new THREE.Vector3();
     }
 
-    update(delta, inputState, isBraking, isBoosting, isFlightPaused) {
+    update(delta, inputState, isBraking, isBoosting, isFlightPaused, treeGrid) {
         if (isFlightPaused) return;
 
         // Accelerate/Decelerate
@@ -93,5 +93,57 @@ export class PlayerPhysics {
         }
         
         this.character.position.y = Math.min(Math.max(this.character.position.y, minimumFlightHeight), 3500);
+
+        // Tree Collisions (Soft sliding physics)
+        if (treeGrid) {
+            const px = this.character.position.x;
+            const pz = this.character.position.z;
+            const py = this.character.position.y;
+            
+            const TREE_CELL_SIZE = 15;
+            const cx = (Math.floor(px / TREE_CELL_SIZE) + 32768) & 0xFFFF;
+            const cz = (Math.floor(pz / TREE_CELL_SIZE) + 32768) & 0xFFFF;
+            
+            // Check 3x3 neighbor cells
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const ncx = (cx + dx) & 0xFFFF;
+                    const ncz = (cz + dz) & 0xFFFF;
+                    const cellKey = (ncx << 16) | ncz;
+                    const tree = treeGrid.get(cellKey);
+                    
+                    if (tree) {
+                        const tx = tree.x;
+                        const tz = tree.z;
+                        const ty = getWorldHeight(tx, tz);
+                        
+                        // We sink jungle trees by 9.5m, so the base is at ty - 9.5
+                        // Max tree height is around 28.0m
+                        const treeBottom = ty - 10.5;
+                        const treeTop = ty + 20.0;
+                        
+                        if (py >= treeBottom && py <= treeTop) {
+                            const dX = px - tx;
+                            const dZ = pz - tz;
+                            const distSq = dX * dX + dZ * dZ;
+                            const dist = Math.sqrt(distSq);
+                            
+                            // Foliage vs Trunk radius based on height
+                            const isFoliageZone = py > (ty + 10.0);
+                            const collRad = isFoliageZone ? 12.0 : 2.5;
+                            
+                            if (dist < collRad && dist > 0.001) {
+                                const overlap = collRad - dist;
+                                // Push the player out
+                                this.character.position.x += (dX / dist) * overlap;
+                                this.character.position.z += (dZ / dist) * overlap;
+                                // Slow down the flight
+                                this.velocity *= 0.65;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
