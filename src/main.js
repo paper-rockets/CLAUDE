@@ -3709,7 +3709,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             // Clone the geometry and bake parent matrices, translations, and scaling into it
             const g = m.geometry.clone();
             g.applyMatrix4(m.matrixWorld);
-            g.translate(0, offsetY, 0);
+            // Translate the geometry down by 4.0 units in world space (4.0 / sc) so that the roots sink fully into the ground
+            g.translate(0, offsetY - 4.0 / sc, 0);
             g.scale(sc, sc, sc);
 
             // Compute indices if not present
@@ -3733,7 +3734,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             // Classify mesh as trunk vs leaf
             const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
-            const isBark = matName.includes('batang') || matName.includes('akar') || matName.includes('bark') || matName.includes('trunk') || matName.includes('wood');
+            const isBark = matName.includes('batang') || matName.includes('akar') || matName.includes('bark') || matName.includes('wood');
+            const isLeaf = matName.includes('daun') || matName.includes('ivy');
 
             // Convert material to MeshToonMaterial with in-game gradientMap and preserve texture/alpha test
             const toonMat = new THREE.MeshToonMaterial({
@@ -3744,9 +3746,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 normalMap: m.material.normalMap,
                 normalScale: m.material.normalScale,
                 alphaMap: m.material.alphaMap,
-                transparent: m.material.transparent || false,
-                alphaTest: m.material.alphaTest || (matName.includes('daun') || matName.includes('ivy') ? 0.15 : 0.0),
-                opacity: m.material.opacity !== undefined ? m.material.opacity : 1.0,
+                // Make leaves fully opaque and non-see-through to increase opacity
+                transparent: isLeaf ? false : (m.material.transparent || false),
+                alphaTest: isLeaf ? 0.45 : (m.material.alphaTest || 0.0),
+                opacity: 1.0,
                 side: THREE.DoubleSide,
                 depthWrite: true,
                 depthTest: true,

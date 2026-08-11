@@ -13,6 +13,19 @@ export function setupGodMode(scene, cameraBase, renderer, playerGrp) {
     godControls.panSpeed = 2.0;
     godControls.enabled = false;
     
+    // Restrict mouse actions to prevent mouse drag zooming (only scroll wheel will zoom)
+    godControls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.NONE,
+        RIGHT: THREE.MOUSE.PAN
+    };
+    
+    // Restrict touch actions to prevent pinch zoom if requested
+    godControls.touches = {
+        ONE: THREE.TOUCH.ROTATE,
+        TWO: THREE.TOUCH.PAN
+    };
+
     // We update the target initially
     godControls.target.copy(playerGrp.position);
     godControls.update();
