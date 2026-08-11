@@ -2899,6 +2899,23 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         }
         instMegaClouds.instanceMatrix.needsUpdate = true;
 
+        // === TREE VISIBILITY: runs EVERY FRAME (not gated by shouldUpdateTerrain) ===
+        {
+            const isFreeCamVis = (window.editorState && window.editorState.isEditorMode) || isGodMode;
+            const visFocusX = isFreeCamVis ? (isGodMode ? godCamera.position.x : camera.position.x) : playerX;
+            const visFocusZ = isFreeCamVis ? (isGodMode ? godCamera.position.z : camera.position.z) : playerZ;
+            // Check BOTH b1 and b2 — at biome borders mainBiome may still be non-jungle
+            // even though the terrain is visually blending into jungle
+            const _visData = getIslandData(visFocusX, visFocusZ);
+            const _b1Jungle = _visData.b1 && _visData.b1.name && _visData.b1.name.toLowerCase().includes('jungle');
+            const _b2Jungle = _visData.b2 && _visData.b2.name && _visData.b2.name.toLowerCase().includes('jungle');
+            const _inJungle = _b1Jungle || _b2Jungle;
+            if (instTree1) instTree1.visible = params.showTrees && !_inJungle;
+            if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = params.showTrees && !_inJungle);
+            if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = params.showTrees && !_inJungle;
+            if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = params.showTrees;
+        }
+
         if (shouldUpdateTerrain) {
             // Center tree updates on camera position when in editor/freecam/God Mode or player when flying
             const isFreeCam = (window.editorState && window.editorState.isEditorMode) || isGodMode;
@@ -2911,15 +2928,28 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             const billboardMinDist = 380; // Billboards spawn from 380m out to 800m (40m overlap ring)
             const billboardMaxDist = 800;
 
-            if (params.showTrees) {
-                const playerBiomeName = getBiomeAt(playerX, playerZ).name;
-                const playerInJungle = playerBiomeName.toLowerCase().includes('jungle');
+            // Check if there are ANY tree-supporting biomes nearby to avoid thrashing on CPU noise calculations
+            const checkDist = 800; // max tree radius
+            const points = [
+                { x: focusX, z: focusZ },
+                { x: focusX + checkDist, z: focusZ },
+                { x: focusX - checkDist, z: focusZ },
+                { x: focusX, z: focusZ + checkDist },
+                { x: focusX, z: focusZ - checkDist }
+            ];
+            let treesPossibleNearby = false;
+            for (let pIdx = 0; pIdx < points.length; pIdx++) {
+                const p = points[pIdx];
+                const biome = getBiomeAt(p.x, p.z);
+                const islandData = getIslandData(p.x, p.z);
+                if (biome && biome.treesOk && islandData.mask > 0.0) {
+                    treesPossibleNearby = true;
+                    break;
+                }
+            }
 
-                // Enforce zero pines, palms, or billboards in the Lush Jungle biome
-                if (instTree1) instTree1.visible = !playerInJungle;
-                if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = !playerInJungle);
-                if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = false;
-                if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = false;
+            if (params.showTrees) {
+                const playerInJungle = getBiomeAt(focusX, focusZ).name.toLowerCase().includes('jungle');
 
                 // 1. Update standard pine trees (instTree1)
                 const count1 = instTree1.maxCount || instTree1.count;
@@ -2928,7 +2958,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     instTree1.getMatrixAt(i, dummy.matrix);
                     dummy.position.setFromMatrixPosition(dummy.matrix);
 
-                    if (playerInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
+                    // Optimization: if already despawned and no trees can spawn nearby, skip completely!
+                    if (dummy.position.y < -500 && !treesPossibleNearby) {
+                        continue;
+                    }
+
+                    // Also evict any pine that snuck into a jungle tile (biome border cleanup)
+                    const treeInJungle = dummy.position.y > 0 && getBiomeAt(dummy.position.x, dummy.position.z).name.toLowerCase().includes('jungle');
+                    if (playerInJungle || treeInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
                         if (dummy.position.y > 0) {
                             treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
                         }
@@ -2937,7 +2974,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         let nx, nz, h, pathVal, bName = '';
                         let attempts = 0;
 
-                        if (!playerInJungle) {
+                        if (!playerInJungle && treesPossibleNearby) {
                             while(!valid && attempts < 12) {
                                 nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                 nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
@@ -3013,6 +3050,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         firstPart.getMatrixAt(i, dummy.matrix);
                         dummy.position.setFromMatrixPosition(dummy.matrix);
 
+                        // Optimization: if already despawned and no trees can spawn nearby, skip completely!
+                        if (dummy.position.y < -500 && !treesPossibleNearby) {
+                            continue;
+                        }
+
                         if (Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
                             if (dummy.position.y > 0) {
                                 treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
@@ -3022,37 +3064,39 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             let nx, nz, h, pathVal, bName = '';
                             let attempts = 0;
 
-                            while(!valid && attempts < 12) {
-                                nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                h = getWorldHeight(nx, nz);
-                                pathVal = getPathStrength(nx, nz);
-                                bName = getBiomeAt(nx, nz).name;
+                            if (treesPossibleNearby) {
+                                while(!valid && attempts < 12) {
+                                    nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                    nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                    h = getWorldHeight(nx, nz);
+                                    pathVal = getPathStrength(nx, nz);
+                                    bName = getBiomeAt(nx, nz).name;
 
-                                let isForest = true;
-                                let biomeMatch = bName.includes('Jungle');
-                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                                
-                                // Jungle trees spawn all the way up the canopy hills!
-                                let elevationValid = (h >= 6.8 && h <= 110.0) && islandMaskOk;
+                                    let isForest = true;
+                                    let biomeMatch = bName.includes('Jungle');
+                                    let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                    
+                                    // Jungle trees spawn all the way up the canopy hills!
+                                    let elevationValid = (h >= 6.8 && h <= 110.0) && islandMaskOk;
 
-                                if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
-                                    let cx = Math.floor(nx / TREE_CELL_SIZE);
-                                    let cz = Math.floor(nz / TREE_CELL_SIZE);
-                                    let tooClose = false;
-                                    for (let dx = -1; dx <= 1 && !tooClose; dx++) {
-                                        for (let dz = -1; dz <= 1 && !tooClose; dz++) {
-                                            const ncx = (cx + dx + 32768) & 0xFFFF;
-                                            const ncz = (cz + dz + 32768) & 0xFFFF;
-                                            let neighbor = treeGrid.get((ncx << 16) | ncz);
-                                            if (neighbor) {
-                                                if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 36) tooClose = true;
+                                    if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
+                                        let cx = Math.floor(nx / TREE_CELL_SIZE);
+                                        let cz = Math.floor(nz / TREE_CELL_SIZE);
+                                        let tooClose = false;
+                                        for (let dx = -1; dx <= 1 && !tooClose; dx++) {
+                                            for (let dz = -1; dz <= 1 && !tooClose; dz++) {
+                                                const ncx = (cx + dx + 32768) & 0xFFFF;
+                                                const ncz = (cz + dz + 32768) & 0xFFFF;
+                                                let neighbor = treeGrid.get((ncx << 16) | ncz);
+                                                if (neighbor) {
+                                                    if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 36) tooClose = true;
+                                                }
                                             }
                                         }
+                                        if (!tooClose) valid = true;
                                     }
-                                    if (!tooClose) valid = true;
+                                    attempts++;
                                 }
-                                attempts++;
                             }
 
                             if (valid) {
@@ -3107,6 +3151,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         firstPart.getMatrixAt(i, dummy.matrix);
                         dummy.position.setFromMatrixPosition(dummy.matrix);
 
+                        // Optimization: if already despawned and no trees can spawn nearby, skip completely!
+                        if (dummy.position.y < -500 && !treesPossibleNearby) {
+                            continue;
+                        }
+
                         if (Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
                             if (dummy.position.y > 0) {
                                 treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
@@ -3116,34 +3165,38 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             let nx, nz, h, pathVal, bName = '';
                             let attempts = 0;
 
-                            while(!valid && attempts < 25) {
-                                nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                h = getWorldHeight(nx, nz);
-                                pathVal = getPathStrength(nx, nz);
-                                bName = getBiomeAt(nx, nz).name;
+                            if (treesPossibleNearby) {
+                                while(!valid && attempts < 25) {
+                                    nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                    nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                    h = getWorldHeight(nx, nz);
+                                    pathVal = getPathStrength(nx, nz);
+                                    bName = getBiomeAt(nx, nz).name;
 
-                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                                // Water edge elevation range: strictly near water level (6.1m to 12.0m)
-                                let elevationValid = (h >= 6.1 && h <= 12.0) && islandMaskOk;
+                                    let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                    // Water edge elevation range: strictly near water level (6.1m to 12.0m)
+                                    let elevationValid = (h >= 6.1 && h <= 12.0) && islandMaskOk;
+                                    // Palm trees don't belong in Ghibli Land
+                                    let biomeAllowed = !bName.includes('Ghibli Land');
 
-                                if (elevationValid && pathVal < 0.20 && isTreeZone(nx, nz)) {
-                                    let cx = Math.floor(nx / TREE_CELL_SIZE);
-                                    let cz = Math.floor(nz / TREE_CELL_SIZE);
-                                    let tooClose = false;
-                                    for (let dx = -1; dx <= 1 && !tooClose; dx++) {
-                                        for (let dz = -1; dz <= 1 && !tooClose; dz++) {
-                                            const ncx = (cx + dx + 32768) & 0xFFFF;
-                                            const ncz = (cz + dz + 32768) & 0xFFFF;
-                                            let neighbor = treeGrid.get((ncx << 16) | ncz);
-                                            if (neighbor) {
-                                                if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 25) tooClose = true;
+                                    if (elevationValid && biomeAllowed && pathVal < 0.20 && isTreeZone(nx, nz)) {
+                                        let cx = Math.floor(nx / TREE_CELL_SIZE);
+                                        let cz = Math.floor(nz / TREE_CELL_SIZE);
+                                        let tooClose = false;
+                                        for (let dx = -1; dx <= 1 && !tooClose; dx++) {
+                                            for (let dz = -1; dz <= 1 && !tooClose; dz++) {
+                                                const ncx = (cx + dx + 32768) & 0xFFFF;
+                                                const ncz = (cz + dz + 32768) & 0xFFFF;
+                                                let neighbor = treeGrid.get((ncx << 16) | ncz);
+                                                if (neighbor) {
+                                                    if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 25) tooClose = true;
+                                                }
                                             }
                                         }
+                                        if (!tooClose) valid = true;
                                     }
-                                    if (!tooClose) valid = true;
+                                    attempts++;
                                 }
-                                attempts++;
                             }
 
                             if (valid) {
@@ -3193,6 +3246,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     instBB.getMatrixAt(i, dummy.matrix);
                     dummy.position.setFromMatrixPosition(dummy.matrix);
 
+                    // Optimization: if already despawned and no trees can spawn nearby, skip completely!
+                    if (dummy.position.y < -500 && !treesPossibleNearby) {
+                        continue;
+                    }
+
                     const dX = dummy.position.x - focusX;
                     const dZ = dummy.position.z - focusZ;
                     const dSq = dX * dX + dZ * dZ;
@@ -3203,7 +3261,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         let nx, nz, h, bName = '';
                         let attempts = 0;
 
-                        if (!(playerInJungle && bbIdx === 0)) {
+                        if (treesPossibleNearby && !(playerInJungle && bbIdx === 0)) {
                             while(!valid && attempts < 15) {
                                 const ang = Math.random() * Math.PI * 2.0;
                                 const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
