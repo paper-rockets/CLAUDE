@@ -2,13 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// Tree presets definition
 export const TREE_PRESETS = [
     {
         key: 'pine_ultra_fast',
         name: 'Pine (Ultra Fast)',
         glbPath: 'assets/Pine_ultra_fast.glb',
-        billboardPath: 'assets/tree_billboard_1.png',
+        billboardPath: 'assets/tree_billboard_pine_1_norm.png',
         targetHeight: 22.0,
         baseColorHex: '#52c439'
     },
@@ -16,55 +15,15 @@ export const TREE_PRESETS = [
         key: 'pine_1_ultra_fast',
         name: 'Pine Alt (Ultra Fast 1)',
         glbPath: 'assets/Pine_1_ultra_fast.glb',
-        billboardPath: 'assets/tree_billboard_2.png',
+        billboardPath: 'assets/tree_billboard_pine_2.png',
         targetHeight: 22.0,
         baseColorHex: '#2ea84b'
-    },
-    {
-        key: 'pine_crystal',
-        name: 'Pine Crystal',
-        glbPath: 'assets/Pine_Crystal.glb',
-        billboardPath: 'assets/pine light.png',
-        targetHeight: 24.0,
-        baseColorHex: '#44c838'
-    },
-    {
-        key: 'tree_oak1',
-        name: 'Oak 1',
-        glbPath: 'assets/tree_oak1.glb',
-        billboardPath: 'assets/tree_billboard_3.png',
-        targetHeight: 18.0,
-        baseColorHex: '#64d848'
-    },
-    {
-        key: 'tree_oak2',
-        name: 'Oak 2',
-        glbPath: 'assets/tree_oak2.glb',
-        billboardPath: 'assets/tree_billboard_4.png',
-        targetHeight: 18.0,
-        baseColorHex: '#38b000'
-    },
-    {
-        key: 'tree_oak3',
-        name: 'Oak 3',
-        glbPath: 'assets/tree_oak3.glb',
-        billboardPath: 'assets/tree_billboard_1.png',
-        targetHeight: 18.0,
-        baseColorHex: '#52c439'
     },
     {
         key: 'normal_tree_5',
         name: 'Normal Tree 5',
         glbPath: 'assets/NormalTree_5.glb',
-        billboardPath: 'assets/tree_billboard_2.png',
-        targetHeight: 20.0,
-        baseColorHex: '#2ea84b'
-    },
-    {
-        key: 'palm1_var5',
-        name: 'Palm 1 VAR5',
-        glbPath: 'assets/Palm1_VAR5/Palm1_VAR5.glb',
-        billboardPath: 'assets/Palm1_VAR5/preview.png',
+        billboardPath: 'assets/tree_billboard_pine_5.png',
         targetHeight: 20.0,
         baseColorHex: '#2ea84b'
     }
@@ -225,8 +184,8 @@ export function applyMatHSL(mat, origMat, hShift, sShift, lShift) {
     return applySingleMatHSL(mat, origMat || mat, hShift, sShift, lShift);
 }
 
-// Helper: Apply separate HSL shifts to HTML5 Canvas ImageData for Leaves and Bark
-export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatShift, leafLitShift, barkHueShift, barkSatShift, barkLitShift) {
+// Helper: Apply separate HSL shifts to HTML5 Canvas ImageData for Leaves
+export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatShift, leafLitShift) {
     const ctx = targetCanvas.getContext('2d');
     const width = sourceImg.naturalWidth || sourceImg.width || 512;
     const height = sourceImg.naturalHeight || sourceImg.height || 512;
@@ -237,8 +196,7 @@ export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatS
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(sourceImg, 0, 0, width, height);
 
-    if (leafHueShift === 0 && leafSatShift === 0 && leafLitShift === 0 &&
-        barkHueShift === 0 && barkSatShift === 0 && barkLitShift === 0) {
+    if (leafHueShift === 0 && leafSatShift === 0 && leafLitShift === 0) {
         return;
     }
 
@@ -248,10 +206,6 @@ export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatS
     const lhShift = leafHueShift / 360.0;
     const lsShift = leafSatShift / 100.0;
     const llShift = leafLitShift / 100.0;
-
-    const bhShift = barkHueShift / 360.0;
-    const bsShift = barkSatShift / 100.0;
-    const blShift = barkLitShift / 100.0;
 
     for (let i = 0; i < data.length; i += 4) {
         const alpha = data[i + 3];
@@ -267,15 +221,13 @@ export function applyHSLToCanvas(sourceImg, targetCanvas, leafHueShift, leafSatS
         // The green leaves in presets have hues in range [0.12, 0.55]
         const isLeaf = (h >= 0.12 && h <= 0.55);
 
-        const hShift = isLeaf ? lhShift : bhShift;
-        const sShift = isLeaf ? lsShift : bsShift;
-        const lShift = isLeaf ? llShift : blShift;
+        if (!isLeaf) continue; // Skip bark completely
 
-        let nh = (h + hShift) % 1.0;
+        let nh = (h + lhShift) % 1.0;
         if (nh < 0) nh += 1.0;
 
-        let ns = Math.max(0.0, Math.min(1.0, s + sShift));
-        let nl = Math.max(0.0, Math.min(1.0, l + lShift));
+        let ns = Math.max(0.0, Math.min(1.0, s + lsShift));
+        let nl = Math.max(0.0, Math.min(1.0, l + llShift));
 
         const [nr, ng, nb] = hslToRgb(nh, ns, nl);
 
@@ -319,9 +271,6 @@ export class TreeBillboardEditor {
                     leafHueShift: 0,
                     leafSatShift: 0,
                     leafLitShift: 0,
-                    barkHueShift: 0,
-                    barkSatShift: 0,
-                    barkLitShift: 0,
                     colorHex: preset.baseColorHex,
                     colorObj: defaultColor.clone(),
                     isDefault: true
@@ -417,6 +366,51 @@ export class TreeBillboardEditor {
                 margin-bottom: 15px;
                 outline: none;
                 cursor: pointer;
+            }
+            .tbe-preset-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 8px;
+                margin-bottom: 15px;
+                max-height: 180px;
+                overflow-y: auto;
+                padding-right: 4px;
+            }
+            .tbe-preset-grid::-webkit-scrollbar { width: 6px; }
+            .tbe-preset-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 4px; }
+            .tbe-preset-item {
+                aspect-ratio: 1;
+                background-size: cover;
+                background-position: center;
+                background-color: rgba(255,255,255,0.1);
+                border: 2px solid transparent;
+                border-radius: 6px;
+                cursor: pointer;
+                transition: transform 0.1s, border-color 0.1s;
+                position: relative;
+            }
+            .tbe-preset-item:hover {
+                transform: scale(1.05);
+                border-color: rgba(255,255,255,0.5);
+                z-index: 10;
+            }
+            .tbe-preset-item.active {
+                border-color: #00e5ff;
+            }
+            .tbe-preset-name {
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: rgba(0,0,0,0.7);
+                font-size: 9px;
+                text-align: center;
+                padding: 2px 0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
             }
             .tbe-box {
                 border: 1px solid rgba(255,255,255,0.1);
@@ -538,13 +532,11 @@ export class TreeBillboardEditor {
                 <button id="tbe-close-btn">[X]</button>
             </div>
 
-            <label class="tbe-label">&gt; SELECT_BASE_TREE_GLB:</label>
-            <select id="tbe-tree-select" class="tbe-select">
-                ${TREE_PRESETS.map(p => `<option value="${p.key}">${p.name}</option>`).join('')}
-            </select>
+            <label class="tbe-label">&gt; SELECT BASE TREE:</label>
+            <div id="tbe-preset-grid" class="tbe-preset-grid"></div>
 
             <div class="tbe-box">
-                <span class="tbe-label">&gt; LEAVES_COLOR_SHIFT (HSL):</span>
+                <span class="tbe-label">&gt; COLOR SHIFT (HSL):</span>
                 <div class="tbe-slider-row">
                     <span>Hue Shift:</span>
                     <input type="range" id="tbe-leaf-hue" class="tbe-slider" min="-180" max="180" value="0">
@@ -562,27 +554,8 @@ export class TreeBillboardEditor {
                 </div>
             </div>
 
-            <div class="tbe-box">
-                <span class="tbe-label">&gt; TRUNK_COLOR_SHIFT (HSL):</span>
-                <div class="tbe-slider-row">
-                    <span>Hue Shift:</span>
-                    <input type="range" id="tbe-bark-hue" class="tbe-slider" min="-180" max="180" value="0">
-                    <span id="tbe-bark-hue-val" class="tbe-val">0°</span>
-                </div>
-                <div class="tbe-slider-row">
-                    <span>Saturation:</span>
-                    <input type="range" id="tbe-bark-sat" class="tbe-slider" min="-100" max="100" value="0">
-                    <span id="tbe-bark-sat-val" class="tbe-val">0%</span>
-                </div>
-                <div class="tbe-slider-row">
-                    <span>Lightness:</span>
-                    <input type="range" id="tbe-bark-lit" class="tbe-slider" min="-100" max="100" value="0">
-                    <span id="tbe-bark-lit-val" class="tbe-val">0%</span>
-                </div>
-            </div>
-
             <div id="tbe-viewport">
-                <div id="tbe-viewport-legend">LEFT: 3D GLB MESH | RIGHT: 2D BILLBOARD CANVAS</div>
+                <div class="tbe-vp-label">LEFT: 3D GLB | RIGHT: 2D BILLBOARD</div>
             </div>
 
             <div class="tbe-btn-row">
@@ -600,7 +573,7 @@ export class TreeBillboardEditor {
         document.body.appendChild(panel);
 
         this.panelEl = panel;
-        this.selectEl = document.getElementById('tbe-tree-select');
+        this.presetGridEl = document.getElementById('tbe-preset-grid');
         this.leafHueInput = document.getElementById('tbe-leaf-hue');
         this.leafSatInput = document.getElementById('tbe-leaf-sat');
         this.leafLitInput = document.getElementById('tbe-leaf-lit');
@@ -608,41 +581,24 @@ export class TreeBillboardEditor {
         this.leafSatValEl = document.getElementById('tbe-leaf-sat-val');
         this.leafLitValEl = document.getElementById('tbe-leaf-lit-val');
 
-        this.barkHueInput = document.getElementById('tbe-bark-hue');
-        this.barkSatInput = document.getElementById('tbe-bark-sat');
-        this.barkLitInput = document.getElementById('tbe-bark-lit');
-        this.barkHueValEl = document.getElementById('tbe-bark-hue-val');
-        this.barkSatValEl = document.getElementById('tbe-bark-sat-val');
-        this.barkLitValEl = document.getElementById('tbe-bark-lit-val');
-
         this.varCountEl = document.getElementById('tbe-var-count');
         this.varListEl = document.getElementById('tbe-variants-list');
         this.viewportContainer = document.getElementById('tbe-viewport');
 
+        // Build preset grid
+        this.renderPresetGrid();
+
         // Event listeners
         document.getElementById('tbe-close-btn').onclick = () => this.togglePanel(false);
-
-        this.selectEl.onchange = (e) => {
-            this.currentPresetKey = e.target.value;
-            this.resetSliders();
-            this.loadCurrentPreset();
-        };
 
         const onSliderChange = () => {
             this.leafHueShift = parseInt(this.leafHueInput.value, 10);
             this.leafSatShift = parseInt(this.leafSatInput.value, 10);
             this.leafLitShift = parseInt(this.leafLitInput.value, 10);
-            this.barkHueShift = parseInt(this.barkHueInput.value, 10);
-            this.barkSatShift = parseInt(this.barkSatInput.value, 10);
-            this.barkLitShift = parseInt(this.barkLitInput.value, 10);
 
             this.leafHueValEl.textContent = `${this.leafHueShift}°`;
             this.leafSatValEl.textContent = `${this.leafSatShift}%`;
             this.leafLitValEl.textContent = `${this.leafLitShift}%`;
-
-            this.barkHueValEl.textContent = `${this.barkHueShift}°`;
-            this.barkSatValEl.textContent = `${this.barkSatShift}%`;
-            this.barkLitValEl.textContent = `${this.barkLitShift}%`;
 
             this.updatePreviews();
         };
@@ -650,9 +606,6 @@ export class TreeBillboardEditor {
         this.leafHueInput.oninput = onSliderChange;
         this.leafSatInput.oninput = onSliderChange;
         this.leafLitInput.oninput = onSliderChange;
-        this.barkHueInput.oninput = onSliderChange;
-        this.barkSatInput.oninput = onSliderChange;
-        this.barkLitInput.oninput = onSliderChange;
 
         document.getElementById('tbe-reset-btn').onclick = () => {
             this.resetSliders();
@@ -666,6 +619,23 @@ export class TreeBillboardEditor {
         document.getElementById('tbe-apply-btn').onclick = () => {
             this.notifyApplyCallbacks();
         };
+    }
+
+    renderPresetGrid() {
+        this.presetGridEl.innerHTML = '';
+        TREE_PRESETS.forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'tbe-preset-item' + (p.key === this.currentPresetKey ? ' active' : '');
+            el.style.backgroundImage = `url("${p.billboardPath}")`;
+            el.innerHTML = `<div class="tbe-preset-name">${p.name}</div>`;
+            el.onclick = () => {
+                this.currentPresetKey = p.key;
+                this.renderPresetGrid();
+                this.resetSliders();
+                this.loadCurrentPreset();
+            };
+            this.presetGridEl.appendChild(el);
+        });
     }
 
     initPreviewScene() {
@@ -726,7 +696,6 @@ export class TreeBillboardEditor {
         const animate = () => {
             requestAnimationFrame(animate);
             if (this.isPanelVisible) {
-                this.preview3DGroup.rotation.y += 0.005;
                 this.previewControls.update();
                 this.previewRenderer.render(this.previewScene, this.previewCamera);
             }
@@ -738,23 +707,14 @@ export class TreeBillboardEditor {
         this.leafHueShift = 0;
         this.leafSatShift = 0;
         this.leafLitShift = 0;
-        this.barkHueShift = 0;
-        this.barkSatShift = 0;
-        this.barkLitShift = 0;
 
         this.leafHueInput.value = 0;
         this.leafSatInput.value = 0;
         this.leafLitInput.value = 0;
-        this.barkHueInput.value = 0;
-        this.barkSatInput.value = 0;
-        this.barkLitInput.value = 0;
 
         this.leafHueValEl.textContent = '0°';
         this.leafSatValEl.textContent = '0%';
         this.leafLitValEl.textContent = '0%';
-        this.barkHueValEl.textContent = '0°';
-        this.barkSatValEl.textContent = '0%';
-        this.barkLitValEl.textContent = '0%';
     }
 
     togglePanel(visible) {
@@ -849,11 +809,13 @@ export class TreeBillboardEditor {
                     const matName = (origMat && origMat.name) ? origMat.name.toLowerCase() : '';
                     const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || childName.includes('bark') || childName.includes('trunk') || childName.includes('wood');
 
-                    const hShift = (isBark ? this.barkHueShift : this.leafHueShift) / 360.0;
-                    const sShift = (isBark ? this.barkSatShift : this.leafSatShift) / 100.0;
-                    const lShift = (isBark ? this.barkLitShift : this.leafLitShift) / 100.0;
+                    if (isBark) return; // Skip bark completely
+
+                    const hShift = this.leafHueShift / 360.0;
+                    const sShift = this.leafSatShift / 100.0;
+                    const lShift = this.leafLitShift / 100.0;
                     const preset = this.getCurrentPreset();
-                    const baseHex = isBark ? (preset.barkColorHex || '#6e4a32') : (preset.baseColorHex || '#52c439');
+                    const baseHex = preset.baseColorHex || '#52c439';
                     const baseC = new THREE.Color(baseHex);
                     const [bh, bs, bl] = rgbToHsl(baseC.r, baseC.g, baseC.b);
                     
@@ -890,8 +852,7 @@ export class TreeBillboardEditor {
             applyHSLToCanvas(
                 billboardImg, 
                 this.offscreenCanvas, 
-                this.leafHueShift, this.leafSatShift, this.leafLitShift,
-                this.barkHueShift, this.barkSatShift, this.barkLitShift
+                this.leafHueShift, this.leafSatShift, this.leafLitShift
             );
             if (this.billboardCanvasTexture) {
                 this.billboardCanvasTexture.needsUpdate = true;
@@ -925,9 +886,6 @@ export class TreeBillboardEditor {
             leafHueShift: this.leafHueShift,
             leafSatShift: this.leafSatShift,
             leafLitShift: this.leafLitShift,
-            barkHueShift: this.barkHueShift,
-            barkSatShift: this.barkSatShift,
-            barkLitShift: this.barkLitShift,
             colorHex: varColorHex,
             colorObj: varColorObj.clone(),
             isDefault: false
@@ -958,7 +916,7 @@ export class TreeBillboardEditor {
             item.innerHTML = `
                 <div>
                     <span class="tbe-swatch" style="background:${v.colorHex};"></span>
-                    <span>${v.name} ${v.isDefault ? '(Original)' : `[L: H:${v.leafHueShift}° S:${v.leafSatShift}% L:${v.leafLitShift}%] [B: H:${v.barkHueShift}° S:${v.barkSatShift}% L:${v.barkLitShift}%]`}</span>
+                    <span>${v.name} ${v.isDefault ? '(Original)' : `[H:${v.leafHueShift}° S:${v.leafSatShift}% L:${v.leafLitShift}%]`}</span>
                 </div>
                 ${!v.isDefault ? `<button class="tbe-del-btn" data-id="${v.id}">DEL</button>` : ''}
             `;
