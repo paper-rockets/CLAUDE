@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { LOW_GFX } from '../config/constants.js';
 import { renderer, scene, camera } from './Engine.js';
 
@@ -11,8 +12,8 @@ export const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
 const _bloomRes = LOW_GFX ? new THREE.Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5) : new THREE.Vector2(window.innerWidth, window.innerHeight);
-export const bloomPass = new UnrealBloomPass(_bloomRes, 0.8, 0.4, 1.5);
-bloomPass.enabled = !LOW_GFX;
+export const bloomPass = new UnrealBloomPass(_bloomRes, 0.30, 0.3, 0.82);
+bloomPass.enabled = false;
 composer.addPass(bloomPass);
 
 export const GhibliSummerShader = {
@@ -56,10 +57,10 @@ export const GodRaysShader = {
     uniforms: {
         tDiffuse: { value: null },
         uSunScreenPos: { value: new THREE.Vector2(0.5, 0.5) },
-        uIntensity: { value: 0.65 },
-        uDecay: { value: 0.927 },
-        uDensity: { value: 0.50 },
-        uWeight: { value: 0.75 },
+        uIntensity: { value: 0.15 },
+        uDecay: { value: 0.90 },
+        uDensity: { value: 0.40 },
+        uWeight: { value: 0.30 },
         uSunVisible: { value: 1.0 }
     },
     vertexShader: `
@@ -100,13 +101,13 @@ export const GodRaysShader = {
                 sampleUV -= deltaUV;
                 vec4 samp = texture2D(tDiffuse, sampleUV);
                 float lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
-                float bright = smoothstep(0.45, 0.85, lum);
+                float bright = smoothstep(0.70, 0.95, lum);
                 illumination += bright * currentWeight;
                 currentWeight *= uDecay;
             }
             
             float edgeFade = 1.0 - smoothstep(0.4, 1.5, dist);
-            vec3 rayColor = vec3(1.0, 0.9, 0.7) * illumination * uIntensity * edgeFade * uSunVisible;
+            vec3 rayColor = vec3(1.0, 0.95, 0.85) * illumination * uIntensity * edgeFade * uSunVisible;
             
             gl_FragColor = vec4(texel.rgb + rayColor, texel.a);
         }
@@ -120,6 +121,9 @@ composer.addPass(godRaysPass);
 export const summerPass = new ShaderPass(GhibliSummerShader);
 summerPass.enabled = false;
 composer.addPass(summerPass);
+
+export const outputPass = new OutputPass();
+composer.addPass(outputPass);
 
 export let isSummerFilterOn = false;
 

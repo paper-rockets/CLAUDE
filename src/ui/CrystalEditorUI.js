@@ -31,10 +31,18 @@ export class CrystalEditorUI {
                 this.matCrystal.userData.shader.uniforms.baseGlow.value = parseFloat(e.target.value);
             }
         });
-        getElem('c-nightGlowMult').addEventListener('input', (e) => {
+        getElem('c-nightGlow').addEventListener('input', (e) => {
             if (this.matCrystal.userData.shader) {
                 this.matCrystal.userData.shader.uniforms.nightGlowMult.value = parseFloat(e.target.value);
             }
         });
+
+        const closeBtn = getElem('c-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                const editor = getElem('crystal-editor');
+                if (editor) editor.style.display = 'none';
+            });
+        }
     }
 }

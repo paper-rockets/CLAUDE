@@ -18,16 +18,23 @@ export default {
         const spikeN2 = snoise(x * 0.013 - 500, z * 0.013 + 400);
         const spikeN3 = snoise(x * 0.009 + 700, z * 0.009 + 100);
 
-        const s1 = Math.max(0, spikeN1 - 0.60) / 0.40;
-        const s2 = Math.max(0, spikeN2 - 0.62) / 0.38;
-        const s3 = Math.max(0, spikeN3 - 0.64) / 0.36;
+        const s1 = Math.max(0, spikeN1 - 0.55) / 0.45;
+        const s2 = Math.max(0, spikeN2 - 0.57) / 0.43;
+        const s3 = Math.max(0, spikeN3 - 0.60) / 0.40;
 
-        const spires = (s1 * s1 * 90.0) + (s2 * s2 * 70.0) + (s3 * s3 * 55.0);
+        const smooth1 = s1 * s1 * (3.0 - 2.0 * s1);
+        const smooth2 = s2 * s2 * (3.0 - 2.0 * s2);
+        const smooth3 = s3 * s3 * (3.0 - 2.0 * s3);
+        const spires = (smooth1 * 50.0) + (smooth2 * 38.0) + (smooth3 * 28.0);
+
+        const ridgeN = Math.abs(snoise(x * 0.003 + 150, z * 0.003 - 250));
+        const ridgeFlow = Math.max(0, 1.0 - ridgeN * 4.0);
+        const ridges = ridgeFlow * ridgeFlow * 12.0;
 
         const lakeN = snoise(x * 0.006 + 900, z * 0.006 - 700);
         const lake = lakeN > 0.70 ? -(lakeN - 0.70) * 25.0 : 0.0;
 
-        return Math.max(-2.0, valley + spires + lake);
+        return Math.max(-2.0, valley + spires + ridges + lake);
     },
     getColor(h, x, z, snoise, tempColor, smoothstep) {
         const shimmer = snoise(x * 0.025 + 1000, z * 0.025 + 1000) * 0.5 + 0.5;

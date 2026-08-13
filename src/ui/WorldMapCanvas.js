@@ -69,10 +69,28 @@ export class WorldMapCanvas {
                     const sampleZ = pzStart + j * step;
                     
                     const data = this.getIslandData(sampleX, sampleZ);
+                    const bName = data.name || '';
+                    
+                    // Overgrown Ruin "Cage Jungle" Footprint
+                    const isRuinFootprint = (sampleZ >= 33000 && sampleZ <= 42000 && Math.abs(sampleX) < 14000 && data.height > 12.0);
+
                     if (data.mask === 0) {
                         this.mapBgCtx.fillStyle = '#1a4a8c';
+                    } else if (isRuinFootprint) {
+                        // Green-brown ancient stone ruin & overgrown vine footprint
+                        this.mapBgCtx.fillStyle = (data.height > 40) ? '#5c5446' : '#3d4d29';
                     } else if (data.height < 5) {
                         this.mapBgCtx.fillStyle = '#e6c875';
+                    } else if (bName.includes('Plains') || bName.includes('Vast')) {
+                        // Sunflower Field Clusters in Vast Plains
+                        const sfCluster = Math.sin(sampleX * 0.0004) * Math.cos(sampleZ * 0.0004);
+                        if (sfCluster > 0.15) {
+                            this.mapBgCtx.fillStyle = '#e6b800'; // Golden sunflower cluster
+                        } else {
+                            this.mapBgCtx.fillStyle = '#489c2d'; // Meadow grass
+                        }
+                    } else if (bName.includes('Jungle')) {
+                        this.mapBgCtx.fillStyle = '#1e5e2e'; // Jungle canopy
                     } else if (data.height < 60) {
                         this.mapBgCtx.fillStyle = '#4a8505';
                     } else if (data.height < 150) {

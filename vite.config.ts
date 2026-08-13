@@ -15,5 +15,14 @@ export default defineConfig(() => {
     server: {
       hmr: true,
     },
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          model_viewer: path.resolve(__dirname, 'model_viewer.html'),
+          tree_viewer: path.resolve(__dirname, 'tree_viewer.html'),
+        },
+      },
+    },
   };
 });

@@ -20,6 +20,12 @@ export class SettingsGUIWrapper {
             .onChange((val) => {
                 if (this.callbacks.onGfxChange) this.callbacks.onGfxChange(val);
             });
+            
+        gfxFolder.add(this.params, 'toonShading')
+            .name('Toon Shading')
+            .onChange((val) => {
+                if (this.callbacks.onToggleToon) this.callbacks.onToggleToon(val);
+            });
 
         // Atmosphere & Environment Folder
         const envFolder = this.gui.addFolder('🌤️ Atmosphere');

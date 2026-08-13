@@ -23,31 +23,35 @@ export default {
         const macroNoise = snoise(wx * 0.00035, wz * 0.00035);
         let baseHeight = macroNoise * 42.0 + 42.0;
 
-        const stepSize = 13.0;
+        const detailNoise = snoise(wx * 0.002, wz * 0.002) * 3.5
+            + snoise(wx * 0.005, wz * 0.005) * 1.2;
+        baseHeight += detailNoise;
+
+        const stepSize = 15.0;
         const terraceIdx = Math.floor(baseHeight / stepSize);
         const terraceFrac = (baseHeight % stepSize) / stepSize;
-        const tFrac = Math.max(0, Math.min(1, (terraceFrac - 0.28) / 0.44));
-        const smoothTerrace = terraceIdx * stepSize + Math.pow(tFrac * tFrac * (3 - 2 * tFrac), 2.2) * stepSize;
+        const tFrac = Math.max(0, Math.min(1, (terraceFrac - 0.18) / 0.64));
+        const smoothTerrace = terraceIdx * stepSize + Math.pow(tFrac * tFrac * (3 - 2 * tFrac), 1.6) * stepSize;
 
         const gorgeNoise = Math.abs(snoise(wx * 0.0011 + 150.0, wz * 0.0011 - 150.0));
         let gorgeCarve = 0;
-        if (gorgeNoise < 0.16) {
-            const t = 1.0 - (gorgeNoise / 0.16);
-            gorgeCarve = t * t * (3.0 - 2.0 * t) * 38.0;
+        if (gorgeNoise < 0.20) {
+            const t = 1.0 - (gorgeNoise / 0.20);
+            gorgeCarve = t * t * (3.0 - 2.0 * t) * 30.0;
         }
 
         const gulchNoise = Math.abs(snoise(wx * 0.0028 - 300.0, wz * 0.0028 + 300.0));
         let gulchCarve = 0;
-        if (gulchNoise < 0.10) {
-            const t2 = 1.0 - (gulchNoise / 0.10);
-            gulchCarve = t2 * t2 * (3.0 - 2.0 * t2) * 14.0;
+        if (gulchNoise < 0.12) {
+            const t2 = 1.0 - (gulchNoise / 0.12);
+            gulchCarve = t2 * t2 * (3.0 - 2.0 * t2) * 10.0;
         }
 
         const hoodooNoise = snoise(wx * 0.0042 + 400.0, wz * 0.0042 - 400.0);
         let hoodooHeight = 0;
-        if (hoodooNoise > 0.60) {
-            const hFactor = (hoodooNoise - 0.60) / 0.40;
-            hoodooHeight = hFactor * hFactor * 32.0;
+        if (hoodooNoise > 0.68) {
+            const hFactor = (hoodooNoise - 0.68) / 0.32;
+            hoodooHeight = hFactor * hFactor * 22.0;
         }
 
         let h = smoothTerrace - gorgeCarve - gulchCarve + hoodooHeight + 11.0;

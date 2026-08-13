@@ -1,15 +1,15 @@
 import * as THREE from 'three';
 
-const colorDeepWater    = new THREE.Color(0x0a5c5a);
-const colorShallowWater = new THREE.Color(0x1bb3a0);
-const colorSand         = new THREE.Color(0xdfbf7a);
-const colorJungleGrass  = new THREE.Color(0x38b000);
-const colorJungleMid    = new THREE.Color(0x1b8a4b);
-const colorJungleHigh   = new THREE.Color(0x106038);
-const colorJungleMoss   = new THREE.Color(0x70e000);
-const colorTealAccent   = new THREE.Color(0x00a896);
-const colorRock         = new THREE.Color(0x594f42);
-const colorSoil         = new THREE.Color(0x7a5033);
+const colorDeepWater    = new THREE.Color(0x126860); // Clear Tropical Emerald Water
+const colorShallowWater = new THREE.Color(0x24b89e); // Soft Cyan-Green Shore Water
+const colorSand         = new THREE.Color(0xe2c488); // Soft Golden Sand
+const colorJungleGrass  = new THREE.Color(0x32a428); // Vibrant Ghibli Lowland Grass
+const colorJungleMid    = new THREE.Color(0x228a42); // Rich Canopy Green
+const colorJungleHigh   = new THREE.Color(0x186835); // Deep Mountain Jungle
+const colorJungleMoss   = new THREE.Color(0x48b824); // Warm Sunlit Moss
+const colorTealAccent   = new THREE.Color(0x28985e); // Soft Lush Jade Accent
+const colorRock         = new THREE.Color(0x594f42); // Rainforest Karst Rock
+const colorSoil         = new THREE.Color(0x6e4a2e); // Rich Rainforest Soil
 
 export default {
     name: "🌴 Lush Jungle",
@@ -29,11 +29,11 @@ export default {
 
         const karstN = snoise(x * 0.0015 - 800, z * 0.0015 + 800);
         let karstElevation = 0;
-        if (karstN > 0.45) {
-            let k = (karstN - 0.45) / 0.30;
+        if (karstN > 0.50) {
+            let k = (karstN - 0.50) / 0.40;
             k = Math.max(0, Math.min(1, k));
             k = k * k * (3 - 2 * k);
-            karstElevation = k * 35.0;
+            karstElevation = k * 20.0;
         }
 
         let h = nBase + nHills + nDetail - riverCarve + karstElevation + 22.0;

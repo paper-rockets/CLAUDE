@@ -9,25 +9,33 @@ function smoothstep(min, max, value) {
     return x * x * (3 - 2 * x);
 }
 
+const ZONE_OCEAN = ZONES.find(z => z.name.includes('Ocean')) || ZONES[0];
+const ZONE_ARCHIPELAGO = ZONES.find(z => z.name.includes('Archipelago')) || ZONES[0];
+const ZONE_GHIBLI = ZONES.find(z => z.name.includes('Ghibli')) || ZONES[1];
+const ZONE_PLAINS = ZONES.find(z => z.name.includes('Golden')) || ZONES[2];
+const ZONE_MISTY = ZONES.find(z => z.name.includes('Misty')) || ZONES[3];
+const ZONE_JUNGLE = ZONES.find(z => z.name.includes('Jungle')) || ZONES[4];
+const ZONE_CRYSTAL = ZONES.find(z => z.name.includes('Crystal')) || ZONES[5];
+const ZONE_DESERT = ZONES.find(z => z.name.includes('Desert')) || ZONES[7];
+const ZONE_CANYON = ZONES.find(z => z.name.includes('Canyon')) || ZONES[8];
+const ZONE_NORTHPOLE = ZONES.find(z => z.name.includes('North Pole')) || ZONES[9];
+
 function getBiomeFromTempMoist(temp, moist) {
     if (temp < 0.33) {
-        return (moist > 0.50) 
-            ? (ZONES.find(z => z.name.includes('North Pole')) || ZONES[9]) 
-            : (ZONES.find(z => z.name.includes('Misty')) || ZONES[3]);
+        return (moist > 0.50) ? ZONE_NORTHPOLE : ZONE_MISTY;
     } else if (temp <= 0.66) {
-        return (moist > 0.50) 
-            ? (ZONES.find(z => z.name.includes('Ghibli')) || ZONES[1]) 
-            : (ZONES.find(z => z.name.includes('Golden')) || ZONES[2]);
+        return (moist > 0.50) ? ZONE_GHIBLI : ZONE_PLAINS;
     } else {
         if (moist > 0.50) {
-            return ZONES.find(z => z.name.includes('Jungle')) || ZONES[4];
+            return ZONE_JUNGLE;
         } else {
-            return (moist < 0.20) 
-                ? (ZONES.find(z => z.name.includes('Canyon')) || ZONES[8]) 
-                : (ZONES.find(z => z.name.includes('Desert')) || ZONES[7]);
+            return (moist < 0.20) ? ZONE_CANYON : ZONE_DESERT;
         }
     }
 }
+
+const _tempC1 = new THREE.Color();
+const _tempC2 = new THREE.Color();
 
 let _cacheIslandX = NaN, _cacheIslandZ = NaN, _cacheIslandResult = null;
 
@@ -50,23 +58,19 @@ export function computeIslandData(worldX, worldZ) {
     const moistRaw = snoise(wx / 180000.0 + 700.0, wz / 180000.0 + 700.0);
     const moist = moistRaw * 0.5 + 0.5;
 
-    const oceanZone = ZONES.find(z => z.name.includes('Ocean')) || ZONES[0];
-    const archipelagoZone = ZONES.find(z => z.name.includes('Archipelago')) || ZONES[0];
-    const crystalZone = ZONES.find(z => z.name.includes('Crystal')) || ZONES[5];
-
     if (elev < 0.52) {
-        return { mask: 0.0, b1: oceanZone, b2: oceanZone, w1: 1.0, w2: 0.0, mainBiome: oceanZone, elev, temp, moist };
+        return { mask: 0.0, b1: ZONE_OCEAN, b2: ZONE_OCEAN, w1: 1.0, w2: 0.0, mainBiome: ZONE_OCEAN, elev, temp, moist };
     }
 
     let mask = smoothstep(0.52, 0.56, elev);
 
     const isCrystalPlateau = (elev > 0.78) && (Math.abs(temp - 0.5) < 0.06) && (Math.abs(moist - 0.5) < 0.06);
     if (isCrystalPlateau) {
-        return { mask: 1.0, b1: crystalZone, b2: crystalZone, w1: 1.0, w2: 0.0, mainBiome: crystalZone, elev, temp, moist };
+        return { mask: 1.0, b1: ZONE_CRYSTAL, b2: ZONE_CRYSTAL, w1: 1.0, w2: 0.0, mainBiome: ZONE_CRYSTAL, elev, temp, moist };
     }
 
     if (elev < 0.56) {
-        const shoreBiome = (temp > 0.5) ? archipelagoZone : oceanZone;
+        const shoreBiome = (temp > 0.5) ? ZONE_ARCHIPELAGO : ZONE_OCEAN;
         const inlandBiome = getBiomeFromTempMoist(temp, moist);
         const blend = smoothstep(0.52, 0.56, elev);
         return {
@@ -112,7 +116,7 @@ export function getIslandData(worldX, worldZ) {
 
 export function getBiomeAt(worldX, worldZ) {
     const data = getIslandData(worldX, worldZ);
-    if (data.mask === 0) return ZONES.find(z => z.name.includes('Ocean')) || ZONES[0];
+    if (data.mask === 0) return ZONE_OCEAN;
     return data.mainBiome;
 }
 
@@ -144,18 +148,14 @@ export function getWorldHeight(worldX, worldZ) {
 export function getWorldColor(h, worldX, worldZ, targetColor) {
     const data = getIslandData(worldX, worldZ);
     if (data.mask === 0) {
-        const oceanZone = ZONES.find(z => z.name.includes('Ocean')) || ZONES[0];
-        oceanZone.module.getColor(h, worldX, worldZ, snoise, targetColor, smoothstep);
+        ZONE_OCEAN.module.getColor(h, worldX, worldZ, snoise, targetColor, smoothstep);
         return;
     }
 
-    const c1 = new THREE.Color();
-    const c2 = new THREE.Color();
-
-    data.b1.module.getColor(h, worldX, worldZ, snoise, c1, smoothstep);
-    data.b2.module.getColor(h, worldX, worldZ, snoise, c2, smoothstep);
+    data.b1.module.getColor(h, worldX, worldZ, snoise, _tempC1, smoothstep);
+    data.b2.module.getColor(h, worldX, worldZ, snoise, _tempC2, smoothstep);
 
     const smoothW = data.w2 * data.w2 * (3.0 - 2.0 * data.w2);
-    targetColor.copy(c1).lerp(c2, smoothW);
+    targetColor.copy(_tempC1).lerp(_tempC2, smoothW);
     return;
 }

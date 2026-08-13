@@ -52,8 +52,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     let isShadowsOn = !LOW_GFX;
     let isTreeShadowsOn = false;
     let shadowDistMode = LOW_GFX ? 'Close' : 'Med';
-    let isBloomOn = !LOW_GFX;
-    let isHD = !LOW_GFX;
+    let isBloomOn = false;
+    let isHD = true;
     let cameraZoomDist = 12.0;
     let currentFrame = 0;
     let logicTimer = 0;
@@ -366,6 +366,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         showTerrain: true,
         showWater: true,
         showTrees: true,
+        enableSkydome: false,
+        daySkydomeTexture: Math.random() > 0.5 ? '1' : '2',
+        nightSkydomeTexture: '2', // Default to 2 because it has the transparency mask
         showClouds: true,
         showCloudsRegular: true,
         showCloudsHigh: true,
@@ -379,6 +382,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         cloudCountHigh: LOW_GFX ? 0 : 24,
         cloudCountWispy: LOW_GFX ? 0 : 30,
         cloudCountMega: LOW_GFX ? 0 : 24,
+        showCloudsHorizon: true,
+        cloudCountHorizon: LOW_GFX ? 0 : 45,
+        cloudScaleHorizon: 1.0,
         showBirds: true,
         showFogPlanes: true,
         showCrystals: true,
@@ -683,9 +689,47 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     // Fullscreen removed from Game folder - now on the top bar!
 
     const envFolder = gui.addFolder('Environment');
+    envFolder.add(params, 'sceneFog').name('Global Fog').onChange(v => {
+        if (!v && typeof scene !== 'undefined' && scene.fog) {
+            scene.fog.near = 100000;
+            scene.fog.far = 200000;
+        }
+    });
     envFolder.add(params, 'wind').name('Wind').onChange(v => { if(isWindOn !== v) document.getElementById('wind-toggle').click(); });
-    envFolder.add(params, 'rain').name('Rain').onChange(v => { isRainOn = v; if(typeof rainSystem !== 'undefined') rainSystem.visible = v; });
-    envFolder.add(params, 'fogPlane').name('Ground Fog').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
+    const rainFolder = envFolder.addFolder('Rain Settings');
+    params.rainSize = 2.0;
+    params.rainIntensity = 1.0;
+    params.rainWindX = 1.0;
+    params.rainWindY = 0.5;
+    rainFolder.add(params, 'rain').name('Enable Rain').onChange(v => { isRainOn = v; });
+    rainFolder.add(params, 'rainSize', 0.5, 10.0).name('Drop Size');
+    rainFolder.add(params, 'rainIntensity', 0.1, 5.0).name('Intensity');
+    rainFolder.add(params, 'rainWindX', -5.0, 5.0).name('Wind X');
+    rainFolder.add(params, 'rainWindY', -5.0, 5.0).name('Wind Z');
+    window.biomeFogSettings = window.biomeFogSettings || {};
+    const fogFolder = envFolder.addFolder('Ground Fog');
+    fogFolder.add(params, 'fogPlane').name('Enable Fog').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
+    params.biomeFogOffset = 0;
+    const fogOffsetCtrl = fogFolder.add(params, 'biomeFogOffset', -50, 50).name('Biome Fog Offset').onChange(v => {
+        if (typeof playerGrp !== 'undefined') {
+            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+            window.biomeFogSettings[bName] = v;
+        }
+    });
+    // Add an interval to update the slider when biome changes
+    setInterval(() => {
+        if (typeof playerGrp !== 'undefined' && !fogOffsetCtrl.__onChangeBlocked) {
+            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+            const currentOffset = window.biomeFogSettings[bName] || 0;
+            if (params.biomeFogOffset !== currentOffset) {
+                params.biomeFogOffset = currentOffset;
+                fogOffsetCtrl.__onChangeBlocked = true; // Prevent triggering onChange and writing back
+                fogOffsetCtrl.updateDisplay();
+                fogOffsetCtrl.__onChangeBlocked = false;
+            }
+            fogFolder.title('Ground Fog (' + bName + ')');
+        }
+    }, 500);
     envFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
     envFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
     envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
@@ -950,7 +994,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             if (typeof instHighClouds !== 'undefined') instHighClouds.visible = false;
             if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = false;
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = false;
-            if (typeof skyMat !== 'undefined' && skyMat.uniforms && skyMat.uniforms.uEnableClouds) skyMat.uniforms.uEnableClouds.value = 0.0;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 0.0;
 
             if (typeof scene !== 'undefined' && scene.fog) { scene.fog.near = 100000; scene.fog.far = 200000; }
             if (typeof groundFog !== 'undefined') groundFog.visible = false;
@@ -981,7 +1025,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             if (typeof instHighClouds !== 'undefined') instHighClouds.visible = true;
             if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = true;
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
-            if (typeof skyMat !== 'undefined' && skyMat.uniforms && skyMat.uniforms.uEnableClouds) skyMat.uniforms.uEnableClouds.value = 1.0;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
 
             btn.style.background = '#ffaa00';
             btn.style.color = '#000';
@@ -1872,9 +1916,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
 
     billboardMat.onBeforeCompile = (shader) => {
+        shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
         shader.vertexShader = shader.vertexShader.replace(
             'void main() {',
             `
+            uniform float uTreeScale;
             attribute vec3 aLeafHslShift;
             attribute vec3 aBarkHslShift;
             varying vec3 vLeafHslShift;
@@ -1915,6 +1961,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             float scaleZ = length(vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2]));
             
             transformed = right_v * (position.x * scaleX) + vec3(0.0, position.y * scaleY, 0.0) + fwd_v * (position.z * scaleZ);
+            transformed *= uTreeScale;
             `
         ).replace(
             '#include <project_vertex>',
@@ -2316,6 +2363,109 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     }
 
     // ==========================================
+    // RAIN SYSTEM
+    // ==========================================
+    class RainSystem {
+        constructor(scene) {
+            this.scene = scene;
+            this.count = 30000;
+            const positions = new Float32Array(this.count * 3);
+            const rand = new Float32Array(this.count);
+            for(let i=0; i<this.count; i++) {
+                positions[i*3] = (Math.random() - 0.5) * 300;
+                positions[i*3+1] = Math.random() * 100;
+                positions[i*3+2] = (Math.random() - 0.5) * 300;
+                rand[i] = Math.random();
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
+            
+            this.uniforms = {
+                uTime: { value: 0 },
+                uCamPos: { value: new THREE.Vector3() },
+                uSize: { value: 2.0 },
+                uWind: { value: new THREE.Vector2(0, 0) },
+                uIntensity: { value: 1.0 },
+                uAngle: { value: 0.0 }
+            };
+            
+            const material = new THREE.ShaderMaterial({
+                uniforms: this.uniforms,
+                vertexShader: `
+                    uniform float uTime;
+                    uniform vec3 uCamPos;
+                    uniform float uSize;
+                    uniform vec2 uWind;
+                    
+                    attribute float aRand;
+                    varying float vRand;
+                    
+                    void main() {
+                        vRand = aRand;
+                        vec3 pos = position;
+                        
+                        float fallSpeed = 60.0 + aRand * 20.0;
+                        pos.y -= uTime * fallSpeed;
+                        pos.x += uTime * uWind.x * 20.0;
+                        pos.z += uTime * uWind.y * 20.0;
+                        
+                        pos.x = mod(pos.x - uCamPos.x + 150.0, 300.0) - 150.0 + uCamPos.x;
+                        pos.z = mod(pos.z - uCamPos.z + 150.0, 300.0) - 150.0 + uCamPos.z;
+                        pos.y = mod(pos.y - uCamPos.y + 20.0, 100.0) - 20.0 + uCamPos.y;
+                        
+                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                        gl_Position = projectionMatrix * mvPosition;
+                        gl_PointSize = uSize * (300.0 / -mvPosition.z) * (aRand * 0.5 + 0.5);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uIntensity;
+                    uniform float uAngle;
+                    varying float vRand;
+                    
+                    void main() {
+                        vec2 coord = gl_PointCoord - vec2(0.5);
+                        float s = sin(uAngle);
+                        float c = cos(uAngle);
+                        vec2 rotCoord = vec2(coord.x * c - coord.y * s, coord.x * s + coord.y * c);
+                        if (length(vec2(rotCoord.x * 6.0, rotCoord.y)) > 0.5) discard;
+                        // Darker, semi-transparent blueish rain drop
+                        gl_FragColor = vec4(0.4, 0.5, 0.7, 0.6 * uIntensity);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.NormalBlending
+            });
+            
+            this.mesh = new THREE.Points(geometry, material);
+            this.mesh.frustumCulled = false;
+            this.mesh.visible = false;
+            this.scene.add(this.mesh);
+        }
+        
+        update(time, cam, params) {
+            this.mesh.visible = params.rain;
+            if (!params.rain) return;
+            this.uniforms.uTime.value = time;
+            this.uniforms.uCamPos.value.copy(cam.position);
+            this.uniforms.uSize.value = params.rainSize || 2.0;
+            this.uniforms.uIntensity.value = params.rainIntensity || 1.0;
+            
+            let wx = 1.0; let wy = 0.5;
+            if (params.rainWindX !== undefined) {
+                wx = params.rainWindX;
+                wy = params.rainWindY;
+            }
+            this.uniforms.uWind.value.set(wx, wy);
+            this.uniforms.uAngle.value = Math.atan2(wx * 20.0, -70.0);
+        }
+    }
+    
+    window.rainSystem = new RainSystem(scene);
+
+    // ==========================================
     // VOLUMETRIC GROUND FOG (GOD RAYS)
     // ==========================================
     const fogGroup = new THREE.Group();
@@ -2369,13 +2519,13 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
              float yOffset = vWorldPos.y * 0.2;
              float n1 = snoise(uv + vec2(uTime * 0.03 + yOffset, uTime * 0.02));
              float n2 = snoise(uv * 2.0 - vec2(uTime * 0.02 - yOffset, -uTime * 0.03));
-             
              float noiseAlpha = smoothstep(-0.2, 0.8, n1 + n2 * 0.5);
              
              float dist = length(vWorldPos.xz - cameraPosition.xz);
              float edgeFade = 1.0 - smoothstep(1200.0, 1700.0, dist);
+             float nearFade = smoothstep(10.0, 50.0, dist);
              
-             gl_FragColor.a *= noiseAlpha * edgeFade;
+             gl_FragColor.a *= noiseAlpha * edgeFade * nearFade;
             `
         );
     };
@@ -2464,10 +2614,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     for (let i = 0; i < MAX_HIGH_CLOUD_COUNT; i++) instHighClouds.setMatrixAt(i, dummyInit.matrix);
     for (let i = 0; i < MAX_WISPY_CLOUD_COUNT; i++) instWispyClouds.setMatrixAt(i, dummyInit.matrix);
     for (let i = 0; i < MAX_MEGA_CLOUD_COUNT; i++) instMegaClouds.setMatrixAt(i, dummyInit.matrix);
-    instClouds.instanceMatrix.needsUpdate = true;
-    instHighClouds.instanceMatrix.needsUpdate = true;
-    instWispyClouds.instanceMatrix.needsUpdate = true;
-    instMegaClouds.instanceMatrix.needsUpdate = true;
+
+
     
     // Apply Pastel Colors to Clouds
     let pastelColors = [0xffd1dc, 0xd1ffd1, 0xd1e8ff, 0xfffdd1, 0xe8d1ff];
@@ -2492,7 +2640,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     // ==========================================
     // VOLUMETRIC TOON SKY CLOUDS (SpiralNoiseC Raymarched Sky)
     // ==========================================
-    const toonCloudGeo = new THREE.SphereGeometry(14000, 32, 16);
+    const toonCloudGeo = new THREE.SphereGeometry(22000, 32, 16);
     const toonCloudMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
         transparent: true,
@@ -2550,8 +2698,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 vec3 p = pos * 0.0012 + vec3(uTime * 0.015, 0.0, uTime * 0.008);
                 float noise = SpiralNoiseC(p);
                 float heightFalloff = smoothstep(100.0, 1200.0, pos.y) * smoothstep(5000.0, 2000.0, pos.y);
-                float coverage = (uCloudDensity * 0.5 - 0.2);
-                float cloudVal = noise * 0.35 + coverage + heightFalloff * 0.4;
+                float coverage = (uCloudDensity * 0.8 - 0.7); // Tweak coverage to create holes
+                float cloudVal = noise * 0.5 + coverage + heightFalloff * 0.6;
                 return clamp(cloudVal, 0.0, 1.0);
             }
 
@@ -2570,15 +2718,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 vec3 pos = cameraPosition + dir * rayT;
                 float cloudDensity = getCloud(pos);
 
-                if (cloudDensity < 0.05) {
+                if (cloudDensity < 0.01) {
                     discard;
                 }
 
-                float alpha = smoothstep(0.05, 0.45, cloudDensity);
+                float alpha = smoothstep(0.01, 0.45, cloudDensity);
                 float diff = clamp(dot(vec3(0.0, 1.0, 0.0), uSunDir), 0.5, 1.0);
                 
-                vec3 col = mix(uSkyColor, uCloudColor, alpha);
-                col = mix(col, uCloudColor * 1.15, diff * 0.3);
+                vec3 col = mix(uCloudColor, uCloudColor * 1.15, diff * 0.3);
 
                 gl_FragColor = vec4(col, alpha * 0.95);
             }
@@ -2589,6 +2736,54 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     scene.add(toonCloudDome);
     
 
+
+    // ==========================================
+    // SKYDOME
+    // ==========================================
+    let daySkyboxMesh;
+    let nightSkyboxMesh;
+    const skyboxTexLoader = new THREE.TextureLoader();
+
+    // Skydome Implementation
+    const skydomeGeo = new THREE.BoxGeometry(18000, 18000, 18000);
+    const dayFaces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+    const dayMats = dayFaces.map(face => {
+        const tex = skyboxTexLoader.load(`assets/skydome/day/${params.daySkydomeTexture}/${face}.png`);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return new THREE.MeshBasicMaterial({
+            map: tex,
+            side: THREE.BackSide,
+            fog: false,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.0
+        });
+    });
+    daySkyboxMesh = new THREE.Mesh(skydomeGeo, dayMats);
+    daySkyboxMesh.renderOrder = -1;
+    scene.add(daySkyboxMesh);
+
+    const nightFaces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+    const nightMats = nightFaces.map(face => {
+        const tex = skyboxTexLoader.load(`assets/skydome/night/${params.nightSkydomeTexture}/${face}.png`);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const matArgs = {
+            map: tex,
+            side: THREE.BackSide,
+            fog: false,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.0
+        };
+        if (face !== 'ny' && params.nightSkydomeTexture === '2') {
+            const trTex = skyboxTexLoader.load(`assets/skydome/night/${params.nightSkydomeTexture}/${face} tr.png`);
+            matArgs.alphaMap = trTex;
+        }
+        return new THREE.MeshBasicMaterial(matArgs);
+    });
+    nightSkyboxMesh = new THREE.Mesh(skydomeGeo, nightMats);
+    nightSkyboxMesh.renderOrder = -2;
+    scene.add(nightSkyboxMesh);
 
     // Initialize all to hidden
     const dummyMatrix = new THREE.Matrix4();
@@ -2898,6 +3093,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             instMegaClouds.setMatrixAt(i, dummy.matrix);
         }
         instMegaClouds.instanceMatrix.needsUpdate = true;
+
+        // Distant Horizon Clouds (Billboarded PNGs)
+
 
         // === TREE VISIBILITY: runs EVERY FRAME (not gated by shouldUpdateTerrain) ===
         {
@@ -3756,9 +3954,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             });
 
             mergedMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
                 shader.vertexShader = shader.vertexShader.replace(
                     'void main() {',
                     `
+                    uniform float uTreeScale;
                     attribute float aIsBark;
                     attribute vec3 aLeafHslShift;
                     attribute vec3 aBarkHslShift;
@@ -3841,6 +4041,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
                     
                     vColor.xyz = hsl2rgb_vert(hsl);
+                    `
+                );
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    `
+                    #include <begin_vertex>
+                    transformed *= uTreeScale;
                     `
                 );
             };
@@ -3927,9 +4135,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             // Add custom HSL shading to the fragment shader
             toonMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
                 shader.vertexShader = shader.vertexShader.replace(
                     'void main() {',
                     `
+                    uniform float uTreeScale;
                     attribute vec3 aLeafHslShift;
                     attribute vec3 aBarkHslShift;
                     varying vec3 vLeafHslShift;
@@ -4014,6 +4224,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         
                         diffuseColor.rgb = hsl2rgb_f(hsl);
                     }
+                    `
+                );
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    `
+                    #include <begin_vertex>
+                    transformed *= uTreeScale;
                     `
                 );
             };
@@ -4102,9 +4320,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             });
 
             toonMat.onBeforeCompile = (shader) => {
+                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
                 shader.vertexShader = shader.vertexShader.replace(
                     'void main() {',
                     `
+                    uniform float uTreeScale;
                     attribute vec3 aLeafHslShift;
                     attribute vec3 aBarkHslShift;
                     varying vec3 vLeafHslShift;
@@ -4188,6 +4408,14 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         
                         diffuseColor.rgb = hsl2rgb_f(hsl);
                     }
+                    `
+                );
+
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <begin_vertex>',
+                    `
+                    #include <begin_vertex>
+                    transformed *= uTreeScale;
                     `
                 );
             };
@@ -4561,6 +4789,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         opacity: 0.0 // Start invisible — lerps to target based on time-of-day
     });
     const starField = new THREE.Points(starGeometry, starMaterial);
+    starField.renderOrder = -3;
     starField.visible = false;
     scene.add(starField);
 
@@ -4652,6 +4881,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     function animate() {
         requestAnimationFrame(animate);
+        if (daySkyboxMesh && nightSkyboxMesh) {
+            camera.getWorldPosition(daySkyboxMesh.position);
+            camera.getWorldPosition(nightSkyboxMesh.position);
+        }
         if (params.showMap) _drawWorldMap();
         
         const nowAnimTime = performance.now();
@@ -4679,11 +4912,31 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 terrainUniforms.uSunDir.value.copy(dirLight.position).normalize();
             }
         }
+        if (typeof toonCloudMat !== 'undefined') {
+            toonCloudMat.uniforms.uTime.value = time;
+            if (typeof dirLight !== 'undefined') {
+                toonCloudMat.uniforms.uSunDir.value.copy(dirLight.position).normalize();
+            }
+        }
         if (typeof treeUniforms !== 'undefined') {
             treeUniforms.uPlayerPos.value.copy(playerGrp.position);
         }
+        if (window.rainSystem) {
+            const activeCam = isGodMode ? godCamera : camera;
+            window.rainSystem.update(time, activeCam, params);
+        }
+        if (typeof window.fogUniforms !== 'undefined' && window.fogGroup) {
+            window.fogUniforms.uTime.value = time;
+            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+            const biomeFogOffset = (window.biomeFogSettings && window.biomeFogSettings[bName]) ? window.biomeFogSettings[bName] : 0;
+            const currentGroundY = getWorldHeight(playerGrp.position.x, playerGrp.position.z);
+            // Smoothly interpolate fog group Y to prevent snapping, but snap X and Z to player
+            window.fogGroup.position.x = playerGrp.position.x;
+            window.fogGroup.position.z = playerGrp.position.z;
+            const targetFogY = currentGroundY - 15 + biomeFogOffset;
+            window.fogGroup.position.y += (targetFogY - window.fogGroup.position.y) * dt * 2.0;
+        }
 
-        
         currentFrame++;
         framesThisSecond++;
         const currentGroundY = getWorldHeight(playerGrp.position.x, playerGrp.position.z);
@@ -4710,7 +4963,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         // 3-Stage Lighting Engine Lerp
         const target = envConfigs[timePhase];
         const decayEnv = 1.0 - Math.exp(-2.0 * dt);
-        scene.background.lerp(tempColorTarget.setHex(target.bg), decayEnv);
+        if (scene.background && scene.background.isColor) {
+            scene.background.lerp(tempColorTarget.setHex(target.bg), decayEnv);
+        }
         scene.fog.color.lerp(tempColorTarget.setHex(target.fog), decayEnv);
         
         ambientLight.color.lerp(tempColorTarget.setHex(target.amb), decayEnv);
@@ -4720,6 +4975,39 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         starField.visible = starMaterial.opacity > 0.02;
         if (typeof playerGrp !== 'undefined') {
             starField.position.copy(playerGrp.position);
+        }
+
+        // Skydome Logic
+        if (params.enableSkydome) {
+            const targetDayOp = (timePhase === 2) ? 0.0 : 1.0;
+            const targetNightOp = (timePhase === 2) ? 1.0 : 0.0;
+            if (daySkyboxMesh) {
+                daySkyboxMesh.material.forEach(m => m.opacity += (targetDayOp - m.opacity) * decayEnv);
+            }
+            if (nightSkyboxMesh) {
+                nightSkyboxMesh.material.forEach(m => m.opacity += (targetNightOp - m.opacity) * decayEnv);
+            }
+            
+            if (typeof instClouds !== 'undefined') instClouds.visible = false;
+            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = false;
+            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = false;
+            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = false;
+            if (typeof instHorizonClouds1 !== 'undefined') instHorizonClouds1.visible = false;
+            if (typeof instHorizonClouds2 !== 'undefined') instHorizonClouds2.visible = false;
+            if (typeof instHorizonClouds3 !== 'undefined') instHorizonClouds3.visible = false;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 0.0;
+        } else {
+            if (daySkyboxMesh) daySkyboxMesh.material.forEach(m => m.opacity = 0.0);
+            if (nightSkyboxMesh) nightSkyboxMesh.material.forEach(m => m.opacity = 0.0);
+            
+            if (typeof instClouds !== 'undefined') instClouds.visible = params.showClouds && params.showCloudsRegular;
+            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = params.showClouds && params.showCloudsHigh;
+            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = params.showClouds && params.showCloudsWispy;
+            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = params.showClouds && params.showCloudsMega;
+            if (typeof instHorizonClouds1 !== 'undefined') instHorizonClouds1.visible = params.showCloudsHorizon;
+            if (typeof instHorizonClouds2 !== 'undefined') instHorizonClouds2.visible = params.showCloudsHorizon;
+            if (typeof instHorizonClouds3 !== 'undefined') instHorizonClouds3.visible = params.showCloudsHorizon;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = params.showClouds ? 1.0 : 0.0;
         }
 
 
@@ -5357,6 +5645,31 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         });
 
         const atmoFolder = gui.addFolder('Atmosphere');
+        atmoFolder.add(params, 'enableSkydome').name('Enable Skydome');
+        atmoFolder.add(params, 'daySkydomeTexture', ['1', '2']).name('Day Skydome').onChange(v => {
+            dayFaces.forEach((face, i) => {
+                const tex = skyboxTexLoader.load(`assets/skydome/day/${v}/${face}.png`);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                if (daySkyboxMesh) daySkyboxMesh.material[i].map = tex;
+            });
+        });
+        atmoFolder.add(params, 'nightSkydomeTexture', ['1', '2', '3']).name('Night Skydome').onChange(v => {
+            nightFaces.forEach((face, i) => {
+                const tex = skyboxTexLoader.load(`assets/skydome/night/${v}/${face}.png`);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                if (nightSkyboxMesh) {
+                    nightSkyboxMesh.material[i].map = tex;
+                    if (face !== 'ny' && v === '2') {
+                        nightSkyboxMesh.material[i].alphaMap = skyboxTexLoader.load(`assets/skydome/night/${v}/${face} tr.png`);
+                        nightSkyboxMesh.material[i].transparent = true;
+                    } else {
+                        nightSkyboxMesh.material[i].alphaMap = null;
+                        nightSkyboxMesh.material[i].transparent = true;
+                    }
+                    nightSkyboxMesh.material[i].needsUpdate = true;
+                }
+            });
+        });
         atmoFolder.addColor(atmoParams, 'skyColor').name('Sky Color').onChange(v => envConfigs[timePhase].bg = parseInt(v.replace('#',''), 16));
         atmoFolder.addColor(atmoParams, 'fogColor').name('Fog Color').onChange(v => envConfigs[timePhase].fog = parseInt(v.replace('#',''), 16));
         atmoFolder.addColor(atmoParams, 'ambColor').name('Ambient Light').onChange(v => envConfigs[timePhase].amb = parseInt(v.replace('#',''), 16));
@@ -5423,6 +5736,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             opHigh: 1.0,
             opWispy: 1.0,
             opMega: 1.0,
+            opHorizon: 1.0,
             enableClouds: true,
             density: 1.0,
             cloudScale: 1.0
@@ -5462,6 +5776,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v;
             if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v;
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v;
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                instHorizonClouds1.visible = v;
+                instHorizonClouds2.visible = v;
+                instHorizonClouds3.visible = v;
+            }
             cloudFolder.controllersRecursive().forEach(c => {
                 if (c.property && c.property.startsWith('showClouds')) c.updateDisplay();
             });
@@ -5484,6 +5803,15 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             if (typeof instMegaClouds !== 'undefined') {
                 instMegaClouds.count = Math.max(1, Math.min(MAX_MEGA_CLOUD_COUNT, Math.floor(params.cloudCountMega * v)));
                 if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
+            }
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                const count = Math.max(1, Math.min(MAX_HORIZON_CLOUD_COUNT, Math.floor(params.cloudCountHorizon * v)));
+                instHorizonClouds1.count = count;
+                instHorizonClouds2.count = count;
+                instHorizonClouds3.count = count;
+                if (instHorizonClouds1.instanceMatrix) instHorizonClouds1.instanceMatrix.needsUpdate = true;
+                if (instHorizonClouds2.instanceMatrix) instHorizonClouds2.instanceMatrix.needsUpdate = true;
+                if (instHorizonClouds3.instanceMatrix) instHorizonClouds3.instanceMatrix.needsUpdate = true;
             }
         });
 
@@ -5600,15 +5928,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             oldTreeColors[idx] = newHexVal;
         }
 
-        const treeFolder = envFolder.addFolder('Tree Editor');
+        const treeFolder = envFolder.addFolder('Global Tree Settings');
         treeFolder.add(params, 'treeScale', 0.5, 4.0).name('Tree Scale').onChange(v => treeUniforms.uTreeScale.value = v);
-        treeFolder.addColor(params, 'treeColor0').name('Color 1').onChange(v => updateTreeColorForIndex(0, v));
-        treeFolder.addColor(params, 'treeColor1').name('Color 2').onChange(v => updateTreeColorForIndex(1, v));
-        treeFolder.addColor(params, 'treeColor2').name('Color 3').onChange(v => updateTreeColorForIndex(2, v));
-        treeFolder.addColor(params, 'treeColor3').name('Color 4').onChange(v => updateTreeColorForIndex(3, v));
-        treeFolder.addColor(params, 'treeColor4').name('Color 5').onChange(v => updateTreeColorForIndex(4, v));
-        treeFolder.addColor(params, 'treeColor5').name('Color 6').onChange(v => updateTreeColorForIndex(5, v));
-        treeFolder.addColor(params, 'treeColor6').name('Color 7').onChange(v => updateTreeColorForIndex(6, v));
 
         // ==========================================
         // SYSTEM SETTINGS (SAVE/LOAD)
@@ -5635,7 +5956,24 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         // Load settings if they exist
         try {
             const savedData = localStorage.getItem('flightSettings');
-            if (savedData) gui.load(JSON.parse(savedData));
+            if (savedData) {
+                const parsed = JSON.parse(savedData);
+                
+                // FORCE Quality dropdown to match actual rendering quality
+                parsed.quality = LOW_GFX ? 'Low' : 'Regular';
+                
+                // If we are in Low Quality, force shadows off and HD on (user request)
+                if (LOW_GFX) {
+                    parsed.shadows = false;
+                    parsed.treeShadows = false;
+                    parsed.renderHD = true;
+                }
+                
+                gui.load(parsed);
+                
+                // Immediately save back to flightSettings so that next reload reads correct values
+                localStorage.setItem('flightSettings', JSON.stringify(gui.save()));
+            }
         } catch(e) {
             console.error('Failed to load settings', e);
         }

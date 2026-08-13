@@ -1,33 +1,47 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+const _flyFwd = new THREE.Vector3();
+const _flyRight = new THREE.Vector3();
+const _flyUp = new THREE.Vector3(0, 1, 0);
+
 export function setupGodMode(scene, cameraBase, renderer, playerGrp) {
-    const godCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 2.0, 30000);
+    // Huge far clipping plane (10M units) so zooming out and going high never clips terrain/world
+    const godCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 10000000);
     godCamera.position.set(0, 150, 400);
-    cameraBase.add(godCamera);
+
+    // CRITICAL: Attach godCamera directly to scene (world space), NOT cameraBase!
+    // Adding to cameraBase caused cameraBase slerp/lerp to distort OrbitControls during scrolling and orbiting.
+    scene.add(godCamera);
 
     const godControls = new OrbitControls(godCamera, renderer.domElement);
-    godControls.maxDistance = 25000;
-    godControls.maxPolarAngle = Math.PI / 2 + 0.1;
-    godControls.zoomSpeed = 3.0;
-    godControls.panSpeed = 2.0;
+    godControls.minDistance = 0.5;
+    godControls.maxDistance = 10000000; // Unlimited zoom out distance
+    godControls.minPolarAngle = 0.0001; // Allow looking straight down from high altitude
+    godControls.maxPolarAngle = Math.PI - 0.0001; // Full 180-degree vertical freedom
+    godControls.zoomSpeed = 1.6;
+    godControls.panSpeed = 1.6;
+    godControls.rotateSpeed = 1.0;
+    godControls.enableDamping = true;
+    godControls.dampingFactor = 0.08;
+    godControls.screenSpacePanning = true;
+    godControls.zoomToCursor = true; // Zoom directly towards cursor position on screen
     godControls.enabled = false;
     
-    // Restrict mouse actions to prevent mouse drag zooming (only scroll wheel will zoom)
     godControls.mouseButtons = {
         LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.NONE,
+        MIDDLE: THREE.MOUSE.DOLLY,
         RIGHT: THREE.MOUSE.PAN
     };
     
-    // Restrict touch actions to prevent pinch zoom if requested
     godControls.touches = {
         ONE: THREE.TOUCH.ROTATE,
-        TWO: THREE.TOUCH.PAN
+        TWO: THREE.TOUCH.DOLLY_PAN
     };
 
-    // We update the target initially
-    godControls.target.copy(playerGrp.position);
+    if (playerGrp) {
+        godControls.target.copy(playerGrp.position);
+    }
     godControls.update();
 
     return { godCamera, godControls };
@@ -35,10 +49,17 @@ export function setupGodMode(scene, cameraBase, renderer, playerGrp) {
 
 export function toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, updateWaterCamera) {
     if (isGodMode) {
-        godCamera.position.copy(camera.position);
-        godCamera.quaternion.copy(camera.quaternion);
+        // Copy exact world position and orientation of active player camera
+        camera.getWorldPosition(godCamera.position);
+        camera.getWorldQuaternion(godCamera.quaternion);
+
+        godCamera.far = 10000000;
+        godCamera.updateProjectionMatrix();
+
         godControls.enabled = true;
-        godControls.target.copy(playerGrp.position);
+        if (playerGrp) {
+            godControls.target.copy(playerGrp.position);
+        }
         godControls.update();
         if (updateWaterCamera) updateWaterCamera(godCamera);
     } else {
@@ -46,3 +67,40 @@ export function toggleGodMode(isGodMode, godCamera, camera, godControls, playerG
         if (updateWaterCamera) updateWaterCamera(camera);
     }
 }
+
+export function updateGodMode(dt, keys, godControls, godCamera) {
+    if (!godControls || !godControls.enabled) return;
+
+    // Process smooth OrbitControls damping and mouse/wheel updates
+    godControls.update();
+
+    if (!keys) return;
+
+    // Dynamically scale movement speed based on distance/height so panning high in the sky feels fast and responsive
+    const currentDist = godCamera.position.distanceTo(godControls.target);
+    const speedMult = Math.max(1.0, currentDist * 0.05, godCamera.position.y * 0.05);
+    const moveSpeed = (keys.shift ? 400.0 : 100.0) * speedMult * dt;
+
+    godCamera.getWorldDirection(_flyFwd);
+    _flyFwd.y = 0;
+    _flyFwd.normalize();
+
+    _flyRight.crossVectors(_flyFwd, _flyUp).normalize();
+
+    const moveDelta = new THREE.Vector3();
+
+    if (keys.w || keys.ArrowUp) moveDelta.addScaledVector(_flyFwd, moveSpeed);
+    if (keys.s || keys.ArrowDown) moveDelta.addScaledVector(_flyFwd, -moveSpeed);
+    if (keys.d || keys.ArrowRight) moveDelta.addScaledVector(_flyRight, moveSpeed);
+    if (keys.a || keys.ArrowLeft) moveDelta.addScaledVector(_flyRight, -moveSpeed);
+
+    // Vertical elevation controls: Space or E to move up, Q to move down
+    if (keys.space || keys.e) moveDelta.y += moveSpeed;
+    if (keys.q) moveDelta.y -= moveSpeed;
+
+    if (moveDelta.lengthSq() > 0) {
+        godCamera.position.add(moveDelta);
+        godControls.target.add(moveDelta);
+    }
+}
+

@@ -357,12 +357,14 @@ export class TreeBillboardEditor {
                 width: 420px;
                 max-height: 90vh;
                 overflow-y: auto;
-                background: rgba(8, 12, 10, 0.95);
-                border: 1px solid #00ff66;
-                box-shadow: 0 0 15px rgba(0, 255, 102, 0.15);
-                font-family: 'Courier New', Consolas, Monaco, monospace;
-                color: #00ff66;
-                padding: 12px;
+                background: rgba(0,0,0,0.85);
+                backdrop-filter: blur(8px);
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.2);
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+                font-family: sans-serif;
+                color: #fff;
+                padding: 15px;
                 box-sizing: border-box;
                 z-index: 2000;
                 display: none;
@@ -372,25 +374,26 @@ export class TreeBillboardEditor {
                 width: 6px;
             }
             #tbe-panel::-webkit-scrollbar-thumb {
-                background: #00ff66;
+                background: rgba(255,255,255,0.3);
+                border-radius: 4px;
             }
             #tbe-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                border-bottom: 1px solid #00ff66;
-                padding-bottom: 6px;
-                margin-bottom: 10px;
-                font-size: 13px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                padding-bottom: 10px;
+                margin-bottom: 15px;
+                font-size: 15px;
                 font-weight: bold;
-                letter-spacing: 1px;
+                color: #fff;
             }
             #tbe-close-btn {
                 background: transparent;
                 border: none;
-                color: #00ff66;
+                color: #aaa;
                 cursor: pointer;
-                font-family: monospace;
+                font-family: sans-serif;
                 font-size: 14px;
                 font-weight: bold;
             }
@@ -398,81 +401,84 @@ export class TreeBillboardEditor {
                 color: #ffffff;
             }
             .tbe-label {
-                font-size: 11px;
-                color: #88ffaa;
+                font-size: 12px;
+                color: #ccc;
                 display: block;
-                margin-bottom: 4px;
-                text-transform: uppercase;
+                margin-bottom: 6px;
             }
             .tbe-select {
                 width: 100%;
-                background: #000;
-                border: 1px solid #00ff66;
-                color: #00e5ff;
-                font-family: monospace;
+                background: rgba(255,255,255,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                color: #fff;
+                font-family: sans-serif;
                 padding: 6px;
-                margin-bottom: 10px;
+                border-radius: 4px;
+                margin-bottom: 15px;
                 outline: none;
                 cursor: pointer;
             }
             .tbe-box {
-                border: 1px dashed #225533;
-                padding: 8px;
-                margin-bottom: 10px;
-                background: rgba(0, 20, 10, 0.3);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 6px;
+                padding: 10px;
+                margin-bottom: 15px;
+                background: rgba(255,255,255,0.02);
             }
             .tbe-slider-row {
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                margin-bottom: 6px;
-                font-size: 11px;
+                margin-bottom: 8px;
+                font-size: 12px;
             }
             .tbe-slider-row span {
                 width: 80px;
+                color: #aaa;
             }
             .tbe-slider {
                 flex: 1;
-                accent-color: #00ff66;
                 cursor: pointer;
             }
             .tbe-val {
-                width: 45px;
+                width: 40px;
                 text-align: right;
-                color: #00e5ff;
+                color: #66ccff;
             }
             #tbe-viewport {
                 width: 100%;
-                height: 180px;
-                border: 1px solid #00ff66;
-                background: #040605;
-                margin-bottom: 10px;
+                height: 200px;
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 6px;
+                background: #000;
+                margin-bottom: 15px;
                 position: relative;
+                overflow: hidden;
             }
-            #tbe-viewport-legend {
+            #tbe-viewport canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+            .tbe-vp-label {
                 position: absolute;
-                bottom: 4px;
+                bottom: 6px;
                 left: 6px;
-                font-size: 9px;
-                color: #55aa77;
+                font-size: 10px;
+                color: rgba(255,255,255,0.5);
                 pointer-events: none;
             }
-            .tbe-btn-row {
-                display: flex;
-                gap: 6px;
-                margin-bottom: 10px;
-            }
             .tbe-btn {
-                background: #00ff66;
-                color: #000000;
+                background: #3388ff;
                 border: none;
-                padding: 7px 10px;
-                font-family: monospace;
-                font-size: 11px;
+                color: #fff;
+                padding: 8px 12px;
+                font-family: sans-serif;
                 font-weight: bold;
+                font-size: 12px;
                 cursor: pointer;
-                text-transform: uppercase;
-                transition: background 0.15s;
+                border-radius: 4px;
+                outline: none;
             }
             .tbe-btn:hover {
                 background: #66ffaa;
@@ -846,19 +852,28 @@ export class TreeBillboardEditor {
                     const hShift = (isBark ? this.barkHueShift : this.leafHueShift) / 360.0;
                     const sShift = (isBark ? this.barkSatShift : this.leafSatShift) / 100.0;
                     const lShift = (isBark ? this.barkLitShift : this.leafLitShift) / 100.0;
+                    const preset = this.getCurrentPreset();
+                    const baseHex = isBark ? (preset.barkColorHex || '#6e4a32') : (preset.baseColorHex || '#52c439');
+                    const baseC = new THREE.Color(baseHex);
+                    const [bh, bs, bl] = rgbToHsl(baseC.r, baseC.g, baseC.b);
+                    
+                    let nh = (bh + hShift) % 1.0; if (nh < 0) nh += 1.0;
+                    let ns = Math.max(0.0, Math.min(1.0, bs + sShift));
+                    let nl = Math.max(0.0, Math.min(1.0, bl + lShift));
 
-                    child.material = applyMatHSL(child.material, origMat, hShift, sShift, lShift);
+                    if (child.material.color && typeof child.material.color.setHSL === 'function') {
+                        child.material.color.setHSL(nh, ns, nl);
+                    }
 
                     if (child.geometry && child.geometry.attributes.color && child.userData.origVertexColors) {
                         const origColors = child.userData.origVertexColors;
                         const colors = child.geometry.attributes.color.array;
                         for (let i = 0; i < origColors.length; i += 3) {
                             const [h, s, l] = rgbToHsl(origColors[i], origColors[i + 1], origColors[i + 2]);
-                            let nh = (h + hShift) % 1.0;
-                            if (nh < 0) nh += 1.0;
-                            let ns = Math.max(0.0, Math.min(1.0, s + sShift));
-                            let nl = Math.max(0.0, Math.min(1.0, l + lShift));
-                            const [nr, ng, nb] = hslToRgb(nh, ns, nl);
+                            let vnh = (h + hShift) % 1.0; if (vnh < 0) vnh += 1.0;
+                            let vns = Math.max(0.0, Math.min(1.0, s + sShift));
+                            let vnl = Math.max(0.0, Math.min(1.0, l + lShift));
+                            const [nr, ng, nb] = hslToRgb(vnh, vns, vnl);
                             colors[i] = nr;
                             colors[i + 1] = ng;
                             colors[i + 2] = nb;

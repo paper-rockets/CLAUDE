@@ -43,6 +43,17 @@ export default {
             tempColor.lerpColors(colorMountainGrass, colorMountainRock, smoothstep(15.0, snowStart, h));
         } else {
             tempColor.lerpColors(colorMountainRock, colorSnow, smoothstep(snowStart, snowFull, h));
+            // Snow cap shimmer — crystalline glint on peaks (same technique as North Pole glacierGlint)
+            const snowGlint = snoise(x * 0.012 + 800.0, z * 0.012 - 600.0) * 0.5 + 0.5;
+            const snowCoverage = smoothstep(snowStart, snowFull, h);
+            if (snowGlint > 0.62 && snowCoverage > 0.3) {
+                tempColor.lerp(colorSnow, (snowGlint - 0.62) * snowCoverage * 0.6);
+            }
+            // Peak highlight glint — extra bright sparkle on highest snow
+            const peakGlint = snoise(x * 0.025 + 200.0, z * 0.025 - 400.0) * 0.5 + 0.5;
+            if (peakGlint > 0.70 && h > snowFull * 0.75) {
+                tempColor.lerp(new THREE.Color(0xf0f8ff), (peakGlint - 0.70) * 0.5);
+            }
         }
     }
 };

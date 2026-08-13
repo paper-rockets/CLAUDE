@@ -1,4 +1,4 @@
-﻿// Biome Manager & Adjacency Matrix
+// Biome Manager & Adjacency Matrix
 
 import terrainArch from './biomes/terrain-archipelago.js';
 import terrainGhibli from './biomes/terrain-ghibli.js';
@@ -14,7 +14,7 @@ import { snoise } from './Noise.js';
 export const ZONES = [
     { start:      0, end:   8000, module: terrainArch,     treesOk: true,  name: '🏝️ Archipelago',        archT: (t) => t * 2.0 },
     { start:   8000, end:  16000, module: terrainGhibli,   treesOk: true,  name: '🌲 Ghibli Land'         },
-    { start:  16000, end:  24000, module: terrainPlains,   treesOk: true,  name: '🌾 Golden Plains'        },
+    { start:  16000, end:  24000, module: terrainPlains,   treesOk: true,  name: '🌾 Vast Plains'          },
     { start:  24000, end:  40000, module: terrainMtn,      treesOk: false, name: '🏔️ Misty Mountains'     },
     { start:  40000, end:  70000, module: terrainJungle,   treesOk: true,  name: '🌴 Lush Jungle'          },
     { start:  70000, end: 104000, module: terrainCrystal,  treesOk: false, name: '💎 Crystal Land'         },
@@ -74,12 +74,12 @@ export function zoneWeights(worldZ) {
 export const BIOME_ADJACENCY = {
     '❄️ North Pole':       { temp: 'Cold',      neighbors: ['🏔️ Misty Mountains', '🌊 Open Ocean'] },
     '🏔️ Misty Mountains': { temp: 'Cold',      neighbors: ['❄️ North Pole', '🌲 Ghibli Land', '💎 Crystal Land'] },
-    '🌲 Ghibli Land':     { temp: 'Temperate', neighbors: ['🏔️ Misty Mountains', '🌾 Golden Plains', '🌴 Lush Jungle'] },
-    '🌾 Golden Plains':   { temp: 'Temperate', neighbors: ['🌲 Ghibli Land', '⛰️ Badlands Canyon', '🏜️ Desert Dunes'] },
+    '🌲 Ghibli Land':     { temp: 'Temperate', neighbors: ['🏔️ Misty Mountains', '🌾 Vast Plains', '🌴 Lush Jungle'] },
+    '🌾 Vast Plains':     { temp: 'Temperate', neighbors: ['🌲 Ghibli Land', '⛰️ Badlands Canyon', '🏜️ Desert Dunes'] },
     '🌴 Lush Jungle':      { temp: 'Hot',       neighbors: ['🌲 Ghibli Land', '🏝️ Archipelago', '💎 Crystal Land'] },
-    '⛰️ Badlands Canyon': { temp: 'Hot',       neighbors: ['🌾 Golden Plains', '🏜️ Desert Dunes'] },
-    '🏜️ Desert Dunes':    { temp: 'Hot',       neighbors: ['🌾 Golden Plains', '⛰️ Badlands Canyon', '💎 Crystal Land'] },
-    '🏝️ Archipelago':    { temp: 'Warm',      neighbors: ['🌴 Lush Jungle', '🌲 Ghibli Land', '🌾 Golden Plains'] },
+    '⛰️ Badlands Canyon': { temp: 'Hot',       neighbors: ['🌾 Vast Plains', '🏜️ Desert Dunes'] },
+    '🏜️ Desert Dunes':    { temp: 'Hot',       neighbors: ['🌾 Vast Plains', '⛰️ Badlands Canyon', '💎 Crystal Land'] },
+    '🏝️ Archipelago':    { temp: 'Warm',      neighbors: ['🌴 Lush Jungle', '🌲 Ghibli Land', '🌾 Vast Plains'] },
     '💎 Crystal Land':    { temp: 'Magical',   neighbors: ['🏔️ Misty Mountains', '🌴 Lush Jungle', '🏜️ Desert Dunes'] }
 };
 
