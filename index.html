@@ -107,11 +107,12 @@ console.error = function(...args) {
     <div id="biome-label" style="color: #ffe066; font-family: monospace; font-size: 13px; font-weight: bold; pointer-events: none; opacity: 0.9;"></div>
     <button id="time-toggle" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px; padding: 0;" title="Toggle Time">☀️</button>
     <button id="god-mode-btn" style="background: #ffaa00; border: none; color: #000; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px; margin-left: 6px; text-transform: uppercase;">👁️ God Mode</button>
+    <button id="ocean-toggle-btn" style="background: rgba(143, 233, 228, 0.25); border: 1px solid #8fe9e4; color: #8fe9e4; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px;">🌊 Ocean (O)</button>
     <button id="gui-toggle-btn" style="background: rgba(255,255,255,0.25); border: 1px solid rgba(255,255,255,0.5); color: white; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px;">⚙️ Settings (H)</button>
   </div>
 
   <!-- World Map Overlay -->
-  <div id="world-map" style="position: fixed; bottom: 20px; left: 20px; z-index: 15; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); border-radius: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.3); width: 230px; box-sizing: border-box; box-shadow: 0 8px 32px rgba(0,0,0,0.6); transition: all 0.25s ease-in-out;">
+  <div id="world-map" style="display: none; position: fixed; bottom: 20px; left: 20px; z-index: 15; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); border-radius: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.3); width: 230px; box-sizing: border-box; box-shadow: 0 8px 32px rgba(0,0,0,0.6); transition: all 0.25s ease-in-out;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
       <div id="map-title-text" style="color: #ffe066; font-family: monospace; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;">🗺️ RADAR MAP</div>
       <div style="display: flex; gap: 4px; align-items: center;">
@@ -196,6 +197,8 @@ console.error = function(...args) {
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
+      "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.webgpu.js",
+      "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.tsl.js",
       "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
     }
   }

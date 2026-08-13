@@ -9,8 +9,7 @@ import terrainCanyon from './world/biomes/terrain-canyon.js';
 import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northpole.js';
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
-import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
-import { waterShaderRegistry } from './waterShaders/index.js';
+import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 
 
@@ -28,8 +27,10 @@ import { BIOME_SKY_CONFIGS, WEATHER_PRESETS } from './environment/BiomeSkyConfig
 import { setupGodMode, toggleGodMode } from './physics/GodMode.js';
 
 
+import { MeshToonNodeMaterial, MeshStandardNodeMaterial, MeshBasicNodeMaterial, PointsNodeMaterial } from 'three/webgpu';
+import { uniform, texture, Fn, positionLocal, abs, positionGeometry, sin, step, positionWorld, normalWorld, cameraPosition, float, vec2, vec3, vec4, dot, fract, mix, pow, clamp, normalize, smoothstep as tslSmoothstep, attribute } from 'three/tsl';
 import { scene, camera, renderer, clock } from './core/Engine.js';
-import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposureEffect, initPostProcessingUI } from './core/PostProcessing.js';
+import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -39,14 +40,15 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
     import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
     import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
     import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
     import { ToonShaderManager } from './vfx/ToonShaderManager.js';
+    import { createTerrainMaterial } from './shaders/materials/TerrainNodeMaterial.js';
+    import { windSwayNode } from './shaders/materials/WindSwayNode.js';
+
+    // Wait for WebGPU Backend to initialize before doing ANY graph or material allocations
+    await renderer.init();
 
     let isWindOn = false;
     let isRainOn = false;
@@ -65,6 +67,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     let waterEditorFolder = null;
     let stdFolder = null;
     let terrainRes = TERRAIN_RES;
+    let playerGrp;
     
     let isGodMode = false;
     let godCamera = null;
@@ -77,8 +80,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     let WISPY_CLOUD_COUNT = LOW_GFX ? 0 : 30;
     let MEGA_CLOUD_COUNT = LOW_GFX ? 0 : 24;
 
-    // Water Materials Cache
-    const waterMaterialCache = {};
+
 
     const loadedCustomModels = [];
     let selectedModelIndex = -1;
@@ -318,32 +320,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
-        fogIntensity: 1.0,
+        fogIntensity: 0.2,
         terrainSmoothing: 0.0,
-        waterMode: 'realistic',
-        toggleRealistic: true,
-        toggleAnime: false,
-        toggleWindWaker: false,
-        toggleWindWakerDeep: false,
-        toggleToon06: false,
-        toggleToon07: false,
-        toggleToon08: false,
-        waterDeepColor: '#1a4a8c',
-        waterMidColor: '#4da9e8',
-        waterHighlight: '#ffffff',
-        waterScale: 0.005,
-        waterCellSpeed: 0.5,
-        waterOpacity: 1.0,
-        waterColor: '#4da9e8',
-        waterRoughness: 0.1,
-        waterMetalness: 0.2,
-        waterHeight: 2.4,
-        waterPatternScale: 1.0,
-        waterSpeed: 1.0,
-        waterBlend: 0.85,
-        waterFadeStart: 2000,
-        waterFadeEnd: 20000,
-        waterFadeDarken: 0.6,
         trails: isWindTrailsOn, lockSunToPlayer: true,
         shadows: isShadowsOn,
         treeShadows: isTreeShadowsOn,
@@ -392,8 +370,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         cloudScaleHorizon: 1.0,
         showBirds: true,
         showFogPlanes: true,
-        showCrystals: true,
-        showMap: true,
+        showCrystals: false,
+        showMap: false,
         showGUI: true,
         exposure: 1.8,
         shadeMode: 'original',
@@ -468,7 +446,6 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     });
     perfFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
         renderer.toneMappingExposure = v;
-        if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
     });
     perfFolder.add(params, 'terrainRes', ['256', '128', '64']).name('Terrain Res').onChange(v => {
         terrainRes = parseInt(v);
@@ -496,10 +473,10 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     });
     perfFolder.add(params, 'bloom').name('Bloom').onChange(v => {
         isBloomOn = v;
-        bloomEffect.blendMode.opacity.value = isBloomOn ? 1.0 : 0.0;
+        bloomPass.enabled = isBloomOn;
     });
-    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysEffect.blendMode.opacity.value = v ? 1.0 : 0.0; });
-    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysEffect.uniforms.get("uIntensity").value = v; });
+    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
+    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
 
 
     // Actions for GUI
@@ -662,97 +639,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         if (window.deleteSelectedModel) window.deleteSelectedModel();
     }}, 'deleteModel').name('🗑️ Delete Selected');
 
-    waterEditorFolder = editorFolder.addFolder('🌊 Water Editor');
-    const editorWaterDropdownController = waterEditorFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Water Shader').onChange(v => {
-        activateWaterShader(v, true);
-    });
-
-    // Common Opacity and Height controllers
-    waterEditorFolder.add(params, 'waterOpacity', 0, 1, 0.01).name('Opacity').onChange(v => {
-        if (waterMesh) {
-            waterMesh.material.opacity = v;
-            waterMesh.material.transparent = v < 1.0;
-            waterMesh.material.needsUpdate = true;
-        }
-        if (animeWaterSystem) {
-            animeWaterSystem.controls.opacity = v;
-        }
-    });
-
-    waterEditorFolder.add(params, 'waterHeight', -5, 20, 0.1).name('Height').onChange(v => {
-        if (waterMesh) waterMesh.position.y = v;
-        if (animeWaterSystem) {
-            if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
-                animeWaterSystem.waterFloor.mesh.position.y = v;
-            }
-            if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
-                animeWaterSystem.intersection.mesh.position.y = v;
-            }
-        }
-    });
-
-    // Sub-folder for standard shaders parameters
-    stdFolder = waterEditorFolder.addFolder('Standard Shader Settings');
-    stdFolder.addColor(params, 'waterColor').name('Color').onChange(hex => {
-        if (waterMesh) waterMesh.material.color.set(hex);
-    });
-    stdFolder.add(params, 'waterRoughness', 0, 1, 0.01).name('Roughness').onChange(v => {
-        if (waterMesh) waterMesh.material.roughness = v;
-    });
-    stdFolder.add(params, 'waterMetalness', 0, 1, 0.01).name('Metalness').onChange(v => {
-        if (waterMesh) waterMesh.material.metalness = v;
-    });
-    stdFolder.add(params, 'waterPatternScale', 0.05, 25.0, 0.05).name('Pattern Scale').onChange(v => {
-        waterUniforms.uPatternScale.value = v;
-    });
-    stdFolder.add(params, 'waterSpeed', 0, 5, 0.05).name('Speed').onChange(v => {
-        waterUniforms.uSpeedMult.value = v;
-    });
-    stdFolder.add(params, 'waterBlend', 0, 1, 0.01).name('Blend').onChange(v => {
-        waterUniforms.uBlendStrength.value = v;
-    });
-    stdFolder.add(params, 'waterFadeStart', 0, 10000, 100).name('Fade Start').onChange(v => {
-        waterUniforms.uFadeStart.value = v;
-    });
-    stdFolder.add(params, 'waterFadeEnd', 1000, 50000, 500).name('Fade End').onChange(v => {
-        waterUniforms.uFadeEnd.value = v;
-    });
-    stdFolder.add(params, 'waterFadeDarken', 0, 1, 0.01).name('Fade Darken').onChange(v => {
-        waterUniforms.uFadeDarken.value = v;
-    });
-    stdFolder.add({ reset: () => {
-        params.waterOpacity = 1.0; params.waterColor = '#4da9e8';
-        params.waterRoughness = 0.1; params.waterMetalness = 0.2;
-        params.waterHeight = 2.4; params.waterPatternScale = 1.0;
-        params.waterSpeed = 1.0; params.waterBlend = 0.85;
-        params.waterFadeStart = 2000; params.waterFadeEnd = 20000;
-        params.waterFadeDarken = 0.6;
-        waterUniforms.uPatternScale.value = 1.0;
-        waterUniforms.uSpeedMult.value = 1.0;
-        waterUniforms.uBlendStrength.value = 0.85;
-        waterUniforms.uFadeStart.value = 2000.0;
-        waterUniforms.uFadeEnd.value = 20000.0;
-        waterUniforms.uFadeDarken.value = 0.6;
-        if (waterMesh) {
-            waterMesh.material.opacity = 1.0;
-            waterMesh.material.transparent = false;
-            waterMesh.material.color.set('#4da9e8');
-            waterMesh.material.roughness = 0.1;
-            waterMesh.material.metalness = 0.2;
-            waterMesh.material.needsUpdate = true;
-            waterMesh.position.y = 2.4;
-        }
-        if (animeWaterSystem) {
-            animeWaterSystem.controls.opacity = 1.0;
-            if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
-                animeWaterSystem.waterFloor.mesh.position.y = 2.4;
-            }
-            if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
-                animeWaterSystem.intersection.mesh.position.y = 2.4;
-            }
-        }
-        waterEditorFolder.controllersRecursive().forEach(c => c.updateDisplay());
-    }}, 'reset').name('Reset Defaults');
+    // 🌊 Open Sea Ocean Modal Editor
+    editorFolder.add({ openOceanModal: () => { if (window.waterModalUI) window.waterModalUI.toggle(); } }, 'openOceanModal').name('🌊 Open Sea Ocean Modal (O)');
 
     // 🎨 Live Biome Terrain Color & Shimmer Editor - Moved below Water Editor
     const colorEditorFolder = editorFolder.addFolder('🎨 Terrain Color & Shimmer');
@@ -847,66 +735,19 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
     envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
 
+    envFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
+        .name('🎨 Shade Mode')
+        .onChange(v => {
+            toonShaderManager.apply(scene, v);
+            gui.controllersRecursive().forEach(c => { if (c.property === 'shadeMode') c.updateDisplay(); });
+        });
 
     const debugFolder = gui.addFolder('🔧 Debug Render');
     debugFolder.add(params, 'showTerrain').name('Terrain').onChange(v => { terrain.visible = v; });
 
-    // Water Master Toggle & Shader Toggles
-    const showWaterController = debugFolder.add(params, 'showWater').name('Water Master Toggle').onChange(v => {
-        activateWaterShader(params.waterMode, v);
+    debugFolder.add(params, 'showWater').name('🌊 Ocean Visible').onChange(v => {
+        if (animeWaterSystem) animeWaterSystem.setVisible(v);
     });
-
-    const waterShaderFolder = debugFolder.addFolder('🌊 Water Shaders');
-    let debugWaterDropdownController;
-    const shaderToggleControllers = {};
-
-    function activateWaterShader(mode, turnOn) {
-        if (!turnOn) {
-            params.showWater = false;
-            params.toggleRealistic = false;
-            params.toggleAnime = false;
-            params.toggleWindWaker = false;
-            params.toggleWindWakerDeep = false;
-            params.toggleToon06 = false;
-            params.toggleToon07 = false;
-            params.toggleToon08 = false;
-        } else {
-            params.showWater = true;
-            params.waterMode = mode;
-            params.toggleRealistic = (mode === 'realistic');
-            params.toggleAnime = (mode === 'anime');
-            params.toggleWindWaker = (mode === 'windWaker');
-            params.toggleWindWakerDeep = (mode === 'windWakerDeep');
-            params.toggleToon06 = (mode === 'toon06');
-            params.toggleToon07 = (mode === 'toon07');
-            params.toggleToon08 = (mode === 'toon08');
-        }
-
-        Object.values(shaderToggleControllers).forEach(c => { if(c && c.updateDisplay) c.updateDisplay(); });
-        if (showWaterController && showWaterController.updateDisplay) showWaterController.updateDisplay();
-        if (debugWaterDropdownController && debugWaterDropdownController.updateDisplay) debugWaterDropdownController.updateDisplay();
-        if (editorWaterDropdownController && editorWaterDropdownController.updateDisplay) editorWaterDropdownController.updateDisplay();
-
-        setWaterMaterialMode(params.waterMode);
-
-        // Show/hide folders dynamically inside water editor
-        if (params.waterMode === 'anime') {
-            if (stdFolder) stdFolder.hide();
-            if (animeWaterGUI) animeWaterGUI.show();
-        } else {
-            if (stdFolder) stdFolder.show();
-            if (animeWaterGUI) animeWaterGUI.hide();
-        }
-    }
-
-    shaderToggleControllers['realistic'] = waterShaderFolder.add(params, 'toggleRealistic').name('🌊 Realistic Waves').onChange(v => activateWaterShader('realistic', v));
-    shaderToggleControllers['anime'] = waterShaderFolder.add(params, 'toggleAnime').name('🎨 Anime Cel Water').onChange(v => activateWaterShader('anime', v));
-    shaderToggleControllers['windWaker'] = waterShaderFolder.add(params, 'toggleWindWaker').name('⛵ Wind Waker Ocean').onChange(v => activateWaterShader('windWaker', v));
-    shaderToggleControllers['windWakerDeep'] = waterShaderFolder.add(params, 'toggleWindWakerDeep').name('🌊 Wind Waker Deep').onChange(v => activateWaterShader('windWakerDeep', v));
-    shaderToggleControllers['toon06'] = waterShaderFolder.add(params, 'toggleToon06').name('✨ Toon FBM Step 06').onChange(v => activateWaterShader('toon06', v));
-    shaderToggleControllers['toon07'] = waterShaderFolder.add(params, 'toggleToon07').name('🌀 Toon Layered Ripple 07').onChange(v => activateWaterShader('toon07', v));
-    shaderToggleControllers['toon08'] = waterShaderFolder.add(params, 'toggleToon08').name('🌊 Toon Cloud Ocean 08').onChange(v => activateWaterShader('toon08', v));
-    debugWaterDropdownController = waterShaderFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07', 'toon08']).name('Active Mode').onChange(v => activateWaterShader(v, true));
 
     debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; if(typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = v; if(window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v); if(window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v); });
     function updateCloudScale(instMesh, newMulti, oldMulti) {
@@ -993,9 +834,16 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         guiToggleBtn.addEventListener('click', () => toggleGUI());
     }
 
+    const oceanToggleBtn = document.getElementById('ocean-toggle-btn');
+    if (oceanToggleBtn) {
+        oceanToggleBtn.addEventListener('click', () => {
+            if (window.waterModalUI) window.waterModalUI.toggle();
+        });
+    }
+
     window.addEventListener('keydown', (e) => {
-        if ((e.key === 'h' || e.key === 'H') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-            toggleGUI();
+        if ((e.key === 'o' || e.key === 'O') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            if (window.waterModalUI) window.waterModalUI.toggle();
         }
     });
 
@@ -1199,7 +1047,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
 
     initPostProcessingUI();
-    // (Engine & PostProcessing initialized via modules)
+    godRaysPass.uniforms.uIntensity.value = params.godRayIntensity;
     
     // 2. LIGHTING
     // ==========================================
@@ -1215,147 +1063,42 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     geoCrystal.scale(1, 3, 1);
     geoCrystal.computeVertexNormals();
 
-    const matCrystal = new THREE.MeshPhysicalMaterial({
+    const matCrystal = new MeshStandardNodeMaterial({
         roughness: 0.08,
         metalness: 0.15,
         transparent: true,
-        opacity: 1.02,
-        transmission: 0.0,
-        thickness: 10.0,
-        ior: 2.2,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.05,
-        sheen: 1.0,
-        sheenRoughness: 0.3,
-        sheenColor: new THREE.Color(0xffffff),
-        envMapIntensity: 1.5,
-        depthWrite: true,
-        depthTest: true,
-        fog: true,
+        opacity: 0.95,
         side: THREE.DoubleSide
     });
 
-    matCrystal.onBeforeCompile = (shader) => {
-        shader.uniforms.crystalGlow = { value: 0.0 };
-        shader.uniforms.baseGlow = { value: 1.8 };
-        shader.uniforms.nightGlowMult = { value: 1.5 };
-        shader.uniforms.uCustomColors = { value: [
-            new THREE.Color('#6a00ff'), new THREE.Color('#ff0066'),
-            new THREE.Color('#ff6600'), new THREE.Color('#ffcc00'),
-            new THREE.Color('#00ffaa'), new THREE.Color('#00aaff')
-        ]};
-        shader.uniforms.flyHue = { value: 0.0 };
-        shader.uniforms.flyContrast = { value: 1.0 };
-        shader.uniforms.uTime = { value: 0.0 };
-        matCrystal.userData.shader = shader;
+    const uCrystalGlow = uniform(0.0);
+    const uBaseGlow = uniform(1.8);
+    const uNightGlowMult = uniform(1.5);
 
-        shader.vertexShader = shader.vertexShader.replace(
-            '#include <common>',
-            `#include <common>
-             varying vec3 vPositionC;
-             varying vec3 vWorldNormalC;
-             varying vec3 vWorldPosC;`
-        ).replace(
-            '#include <begin_vertex>',
-            `#include <begin_vertex>
-             vPositionC = position;`
-        ).replace(
-            '#include <worldpos_vertex>',
-            `#include <worldpos_vertex>
-             #if defined( USE_INSTANCING )
-                 vWorldPosC = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
-                 vWorldNormalC = normalize((modelMatrix * instanceMatrix * vec4(normal, 0.0)).xyz);
-             #else
-                 vWorldPosC = (modelMatrix * vec4(transformed, 1.0)).xyz;
-                 vWorldNormalC = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-             #endif`
-        );
+    matCrystal.colorNode = Fn(() => {
+        const tC = clamp(positionLocal.y.add(3.0).div(6.0), 0.0, 1.0);
+        const col1 = vec3(0.42, 0.0, 1.0);
+        const col2 = vec3(1.0, 0.0, 0.4);
+        const col3 = vec3(0.0, 0.85, 1.0);
+        const grad = mix(mix(col1, col2, tC), col3, tC);
+        
+        // Fresnel rim glow
+        const viewDir = normalize(cameraPosition.sub(positionWorld));
+        const fresnel = pow(float(1.0).sub(abs(dot(viewDir, normalWorld))), 3.0);
+        return vec4(mix(grad, vec3(1.0), fresnel.mul(0.5)), 1.0);
+    })();
 
-        shader.fragmentShader = `
-            uniform float crystalGlow;
-            uniform float baseGlow;
-            uniform float nightGlowMult;
-            uniform float flyHue;
-            uniform float flyContrast;
-            uniform float uTime;
-            uniform vec3 uCustomColors[6];
-            ${shader.fragmentShader}
-        `.replace(
-            '#include <common>',
-            `#include <common>
-             varying vec3 vPositionC;
-             varying vec3 vWorldNormalC;
-             varying vec3 vWorldPosC;
-             vec3 rgb2hsv(vec3 c) {
-                 vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-                 vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-                 vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-                 float d = q.x - min(q.w, q.y);
-                 float e = 1.0e-10;
-                 return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-             }
-             vec3 hsv2rgb(vec3 c) {
-                 vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-                 vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-                 return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-             }`
-        ).replace(
-            '#include <color_fragment>',
-            `#include <color_fragment>
-             float tC = clamp((vPositionC.y + 3.0) / 6.0, 0.0, 1.0);
-
-             // Smooth cubic interpolation through 6 color stops
-             float segment = tC * 5.0;
-             int idx = int(floor(segment));
-             float frac = fract(segment);
-             float t = frac * frac * (3.0 - 2.0 * frac); // smoothstep
-
-             vec3 gradientColor;
-             if (idx == 0) gradientColor = mix(uCustomColors[0], uCustomColors[1], t);
-             else if (idx == 1) gradientColor = mix(uCustomColors[1], uCustomColors[2], t);
-             else if (idx == 2) gradientColor = mix(uCustomColors[2], uCustomColors[3], t);
-             else if (idx == 3) gradientColor = mix(uCustomColors[3], uCustomColors[4], t);
-             else gradientColor = mix(uCustomColors[4], uCustomColors[5], t);
-
-             // Hue Shift
-             if (flyHue > 0.0) {
-                 vec3 hsv = rgb2hsv(gradientColor);
-                 hsv.x = fract(hsv.x + flyHue);
-                 gradientColor = hsv2rgb(hsv);
-             }
-
-             // Contrast
-             if (flyContrast != 1.0) {
-                 gradientColor = pow(gradientColor, vec3(1.0 / flyContrast));
-             }
-
-             // Fresnel rim glow
-             vec3 viewDir = normalize(cameraPosition - vWorldPosC);
-             float fresnel = 1.0 - abs(dot(viewDir, vWorldNormalC));
-             fresnel = pow(fresnel, 3.0);
-             vec3 rimColor = mix(gradientColor, vec3(1.0), 0.6);
-             gradientColor = mix(gradientColor, rimColor, fresnel * 0.7);
-
-             // Vibrance boost
-             vec3 hsvFinal = rgb2hsv(gradientColor);
-             hsvFinal.y = min(hsvFinal.y * 1.4, 1.0);
-             hsvFinal.z = min(hsvFinal.z * 1.15, 1.0);
-             gradientColor = hsv2rgb(hsvFinal);
-
-             diffuseColor.rgb = gradientColor;
-            `
-        ).replace(
-            '#include <emissivemap_fragment>',
-            `#include <emissivemap_fragment>
-             float innerGlow = fresnel * 0.4 + 0.15;
-             totalEmissiveRadiance += diffuseColor.rgb * (baseGlow * innerGlow + crystalGlow * nightGlowMult);
-            `
-        );
-    };
+    matCrystal.emissiveNode = Fn(() => {
+        const viewDir = normalize(cameraPosition.sub(positionWorld));
+        const fresnel = pow(float(1.0).sub(abs(dot(viewDir, normalWorld))), 3.0);
+        const innerGlow = fresnel.mul(0.4).add(0.15);
+        return vec3(0.6, 0.2, 1.0).mul(uBaseGlow.mul(innerGlow).add(uCrystalGlow.mul(uNightGlowMult)));
+    })();
 
     const instCrystals = new THREE.InstancedMesh(geoCrystal, matCrystal, CRYSTAL_COUNT);
     instCrystals.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    instCrystals.frustumCulled = false; // Prevent crystals from vanishing when looking away from origin
+    instCrystals.frustumCulled = false;
+    instCrystals.visible = false;
     scene.add(instCrystals);
     
     // Position them far away initially so they don't pop in at 0,0,0
@@ -1406,7 +1149,6 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         }
     }
 
-    loadAssets();
 
     const dirLight = new THREE.DirectionalLight(0xfffaeb, 1.4); // warm bright sunlight
     dirLight.position.set(150, 200, 50);
@@ -1482,186 +1224,29 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     const sandNoiseMap = createSandNoiseTexture(256);
 
     const terrainUniforms = {
-        uTime: { value: 0 },
-        uSunDir: { value: new THREE.Vector3(0.3, 0.8, 0.5) },
-        uSandNoiseMap: { value: sandNoiseMap },
-        uShimmerMult: { value: 1.0 }
+        uTime: uniform(0),
+        uSunDir: uniform(new THREE.Vector3(0.3, 0.8, 0.5)),
+        uSandNoiseMap: texture(sandNoiseMap),
+        uShimmerMult: uniform(1.0)
     };
 
-    const terrainMat = new THREE.MeshStandardMaterial({ 
-        vertexColors: true, 
-        roughness: 0.85,
-        metalness: 0.05,
+    const terrainMat = createTerrainMaterial(
+        terrainUniforms.uTime,
+        terrainUniforms.uSunDir,
+        terrainUniforms.uSandNoiseMap,
+        terrainUniforms.uShimmerMult
+    );
+    const treeUniforms = {
+        uPlayerPos: uniform(new THREE.Vector3(0, 0, 0)),
+        uTreeScale: uniform(1.5)
+    };
+    
+    const matTree = new MeshToonNodeMaterial({
+        vertexColors: true,
+        gradientMap,
         dithering: true
     });
-    
-    // Shader injection for Journey Sand Shaders (glitter sparkles, dune rim glow, warm shadows)
-    terrainMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = terrainUniforms.uTime;
-        shader.uniforms.uSunDir = terrainUniforms.uSunDir;
-        shader.uniforms.uSandNoiseMap = terrainUniforms.uSandNoiseMap;
-        shader.uniforms.uShimmerMult = terrainUniforms.uShimmerMult;
-        
-        shader.vertexShader = `
-            attribute float aBiomeType;
-            varying float vBiomeType;
-            varying vec3 vWorldPos;
-            varying vec3 vViewPos;
-        ` + shader.vertexShader;
-        
-        shader.vertexShader = shader.vertexShader.replace(
-            `#include <worldpos_vertex>`,
-            `#include <worldpos_vertex>
-             vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-             vViewPos = - (modelViewMatrix * vec4(transformed, 1.0)).xyz;
-             vBiomeType = aBiomeType;`
-        );
-
-        shader.fragmentShader = `
-            uniform float uTime;
-            uniform vec3 uSunDir;
-            uniform float uShimmerMult;
-            uniform sampler2D uSandNoiseMap;
-            varying float vBiomeType;
-            varying vec3 vWorldPos;
-            varying vec3 vViewPos;
-
-            float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
-            }
-            float noise(vec2 p) {
-                vec2 i = floor(p);
-                vec2 f = fract(p);
-                vec2 u = f*f*(3.0-2.0*f);
-                return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
-                           mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
-            }
-            float fbm(vec2 p) {
-                float f = 0.0;
-                f += 0.5000 * noise(p); p = p * 2.02;
-                f += 0.2500 * noise(p); p = p * 2.03;
-                f += 0.1250 * noise(p);
-                return f;
-            }
-        ` + shader.fragmentShader;
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-            `#include <color_fragment>`,
-            `#include <color_fragment>
-            
-            // Realistic terrain macro-detail noise overlay
-            vec2 macroUV = vWorldPos.xz * 0.04;
-            float macroNoise = texture2D(uSandNoiseMap, macroUV).r;
-            float microNoise = texture2D(uSandNoiseMap, vWorldPos.xz * 0.15).g;
-            float detailBlend = (macroNoise * 0.6 + microNoise * 0.4) * 0.3 - 0.15;
-            
-            // Apply noise only to non-sand/non-snow (grass/dirt/rock) or globally
-            diffuseColor.rgb = clamp(diffuseColor.rgb + detailBlend, 0.0, 1.0);
-
-            // Animated Cloud Shadows using procedural noise
-            vec2 cloudUV = vWorldPos.xz * 0.0015 + uTime * 0.05;
-            float cloudNoiseVal = fbm(cloudUV);
-            float cloudShadow = smoothstep(0.35, 0.65, cloudNoiseVal) * 0.35;
-            diffuseColor.rgb *= (1.0 - cloudShadow);
-            `
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-            `#include <dithering_fragment>`,
-            `#include <dithering_fragment>
-            
-            vec3 viewDir = normalize(vViewPos);
-            vec3 norm = normalize(vNormal);
-            vec3 lightDir = normalize(uSunDir);
-            vec3 halfDir = normalize(lightDir + viewDir);
-            vec3 ref = reflect(-viewDir, norm);
-            
-            // 1. Detect Sand / Warm Dune Surface (explicit attribute)
-            float isSand = step(0.9, vBiomeType) * step(vBiomeType, 1.1);
-            
-            if (isSand > 0.1) {
-                // Dune Rim Lighting (Fresnel glow along grazing angles and dune ridges)
-                float rim = 1.0 - clamp(dot(norm, viewDir), 0.0, 1.0);
-                float rimStrength = pow(rim, 4.5) * 0.5;
-                vec3 rimGlow = vec3(1.0, 0.72, 0.38) * rimStrength;
-                
-                // Journey Sand Specular Glitter (Glitter grains sampling noise texture)
-                float mainSpec = clamp(dot(ref, halfDir), 0.0, 1.0);
-                mainSpec = pow(mainSpec, 20.0) * 4.5;
-
-                vec2 sandUV1 = vWorldPos.xz * 0.07 + uTime * 0.003;
-                vec2 sandUV2 = vWorldPos.xz * 0.18 - uTime * 0.006;
-                float textureGlitter = texture2D(uSandNoiseMap, sandUV1).r * 0.7 + texture2D(uSandNoiseMap, sandUV2).g * 0.5;
-                textureGlitter = pow(clamp(textureGlitter, 0.0, 1.0), 2.2);
-                mainSpec *= textureGlitter;
-
-                float rimSpec = pow(rim, 2.2) * textureGlitter * 2.5;
-                vec3 specColor = (mainSpec + rimSpec) * vec3(1.0, 0.82, 0.55) * uShimmerMult;
-                
-                // Apply Sand Shader Effects without stripe artifacts
-                gl_FragColor.rgb += (rimGlow + specColor) * isSand;
-            }
-
-            // 2. Detect Snow / North Pole Glacial Surface (explicit attribute)
-            float isSnow = step(1.9, vBiomeType) * step(vBiomeType, 2.1);
-            
-            if (isSnow > 0.1) {
-                // Glacial Rim Lighting (Crisp sky-blue rim highlight)
-                float snowRim = 1.0 - clamp(dot(norm, viewDir), 0.0, 1.0);
-                float snowRimStrength = pow(snowRim, 4.0) * 0.35;
-                vec3 snowRimGlow = vec3(0.65, 0.85, 1.0) * snowRimStrength;
-                
-                // Diamond Snow & Ice Specular Glitter (Fine Crystalline Sparkles)
-                float mainSnowSpec = clamp(dot(ref, halfDir), 0.0, 1.0);
-                mainSnowSpec = pow(mainSnowSpec, 18.0) * 4.0;
-
-                vec2 snowUV1 = vWorldPos.xz * 0.12 + uTime * 0.005;
-                vec2 snowUV2 = vWorldPos.xz * 0.23 - uTime * 0.008;
-                float snowGlitter = texture2D(uSandNoiseMap, snowUV1).r * 0.7 + texture2D(uSandNoiseMap, snowUV2).g * 0.55;
-                snowGlitter = pow(clamp(snowGlitter, 0.0, 1.0), 2.5);
-                mainSnowSpec *= snowGlitter;
-
-                float snowRimSpec = pow(snowRim, 2.2) * snowGlitter * 2.5;
-                vec3 snowSpecColor = (mainSnowSpec + snowRimSpec) * vec3(0.85, 0.95, 1.0) * 1.2 * uShimmerMult;
-                
-                // Apply Diamond Snow Shimmer Effects
-                gl_FragColor.rgb += (snowRimGlow + snowSpecColor) * isSnow;
-            }
-            `
-        );
-    };
-
-    const treeUniforms = {
-        uPlayerPos: { value: new THREE.Vector3(0, 0, 0) },
-        uTreeScale: { value: 1.5 }
-    };
-    
-    const matTree = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap, dithering: true });
-    matTree.onBeforeCompile = (shader) => {
-        shader.uniforms.uPlayerPos = treeUniforms.uPlayerPos;
-        shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
-        shader.uniforms.uTime = terrainUniforms.uTime;
-        
-        shader.vertexShader = `
-            uniform vec3 uPlayerPos;
-            uniform float uTreeScale;
-            uniform float uTime;
-            ${shader.vertexShader}
-        `.replace(
-            `#include <begin_vertex>`,
-            `
-            #include <begin_vertex>
-            transformed *= uTreeScale;
-            
-            // Wind Sway
-            vec4 worldPos = instanceMatrix * vec4(position, 1.0);
-            float sway = sin(uTime * 2.0 + worldPos.x * 0.05 + worldPos.z * 0.05) * 0.08;
-            float secondarySway = cos(uTime * 3.5 + worldPos.x * 0.1) * 0.03;
-            transformed.x += (sway + secondarySway) * max(0.0, position.y);
-            transformed.z += (sway + secondarySway) * max(0.0, position.y);
-            `
-        );
-    };
+    matTree.positionNode = windSwayNode(terrainUniforms.uTime, treeUniforms.uTreeScale);
 
 
 
@@ -2086,189 +1671,36 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     const billboardTex = texLoader.load('assets/tree_billboard_1.png');
     billboardTex.colorSpace = THREE.SRGBColorSpace;
 
-    const billboardMat = new THREE.MeshToonMaterial({
+    const billboardMat = new MeshToonNodeMaterial({
         map: billboardTex,
         alphaTest: 0.25,
         transparent: false,
         side: THREE.DoubleSide,
-        dithering: true,
-        gradientMap: gradientMap
+        dithering: true
     });
-
-    billboardMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
-        shader.vertexShader = shader.vertexShader.replace(
-            'void main() {',
-            `
-            uniform float uTreeScale;
-            attribute vec3 aLeafHslShift;
-            attribute vec3 aBarkHslShift;
-            varying vec3 vLeafHslShift;
-            varying vec3 vBarkHslShift;
-            void main() {
-                vLeafHslShift = aLeafHslShift;
-                vBarkHslShift = aBarkHslShift;
-            `
-        ).replace(
-            '#include <beginnormal_vertex>',
-            `
-            #include <beginnormal_vertex>
-            vec3 instancePos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-            vec3 worldInstPos = (modelMatrix * vec4(instancePos, 1.0)).xyz;
-            vec3 dirToCam = cameraPosition - worldInstPos;
-            dirToCam.y = 0.0;
-            float lenDir = length(dirToCam);
-            vec3 fwd = lenDir > 0.001 ? dirToCam / lenDir : vec3(0.0, 0.0, 1.0);
-            vec3 right = vec3(fwd.z, 0.0, -fwd.x);
-            
-            objectNormal = right * normal.x + vec3(0.0, normal.y, 0.0) + fwd * normal.z;
-            objectNormal = normalize(objectNormal);
-            `
-        ).replace(
-            '#include <begin_vertex>',
-            `
-            #include <begin_vertex>
-            vec3 instancePos_v = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-            vec3 worldInstPos_v = (modelMatrix * vec4(instancePos_v, 1.0)).xyz;
-            vec3 dirToCam_v = cameraPosition - worldInstPos_v;
-            dirToCam_v.y = 0.0;
-            float lenDir_v = length(dirToCam_v);
-            vec3 fwd_v = lenDir_v > 0.001 ? dirToCam_v / lenDir_v : vec3(0.0, 0.0, 1.0);
-            vec3 right_v = vec3(fwd_v.z, 0.0, -fwd_v.x);
-            
-            float scaleX = length(vec3(instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2]));
-            float scaleY = length(vec3(instanceMatrix[1][0], instanceMatrix[1][1], instanceMatrix[1][2]));
-            float scaleZ = length(vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2]));
-            
-            transformed = right_v * (position.x * scaleX) + vec3(0.0, position.y * scaleY, 0.0) + fwd_v * (position.z * scaleZ);
-            transformed *= uTreeScale;
-            `
-        ).replace(
-            '#include <project_vertex>',
-            `
-            vec3 instancePos_proj = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-            vec4 mvPosition = vec4( transformed + instancePos_proj, 1.0 );
-            mvPosition = modelViewMatrix * mvPosition;
-            gl_Position = projectionMatrix * mvPosition;
-            vViewPosition = -mvPosition.xyz;
-            `
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-            'void main() {',
-            `
-            varying vec3 vLeafHslShift;
-            varying vec3 vBarkHslShift;
-            
-            // RGB to HSL GLSL functions
-            vec3 rgb2hsl(vec3 c) {
-                float maxVal = max(c.r, max(c.g, c.b));
-                float minVal = min(c.r, min(c.g, c.b));
-                float h = 0.0;
-                float s = 0.0;
-                float l = (maxVal + minVal) / 2.0;
-
-                if (maxVal != minVal) {
-                    float d = maxVal - minVal;
-                    s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
-                    if (maxVal == c.r) {
-                        h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
-                    } else if (maxVal == c.g) {
-                        h = (c.b - c.r) / d + 2.0;
-                    } else if (maxVal == c.b) {
-                        h = (c.r - c.g) / d + 4.0;
-                    }
-                    h /= 6.0;
-                }
-                return vec3(h, s, l);
-            }
-
-            float hue2rgb(float p, float q, float t) {
-                if (t < 0.0) t += 1.0;
-                if (t > 1.0) t -= 1.0;
-                if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
-                if (t < 1.0/2.0) return q;
-                if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
-                return p;
-            }
-
-            vec3 hsl2rgb(vec3 hsl) {
-                float h = hsl.x;
-                float s = hsl.y;
-                float l = hsl.z;
-                vec3 rgb;
-
-                if (s == 0.0) {
-                    rgb = vec3(l);
-                } else {
-                    float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-                    float p = 2.0 * l - q;
-                    rgb.r = hue2rgb(p, q, h + 1.0/3.0);
-                    rgb.g = hue2rgb(p, q, h);
-                    rgb.b = hue2rgb(p, q, h - 1.0/3.0);
-                }
-                return rgb;
-            }
-            
-            void main() {
-            `
-        ).replace(
-            '#include <map_fragment>',
-            `
-            #include <map_fragment>
-            
-            // Shift HSL on the read texture pixel
-            if (diffuseColor.a > 0.05) {
-                vec3 hsl = rgb2hsl(diffuseColor.rgb);
-                bool isLeaf = (hsl.x >= 0.12 && hsl.x <= 0.55);
-                vec3 shift = isLeaf ? vLeafHslShift : vBarkHslShift;
-                
-                hsl.x = mod(hsl.x + shift.x, 1.0);
-                if (hsl.x < 0.0) hsl.x += 1.0;
-                hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
-                hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
-                
-                diffuseColor.rgb = hsl2rgb(hsl);
-            }
-            `
-        );
-    };
 
     const billboardGeo = new THREE.PlaneGeometry(12, 21.6);
     billboardGeo.translate(0, 10.8, 0);
 
-    // Initialize instanced buffer attributes on billboardGeo for HSL shifts
-    const bbCount_init = 3500;
-    const bbLeafHslArr = new Float32Array(bbCount_init * 3);
-    const bbBarkHslArr = new Float32Array(bbCount_init * 3);
-    const aBBLeafHslShift = new THREE.InstancedBufferAttribute(bbLeafHslArr, 3);
-    const aBBBarkHslShift = new THREE.InstancedBufferAttribute(bbBarkHslArr, 3);
-    billboardGeo.setAttribute('aLeafHslShift', aBBLeafHslShift);
-    billboardGeo.setAttribute('aBarkHslShift', aBBBarkHslShift);
-
     const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 3500);
     instBillboardTrees.frustumCulled = false;
-    instBillboardTrees.visible = false; // Disabled billboard trees per user request
+    instBillboardTrees.visible = false;
     scene.add(instBillboardTrees);
-
-    // Initialize Jungle Billboard trees
-    const jungleBillboardGeo = billboardGeo.clone();
-    const bbJungleLeafHslArr = new Float32Array(1500 * 3);
-    const bbJungleBarkHslArr = new Float32Array(1500 * 3);
-    const aBBJungleLeafHslShift = new THREE.InstancedBufferAttribute(bbJungleLeafHslArr, 3);
-    const aBBJungleBarkHslShift = new THREE.InstancedBufferAttribute(bbJungleBarkHslArr, 3);
-    jungleBillboardGeo.setAttribute('aLeafHslShift', aBBJungleLeafHslShift);
-    jungleBillboardGeo.setAttribute('aBarkHslShift', aBBJungleBarkHslShift);
 
     const jungleBillboardTex = texLoader.load('assets/tree_billboard_4.png');
     jungleBillboardTex.colorSpace = THREE.SRGBColorSpace;
-    const jungleBillboardMat = billboardMat.clone();
-    jungleBillboardMat.map = jungleBillboardTex;
-    jungleBillboardMat.onBeforeCompile = billboardMat.onBeforeCompile;
+    const jungleBillboardMat = new MeshToonNodeMaterial({
+        map: jungleBillboardTex,
+        alphaTest: 0.25,
+        transparent: false,
+        side: THREE.DoubleSide,
+        dithering: true
+    });
 
+    const jungleBillboardGeo = billboardGeo.clone();
     const instJungleBillboardTrees = new THREE.InstancedMesh(jungleBillboardGeo, jungleBillboardMat, 1500);
     instJungleBillboardTrees.frustumCulled = false;
-    instJungleBillboardTrees.visible = false; // Disabled billboard trees per user request
+    instJungleBillboardTrees.visible = false;
     scene.add(instJungleBillboardTrees);
 
     // Exact color matching palette derived directly from 3D GLB Pine tree foliage colors
@@ -2286,12 +1718,15 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     });
 
 
-    const instRocks = new THREE.InstancedMesh(geoRock, matRock, ROCK_COUNT);
-    const instBushes = new THREE.InstancedMesh(geoBush, matBush, BUSH_COUNT);
+    const instRocks = new THREE.InstancedMesh(geoRock, matRock, Math.max(1, ROCK_COUNT));
+    instRocks.count = ROCK_COUNT;
+    const instBushes = new THREE.InstancedMesh(geoBush, matBush, Math.max(1, BUSH_COUNT));
+    instBushes.count = BUSH_COUNT;
     const MAX_CLOUD_COUNT = 300;
     const instClouds = new THREE.InstancedMesh(geoCloud, matCloud, MAX_CLOUD_COUNT);
     instClouds.count = CLOUD_COUNT;
-    const instFlowers = new THREE.InstancedMesh(geoFlower, matFlower, FLOWER_COUNT);
+    const instFlowers = new THREE.InstancedMesh(geoFlower, matFlower, Math.max(1, FLOWER_COUNT));
+    instFlowers.count = FLOWER_COUNT;
 
 
 
@@ -2351,196 +1786,10 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         instFlowers.setColorAt(i, tempFlowerColor);
     }
     
-    // Water Mesh
-    let waterMesh;
-    
-    function loadAssets() {
-        // All 3D models removed
-    }
-
-    
-
-    const waterGeo = new THREE.PlaneGeometry(50000, 50000);
-    waterGeo.rotateX(-Math.PI / 2);
-    
-    const waterUniforms = {
-        uTime: { value: 0 },
-        uPatternScale: { value: 1.0 },
-        uSpeedMult: { value: 1.0 },
-        uBlendStrength: { value: 0.85 },
-        uFadeStart: { value: 2000.0 },
-        uFadeEnd: { value: 20000.0 },
-        uFadeDarken: { value: 0.6 }
-    };
-    
-    const waterMat = new THREE.MeshStandardMaterial({ 
-        color: 0x4da9e8, 
-        transparent: false, 
-        opacity: 1.0,
-        roughness: 0.1,
-        metalness: 0.2
-    });
-    
-    waterMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = waterUniforms.uTime;
-        shader.uniforms.uPatternScale = waterUniforms.uPatternScale;
-        shader.uniforms.uSpeedMult = waterUniforms.uSpeedMult;
-        shader.uniforms.uBlendStrength = waterUniforms.uBlendStrength;
-        shader.uniforms.uFadeStart = waterUniforms.uFadeStart;
-        shader.uniforms.uFadeEnd = waterUniforms.uFadeEnd;
-        shader.uniforms.uFadeDarken = waterUniforms.uFadeDarken;
-
-        if (!shader.vertexShader.includes('varying vec3 vWorldPos;')) {
-            shader.vertexShader = `
-                varying vec3 vWorldPos;
-            ` + shader.vertexShader;
-        }
-
-        if (!shader.vertexShader.includes('vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;')) {
-            shader.vertexShader = shader.vertexShader.replace(
-                `#include <worldpos_vertex>`,
-                `#include <worldpos_vertex>
-                 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
-            );
-        }
-
-        if (!shader.fragmentShader.includes('uniform float uTime;')) {
-            shader.fragmentShader = `
-                uniform float uTime;
-                uniform float uPatternScale;
-                uniform float uSpeedMult;
-                uniform float uBlendStrength;
-                uniform float uFadeStart;
-                uniform float uFadeEnd;
-                uniform float uFadeDarken;
-                varying vec3 vWorldPos;
-
-                vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-                float snoise(vec2 v){
-                    const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-                    vec2 i  = floor(v + dot(v, C.yy) );
-                    vec2 x0 = v -   i + dot(i, C.xx);
-                    vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-                    vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
-                    i = mod(i, 289.0);
-                    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
-                    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-                    m = m*m ; m = m*m ;
-                    vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
-                    vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
-                    vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-                    return 130.0 * dot(m, g);
-                }
-            ` + shader.fragmentShader;
-
-            shader.fragmentShader = shader.fragmentShader.replace(
-                `#include <color_fragment>`,
-                `#include <color_fragment>
-                 float t = uTime * uSpeedMult;
-                 vec2 uv = vWorldPos.xz * 0.1 * uPatternScale;
-                 float n1 = 1.0 - abs(snoise(uv + vec2(t * 0.1, t * 0.05)));
-                 float n2 = 1.0 - abs(snoise(uv * 1.5 - vec2(t * 0.15, -t * 0.05)));
-                 float caustics = pow(n1, 6.0) + pow(n2, 6.0) * 0.5;
-
-                 caustics = clamp(caustics, 0.0, 1.0);
-                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.95, 1.0), caustics * uBlendStrength * 0.59);
-
-                 float dist = length(vWorldPos.xz - cameraPosition.xz);
-                 float depthFade = smoothstep(uFadeStart, uFadeEnd, dist);
-                 diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * uFadeDarken, depthFade);
-                `
-            );
-        }
-    };
-
-    const originalWaterMat = waterMat;
-    waterMesh = new THREE.Mesh(waterGeo, waterMat);
-    waterMesh.position.y = 2.4; // Lowered slightly so the terrain shader can paint a smooth shoreline above it
-    waterMesh.receiveShadow = true;
-    scene.add(waterMesh);
-    
-    // Initialize advanced anime water system
+    // Initialize Open Sea Ocean WebGPU System
     animeWaterSystem = new WaterSystem(scene, renderer);
-    animeWaterSystem.setVisible(false);
-    animeWaterGUI = new WaterEditorGUI(animeWaterSystem, waterEditorFolder);
-
-    function setWaterMaterialMode(mode) {
-        if (!params.showWater) {
-            if (waterMesh) waterMesh.visible = false;
-            if (animeWaterSystem) animeWaterSystem.setVisible(false);
-            if (animeWaterGUI) animeWaterGUI.hide();
-            return;
-        }
-
-        if (mode === 'anime') {
-            if (waterMesh) waterMesh.visible = false;
-            if (animeWaterSystem) {
-                animeWaterSystem.setVisible(true);
-                if (animeWaterSystem.waterFloor && animeWaterSystem.waterFloor.mesh) {
-                    animeWaterSystem.waterFloor.mesh.position.y = params.waterHeight;
-                }
-                if (animeWaterSystem.intersection && animeWaterSystem.intersection.mesh) {
-                    animeWaterSystem.intersection.mesh.position.y = params.waterHeight;
-                }
-                animeWaterSystem.controls.opacity = params.waterOpacity;
-            }
-            if (animeWaterGUI) animeWaterGUI.show();
-            return;
-        }
-
-        if (waterMesh) {
-            waterMesh.visible = true;
-            waterMesh.position.y = params.waterHeight;
-        }
-        if (animeWaterSystem) animeWaterSystem.setVisible(false);
-        if (animeWaterGUI) animeWaterGUI.hide();
-
-        if (mode === 'realistic') {
-            waterMesh.material = originalWaterMat;
-            waterMesh.material.opacity = params.waterOpacity;
-            waterMesh.material.transparent = params.waterOpacity < 1.0;
-            waterMesh.material.color.set(params.waterColor);
-            waterMesh.material.roughness = params.waterRoughness;
-            waterMesh.material.metalness = params.waterMetalness;
-            waterMesh.material.needsUpdate = true;
-            return;
-        }
-
-        let mat = waterMaterialCache[mode];
-        if (!mat) {
-            const shaderObj = waterShaderRegistry[mode];
-            if (shaderObj && shaderObj.onCompile) {
-                mat = new THREE.MeshStandardMaterial({
-                    color: new THREE.Color(params.waterColor),
-                    transparent: params.waterOpacity < 1.0,
-                    opacity: params.waterOpacity,
-                    roughness: params.waterRoughness,
-                    metalness: params.waterMetalness
-                });
-                mat.customProgramCacheKey = () => mode + '_v2';
-                mat.onBeforeCompile = (shader) => {
-                    shader.uniforms.uPatternScale = waterUniforms.uPatternScale;
-                    shader.uniforms.uSpeedMult = waterUniforms.uSpeedMult;
-                    shader.uniforms.uBlendStrength = waterUniforms.uBlendStrength;
-                    shader.uniforms.uFadeStart = waterUniforms.uFadeStart;
-                    shader.uniforms.uFadeEnd = waterUniforms.uFadeEnd;
-                    shader.uniforms.uFadeDarken = waterUniforms.uFadeDarken;
-                    shaderObj.onCompile(shader, waterUniforms);
-                };
-                waterMaterialCache[mode] = mat;
-            }
-        }
-
-        if (mat) {
-            mat.color.set(params.waterColor);
-            mat.opacity = params.waterOpacity;
-            mat.transparent = params.waterOpacity < 1.0;
-            mat.roughness = params.waterRoughness;
-            mat.metalness = params.waterMetalness;
-            waterMesh.material = mat;
-            waterMesh.material.needsUpdate = true;
-        }
-    }
+    animeWaterSystem.setVisible(params.showWater);
+    window.waterModalUI = new WaterModalUI(animeWaterSystem);
 
     // ==========================================
     // RAIN SYSTEM
@@ -2561,64 +1810,24 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
             geometry.setAttribute('aRand', new THREE.BufferAttribute(rand, 1));
             
-            this.uniforms = {
-                uTime: { value: 0 },
-                uCamPos: { value: new THREE.Vector3() },
-                uSize: { value: 2.0 },
-                uWind: { value: new THREE.Vector2(0, 0) },
-                uIntensity: { value: 1.0 },
-                uAngle: { value: 0.0 }
-            };
+            const uTime = uniform(0.0);
+            const uCamPos = uniform(new THREE.Vector3());
+            const uSize = uniform(2.0);
+            const uWind = uniform(new THREE.Vector2(0, 0));
+            const uIntensity = uniform(1.0);
+            const uAngle = uniform(0.0);
+
+            this.uniforms = { uTime, uCamPos, uSize, uWind, uIntensity, uAngle };
             
-            const material = new THREE.ShaderMaterial({
-                uniforms: this.uniforms,
-                vertexShader: `
-                    uniform float uTime;
-                    uniform vec3 uCamPos;
-                    uniform float uSize;
-                    uniform vec2 uWind;
-                    
-                    attribute float aRand;
-                    varying float vRand;
-                    
-                    void main() {
-                        vRand = aRand;
-                        vec3 pos = position;
-                        
-                        float fallSpeed = 60.0 + aRand * 20.0;
-                        pos.y -= uTime * fallSpeed;
-                        pos.x += uTime * uWind.x * 20.0;
-                        pos.z += uTime * uWind.y * 20.0;
-                        
-                        pos.x = mod(pos.x - uCamPos.x + 150.0, 300.0) - 150.0 + uCamPos.x;
-                        pos.z = mod(pos.z - uCamPos.z + 150.0, 300.0) - 150.0 + uCamPos.z;
-                        pos.y = mod(pos.y - uCamPos.y + 20.0, 100.0) - 20.0 + uCamPos.y;
-                        
-                        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-                        gl_Position = projectionMatrix * mvPosition;
-                        gl_PointSize = uSize * (300.0 / -mvPosition.z) * (aRand * 0.5 + 0.5);
-                    }
-                `,
-                fragmentShader: `
-                    uniform float uIntensity;
-                    uniform float uAngle;
-                    varying float vRand;
-                    
-                    void main() {
-                        vec2 coord = gl_PointCoord - vec2(0.5);
-                        float s = sin(uAngle);
-                        float c = cos(uAngle);
-                        vec2 rotCoord = vec2(coord.x * c - coord.y * s, coord.x * s + coord.y * c);
-                        if (length(vec2(rotCoord.x * 6.0, rotCoord.y)) > 0.5) discard;
-                        // Darker, semi-transparent blueish rain drop
-                        gl_FragColor = vec4(0.4, 0.5, 0.7, 0.6 * uIntensity);
-                    }
-                `,
+            const aRand = attribute('aRand', 'float');
+
+            const material = new PointsNodeMaterial({
                 transparent: true,
                 depthWrite: false,
-                blending: THREE.NormalBlending
+                colorNode: vec4(0.4, 0.5, 0.7, uIntensity.mul(0.6)),
+                sizeNode: uSize.mul(aRand.mul(0.5).add(0.5))
             });
-            
+
             this.mesh = new THREE.Points(geometry, material);
             this.mesh.frustumCulled = false;
             this.mesh.visible = false;
@@ -2651,64 +1860,45 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     const fogGroup = new THREE.Group();
     const fogGeo = new THREE.PlaneGeometry(3500, 3500);
     fogGeo.rotateX(-Math.PI / 2);
-    const fogUniforms = { uTime: { value: 0 } };
-    
-    const fogMat = new THREE.MeshLambertMaterial({
+    const fogUniforms = { uTime: uniform(0) };
+
+    const hash = Fn(([p]) => {
+        return fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453123));
+    });
+
+    const noise = Fn(([p]) => {
+        const i = p.floor();
+        const f = p.fract();
+        const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+        return mix(
+            mix(hash(i.add(vec2(0.0, 0.0))), hash(i.add(vec2(1.0, 0.0))), u.x),
+            mix(hash(i.add(vec2(0.0, 1.0))), hash(i.add(vec2(1.0, 1.0))), u.x),
+            u.y
+        );
+    });
+
+    const getFogAlphaFn = Fn(([wPos, camPos, uTime]) => {
+        const uv = wPos.xz.mul(0.0025);
+        const yOffset = wPos.y.mul(0.2);
+        const n1 = noise(uv.add(vec2(uTime.mul(0.03).add(yOffset), uTime.mul(0.02))));
+        const n2 = noise(uv.mul(2.0).sub(vec2(uTime.mul(0.02).sub(yOffset), uTime.mul(-0.03))));
+        const noiseAlpha = tslSmoothstep(-0.2, 0.8, n1.add(n2.mul(0.5)));
+        
+        const dist = wPos.xz.sub(camPos.xz).length();
+        const edgeFade = float(1.0).sub(tslSmoothstep(1200.0, 1700.0, dist));
+        const nearFade = tslSmoothstep(10.0, 50.0, dist);
+        
+        return noiseAlpha.mul(edgeFade).mul(nearFade);
+    });
+
+    const fogMat = new MeshStandardNodeMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.5,
-        depthWrite: false,
+        opacity: 0.8,
+        depthWrite: false
     });
     
-    fogMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = fogUniforms.uTime;
-        shader.vertexShader = `
-            varying vec3 vWorldPos;
-        ` + shader.vertexShader;
-        shader.vertexShader = shader.vertexShader.replace(
-            `#include <worldpos_vertex>`,
-            `#include <worldpos_vertex>
-             vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
-        );
-        shader.fragmentShader = `
-            uniform float uTime;
-            varying vec3 vWorldPos;
-            
-            vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-            float snoise(vec2 v){
-                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-                vec2 i  = floor(v + dot(v, C.yy) );
-                vec2 x0 = v -   i + dot(i, C.xx);
-                vec2 i1; i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-                vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
-                i = mod(i, 289.0);
-                vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 )) + i.x + vec3(0.0, i1.x, 1.0 ));
-                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-                m = m*m ; m = m*m ;
-                vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5; vec3 ox = floor(x + 0.5);
-                vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
-                vec3 g; g.x  = a0.x  * x0.x  + h.x  * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-                return 130.0 * dot(m, g);
-            }
-        ` + shader.fragmentShader;
-        
-        shader.fragmentShader = shader.fragmentShader.replace(
-            `#include <dithering_fragment>`,
-            `#include <dithering_fragment>
-             vec2 uv = vWorldPos.xz * 0.0025;
-             float yOffset = vWorldPos.y * 0.2;
-             float n1 = snoise(uv + vec2(uTime * 0.03 + yOffset, uTime * 0.02));
-             float n2 = snoise(uv * 2.0 - vec2(uTime * 0.02 - yOffset, -uTime * 0.03));
-             float noiseAlpha = smoothstep(-0.2, 0.8, n1 + n2 * 0.5);
-             
-             float dist = length(vWorldPos.xz - cameraPosition.xz);
-             float edgeFade = 1.0 - smoothstep(1200.0, 1700.0, dist);
-             float nearFade = smoothstep(10.0, 50.0, dist);
-             
-             gl_FragColor.a *= noiseAlpha * edgeFade * nearFade;
-            `
-        );
-    };
+    fogMat.opacityNode = getFogAlphaFn(positionWorld, cameraPosition, fogUniforms.uTime).mul(0.8);
 
     // Stack 3 planes for cheap 3D parallax volumetric effect
     for(let i = 0; i < 3; i++) {
@@ -2816,7 +2006,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     
     instFlowers.receiveShadow = false;
     instFlowers.castShadow = false;
-    scene.add(instFlowers);
+    if (FLOWER_COUNT > 0) scene.add(instFlowers);
     
     // ==========================================
     // PROCEDURAL SKYDOME (replaces PNG cubemap + SpiralNoiseC cloud dome)
@@ -3016,23 +2206,15 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     geoBird.setAttribute('position', new THREE.BufferAttribute(bVerts, 3));
     geoBird.computeVertexNormals();
     
-    const matBird = new THREE.MeshToonMaterial({ color: 0xd6e5f5, side: THREE.DoubleSide, gradientMap });
-    
-    matBird.onBeforeCompile = (shader) => {
-        shader.uniforms.time = { value: 0 };
-        shader.vertexShader = `uniform float time;\n` + shader.vertexShader;
-        shader.vertexShader = shader.vertexShader.replace(
-            `#include <begin_vertex>`,
-            `
-            vec3 transformed = vec3( position );
-            float wingDist = abs(position.x);
-            if (wingDist > 0.3) {
-                transformed.y += sin(time * 9.0 + wingDist * 0.5) * wingDist * 0.35;
-            }
-            `
-        );
-        matBird.userData.shader = shader;
-    };
+    const matBird = new MeshToonNodeMaterial({ color: 0xd6e5f5, side: THREE.DoubleSide, gradientMap });
+    matBird.positionNode = Fn(() => {
+        let transformed = positionLocal.toVar();
+        const wingDist = abs(positionGeometry.x);
+        const flap = sin(terrainUniforms.uTime.mul(9.0).add(wingDist.mul(0.5))).mul(wingDist).mul(0.35);
+        const isWing = step(0.3, wingDist);
+        transformed.y.addAssign(flap.mul(isWing));
+        return transformed;
+    })();
 
     const instBirds = new THREE.InstancedMesh(geoBird, matBird, BIRD_COUNT);
     instBirds.castShadow = true;
@@ -3050,10 +2232,11 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     }
 
     const HIGH_BIRD_COUNT = 0;
-    const instHighBirds = new THREE.InstancedMesh(geoBird, matBird, HIGH_BIRD_COUNT);
+    const instHighBirds = new THREE.InstancedMesh(geoBird, matBird, Math.max(1, HIGH_BIRD_COUNT));
+    instHighBirds.count = HIGH_BIRD_COUNT;
     instHighBirds.castShadow = true;
     instHighBirds.frustumCulled = false;
-    scene.add(instHighBirds);
+    if (HIGH_BIRD_COUNT > 0) scene.add(instHighBirds);
 
     const highBirdData = new Float32Array(HIGH_BIRD_COUNT * 6);
     for (let i = 0; i < HIGH_BIRD_COUNT; i++) {
@@ -3763,7 +2946,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     // ==========================================
     // 7. PLAYER SETUP
     // ==========================================
-    const playerGrp = new THREE.Group();
+    playerGrp = new THREE.Group();
     playerGrp.position.set(0, 50, 0);
     scene.add(playerGrp);
 
@@ -4155,112 +3338,12 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
             mergedGeom.setAttribute('aLeafHslShift', aLeafHslShift);
             mergedGeom.setAttribute('aBarkHslShift', aBarkHslShift);
 
-            const mergedMat = new THREE.MeshToonMaterial({
+            const mergedMat = new MeshToonNodeMaterial({
                 vertexColors: true,
                 gradientMap: gradientMap,
                 side: THREE.DoubleSide,
                 dithering: true
             });
-
-            mergedMat.onBeforeCompile = (shader) => {
-                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
-                shader.vertexShader = shader.vertexShader.replace(
-                    'void main() {',
-                    `
-                    uniform float uTreeScale;
-                    attribute float aIsBark;
-                    attribute vec3 aLeafHslShift;
-                    attribute vec3 aBarkHslShift;
-                    
-                    varying float vIsBark;
-                    varying vec3 vLeafHslShift;
-                    varying vec3 vBarkHslShift;
-                    
-                    // RGB to HSL GLSL functions
-                    vec3 rgb2hsl_vert(vec3 c) {
-                        float maxVal = max(c.r, max(c.g, c.b));
-                        float minVal = min(c.r, min(c.g, c.b));
-                        float h = 0.0;
-                        float s = 0.0;
-                        float l = (maxVal + minVal) / 2.0;
-
-                        if (maxVal != minVal) {
-                            float d = maxVal - minVal;
-                            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
-                            if (maxVal == c.r) {
-                                h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
-                            } else if (maxVal == c.g) {
-                                h = (c.b - c.r) / d + 2.0;
-                            } else if (maxVal == c.b) {
-                                h = (c.r - c.g) / d + 4.0;
-                            }
-                            h /= 6.0;
-                        }
-                        return vec3(h, s, l);
-                    }
-
-                    float hue2rgb_vert(float p, float q, float t) {
-                        if (t < 0.0) t += 1.0;
-                        if (t > 1.0) t -= 1.0;
-                        if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
-                        if (t < 1.0/2.0) return q;
-                        if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
-                        return p;
-                    }
-
-                    vec3 hsl2rgb_vert(vec3 hsl) {
-                        float h = hsl.x;
-                        float s = hsl.y;
-                        float l = hsl.z;
-                        vec3 rgb;
-
-                        if (s == 0.0) {
-                            rgb = vec3(l);
-                        } else {
-                            float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-                            float p = 2.0 * l - q;
-                            rgb.r = hue2rgb_vert(p, q, h + 1.0/3.0);
-                            rgb.g = hue2rgb_vert(p, q, h);
-                            rgb.b = hue2rgb_vert(p, q, h - 1.0/3.0);
-                        }
-                        return rgb;
-                    }
-                    
-                    void main() {
-                        vIsBark = aIsBark;
-                        vLeafHslShift = aLeafHslShift;
-                        vBarkHslShift = aBarkHslShift;
-                    `
-                );
-                
-                shader.vertexShader = shader.vertexShader.replace(
-                    '#include <color_vertex>',
-                    `
-                    #include <color_vertex>
-                    
-                    // Shift HSL based on whether it is bark or leaves
-                    vec3 baseCol = vColor.xyz;
-                    vec3 hsl = rgb2hsl_vert(baseCol);
-                    vec3 shift = (aIsBark > 0.5) ? aBarkHslShift : aLeafHslShift;
-                    
-                    // Apply HSL shift
-                    hsl.x = mod(hsl.x + shift.x, 1.0);
-                    if (hsl.x < 0.0) hsl.x += 1.0;
-                    hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
-                    hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
-                    
-                    vColor.xyz = hsl2rgb_vert(hsl);
-                    `
-                );
-                
-                shader.vertexShader = shader.vertexShader.replace(
-                    '#include <begin_vertex>',
-                    `
-                    #include <begin_vertex>
-                    transformed *= uTreeScale;
-                    `
-                );
-            };
 
             instMesh.geometry = mergedGeom;
             instMesh.material = mergedMat;
@@ -4324,7 +3407,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
             const isLeaf = matName.includes('daun') || matName.includes('ivy');
 
             // Convert material to MeshToonMaterial with in-game gradientMap and preserve texture/alpha test
-            const toonMat = new THREE.MeshToonMaterial({
+            const toonMat = new MeshToonNodeMaterial({
                 color: new THREE.Color(0xffffff),
                 map: m.material.map,
                 vertexColors: m.material.vertexColors || false,
@@ -4339,111 +3422,6 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
                 depthTest: true,
                 dithering: true
             });
-
-            // Add custom HSL shading to the fragment shader
-            toonMat.onBeforeCompile = (shader) => {
-                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
-                shader.vertexShader = shader.vertexShader.replace(
-                    'void main() {',
-                    `
-                    uniform float uTreeScale;
-                    attribute vec3 aLeafHslShift;
-                    attribute vec3 aBarkHslShift;
-                    varying vec3 vLeafHslShift;
-                    varying vec3 vBarkHslShift;
-                    void main() {
-                        vLeafHslShift = aLeafHslShift;
-                        vBarkHslShift = aBarkHslShift;
-                    `
-                );
-
-                // RGB <-> HSL conversion functions inside fragment shader
-                shader.fragmentShader = shader.fragmentShader.replace(
-                    'void main() {',
-                    `
-                    varying vec3 vLeafHslShift;
-                    varying vec3 vBarkHslShift;
-                    
-                    vec3 rgb2hsl_f(vec3 c) {
-                        float maxVal = max(c.r, max(c.g, c.b));
-                        float minVal = min(c.r, min(c.g, c.b));
-                        float h = 0.0;
-                        float s = 0.0;
-                        float l = (maxVal + minVal) / 2.0;
-
-                        if (maxVal != minVal) {
-                            float d = maxVal - minVal;
-                            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
-                            if (maxVal == c.r) {
-                                h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
-                            } else if (maxVal == c.g) {
-                                h = (c.b - c.r) / d + 2.0;
-                            } else if (maxVal == c.b) {
-                                h = (c.r - c.g) / d + 4.0;
-                            }
-                            h /= 6.0;
-                        }
-                        return vec3(h, s, l);
-                    }
-
-                    float hue2rgb_f(float p, float q, float t) {
-                        if (t < 0.0) t += 1.0;
-                        if (t > 1.0) t -= 1.0;
-                        if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
-                        if (t < 1.0/2.0) return q;
-                        if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
-                        return p;
-                    }
-
-                    vec3 hsl2rgb_f(vec3 hsl) {
-                        float h = hsl.x;
-                        float s = hsl.y;
-                        float l = hsl.z;
-                        vec3 rgb;
-
-                        if (s == 0.0) {
-                            rgb = vec3(l);
-                        } else {
-                            float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-                            float p = 2.0 * l - q;
-                            rgb.r = hue2rgb_f(p, q, h + 1.0/3.0);
-                            rgb.g = hue2rgb_f(p, q, h);
-                            rgb.b = hue2rgb_f(p, q, h - 1.0/3.0);
-                        }
-                        return rgb;
-                    }
-                    
-                    void main() {
-                    `
-                ).replace(
-                    '#include <map_fragment>',
-                    `
-                    #include <map_fragment>
-                    
-                    if (diffuseColor.a > 0.01) {
-                        // Override realistic texture color with a flat Ghibli base color for toon shading
-                        vec3 baseCol = ${isBark ? 'vec3(0.35, 0.28, 0.22)' : 'vec3(0.28, 0.45, 0.22)'};
-                        vec3 hsl = rgb2hsl_f(baseCol);
-                        vec3 shift = ${isBark ? 'vBarkHslShift' : 'vLeafHslShift'};
-                        
-                        hsl.x = mod(hsl.x + shift.x, 1.0);
-                        if (hsl.x < 0.0) hsl.x += 1.0;
-                        hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
-                        hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
-                        
-                        diffuseColor.rgb = hsl2rgb_f(hsl);
-                    }
-                    `
-                );
-                
-                shader.vertexShader = shader.vertexShader.replace(
-                    '#include <begin_vertex>',
-                    `
-                    #include <begin_vertex>
-                    transformed *= uTreeScale;
-                    `
-                );
-            };
 
             const instMesh = new THREE.InstancedMesh(g, toonMat, 180);
             instMesh.castShadow = true;
@@ -4512,7 +3490,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
             const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || matName.includes('batang') || meshName.includes('bark') || meshName.includes('trunk') || meshName.includes('stem');
             const isLeaf = matName.includes('leaf') || matName.includes('leaves') || matName.includes('frond') || matName.includes('palm') || matName.includes('daun') || meshName.includes('leaf') || meshName.includes('palm');
 
-            const toonMat = new THREE.MeshToonMaterial({
+            const toonMat = new MeshToonNodeMaterial({
                 color: new THREE.Color(0xffffff),
                 map: m.material ? m.material.map : null,
                 vertexColors: (m.material && m.material.vertexColors) ? m.material.vertexColors : false,
@@ -4526,109 +3504,6 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
                 depthTest: true,
                 dithering: true
             });
-
-            toonMat.onBeforeCompile = (shader) => {
-                shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
-                shader.vertexShader = shader.vertexShader.replace(
-                    'void main() {',
-                    `
-                    uniform float uTreeScale;
-                    attribute vec3 aLeafHslShift;
-                    attribute vec3 aBarkHslShift;
-                    varying vec3 vLeafHslShift;
-                    varying vec3 vBarkHslShift;
-                    void main() {
-                        vLeafHslShift = aLeafHslShift;
-                        vBarkHslShift = aBarkHslShift;
-                    `
-                );
-
-                shader.fragmentShader = shader.fragmentShader.replace(
-                    'void main() {',
-                    `
-                    varying vec3 vLeafHslShift;
-                    varying vec3 vBarkHslShift;
-                    
-                    vec3 rgb2hsl_f(vec3 c) {
-                        float maxVal = max(c.r, max(c.g, c.b));
-                        float minVal = min(c.r, min(c.g, c.b));
-                        float h = 0.0;
-                        float s = 0.0;
-                        float l = (maxVal + minVal) / 2.0;
-
-                        if (maxVal != minVal) {
-                            float d = maxVal - minVal;
-                            s = l > 0.5 ? d / (2.0 - maxVal - minVal) : d / (maxVal + minVal);
-                            if (maxVal == c.r) {
-                                h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
-                            } else if (maxVal == c.g) {
-                                h = (c.b - c.r) / d + 2.0;
-                            } else if (maxVal == c.b) {
-                                h = (c.r - c.g) / d + 4.0;
-                            }
-                            h /= 6.0;
-                        }
-                        return vec3(h, s, l);
-                    }
-
-                    float hue2rgb_f(float p, float q, float t) {
-                        if (t < 0.0) t += 1.0;
-                        if (t > 1.0) t -= 1.0;
-                        if (t < 1.0/6.0) return p + (q - p) * 6.0 * t;
-                        if (t < 1.0/2.0) return q;
-                        if (t < 2.0/3.0) return p + (q - p) * (2.0/3.0 - t) * 6.0;
-                        return p;
-                    }
-
-                    vec3 hsl2rgb_f(vec3 hsl) {
-                        float h = hsl.x;
-                        float s = hsl.y;
-                        float l = hsl.z;
-                        vec3 rgb;
-
-                        if (s == 0.0) {
-                            rgb = vec3(l);
-                        } else {
-                            float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-                            float p = 2.0 * l - q;
-                            rgb.r = hue2rgb_f(p, q, h + 1.0/3.0);
-                            rgb.g = hue2rgb_f(p, q, h);
-                            rgb.b = hue2rgb_f(p, q, h - 1.0/3.0);
-                        }
-                        return rgb;
-                    }
-                    
-                    void main() {
-                    `
-                ).replace(
-                    '#include <map_fragment>',
-                    `
-                    #include <map_fragment>
-                    
-                    if (diffuseColor.a > 0.01) {
-                        // Override realistic texture color with a flat Ghibli base color for toon shading
-                        vec3 baseCol = ${isBark ? 'vec3(0.45, 0.35, 0.25)' : 'vec3(0.35, 0.55, 0.25)'};
-                        vec3 hsl = rgb2hsl_f(baseCol);
-                        vec3 shift = ${isBark ? 'vBarkHslShift' : 'vLeafHslShift'};
-                        
-                        hsl.x = mod(hsl.x + shift.x, 1.0);
-                        if (hsl.x < 0.0) hsl.x += 1.0;
-                        hsl.y = clamp(hsl.y + shift.y, 0.0, 1.0);
-                        hsl.z = clamp(hsl.z + shift.z, 0.0, 1.0);
-                        
-                        diffuseColor.rgb = hsl2rgb_f(hsl);
-                    }
-                    `
-                );
-
-                shader.vertexShader = shader.vertexShader.replace(
-                    '#include <begin_vertex>',
-                    `
-                    #include <begin_vertex>
-                    transformed *= uTreeScale;
-                    `
-                );
-            };
 
             const instMesh = new THREE.InstancedMesh(g, toonMat, maxPalmCount);
             instMesh.castShadow = true;
@@ -4996,42 +3871,13 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     starGeometry.setAttribute('pulse', new THREE.BufferAttribute(starPulse, 1));
-    const starMaterial = new THREE.PointsMaterial({
+    const starMaterial = new PointsNodeMaterial({
         color: 0xffffff,
         size: 1.0,
-        sizeAttenuation: false,
-        fog: false, // Prevents scene fog from hiding the stars
         transparent: true,
-        opacity: 0.0 // Start invisible — lerps to target based on time-of-day
+        opacity: 0.0
     });
     
-    starMaterial.onBeforeCompile = (shader) => {
-        shader.uniforms.time = { value: 0 };
-        starMaterial.userData.shader = shader;
-        shader.vertexShader = `
-            attribute float pulse;
-            varying float vPulse;
-        ` + shader.vertexShader;
-        shader.vertexShader = shader.vertexShader.replace(
-            `#include <begin_vertex>`,
-            `#include <begin_vertex>
-            vPulse = pulse;
-            `
-        );
-        shader.fragmentShader = `
-            uniform float time;
-            varying float vPulse;
-        ` + shader.fragmentShader;
-        shader.fragmentShader = shader.fragmentShader.replace(
-            `vec4 diffuseColor = vec4( diffuse, opacity );`,
-            `vec4 diffuseColor = vec4( diffuse, opacity );
-             if (vPulse > 0.5) {
-                 float pulseAmt = 0.4 + 0.6 * sin(time * 0.5 + gl_FragCoord.x * 0.1 + gl_FragCoord.y * 0.1);
-                 diffuseColor.a *= pulseAmt;
-             }
-            `
-        );
-    };
     const starField = new THREE.Points(starGeometry, starMaterial);
     starField.renderOrder = -3;
     starField.visible = false;
@@ -5123,8 +3969,9 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     let playerPhysics;
     let cameraManager;
     
-    function animate() {
-        requestAnimationFrame(animate);
+
+
+    async function animate() {
         if (proceduralSkyMesh) {
             camera.getWorldPosition(proceduralSkyMesh.position);
         }
@@ -5143,15 +3990,14 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         let dt = smoothedDt;
 
         const time = clock.getElapsedTime();
-        
+
         if (starMaterial.userData.shader) {
             starMaterial.userData.shader.uniforms.time.value = time;
         }
 
-        waterUniforms.uTime.value = time;
         if (animeWaterSystem && animeWaterSystem.visible) {
             const activeCam = isGodMode ? godCamera : camera;
-            animeWaterSystem.update(dt, time, activeCam);
+            animeWaterSystem.update(dt, time, activeCam, playerGrp ? playerGrp.position : null, dirLight ? dirLight.position : null);
         }
         if (typeof terrainUniforms !== 'undefined') {
             terrainUniforms.uTime.value = time;
@@ -5242,6 +4088,12 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
             skyUniforms.uCloudColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudCol), decaySky);
             skyUniforms.uCloudShadowColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudShadow), decaySky);
             skyUniforms.uSunColor.value.lerp(tempColorTarget.setHex(target.dir), decaySky);
+            
+            // Sync Open Sea Time Of Day
+            uZenithColor.value.copy(skyUniforms.uSkyColorZenith.value);
+            uHorizonColor.value.copy(skyUniforms.uSkyColorHorizon.value);
+            uSunColor.value.copy(dirLight.color);
+            uSunDir.value.copy(dirLight.position).normalize();
 
             // Weather override (storm/overcast)
             if (currentWeather !== 'clear') {
@@ -5422,9 +4274,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         if (typeof megaCloudMat !== 'undefined') megaCloudMat.color.lerp(tempColorTarget.setHex(target.cloudCol), decayEnv);
         if (typeof matWispyCloud !== 'undefined') matWispyCloud.color.lerp(tempColorTarget.setHex(target.cloudCol), decayEnv);
         
-        // Dynamically scale up the terrain and water as Kiki flies high
+        // Dynamically scale up the terrain as Kiki flies high
         terrainScale = 1.0 + Math.min(1.0, Math.max(0.0, (playerGrp.position.y - 300.0) / 11700.0)) * 9.0;
-        waterMesh.scale.set(terrainScale, 1.0, terrainScale);
 
         // Scale render distance (fog far) to reveal landscape when high
         // Setting it to 850 guarantees that the edge of the world (1200) and tree spawn distance (900) are fully hidden in fog!
@@ -5506,7 +4357,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
 
         // Update God Rays sun screen position
-        if (godRaysEffect.blendMode.opacity.value > 0.0 && typeof staticSun !== 'undefined') {
+        if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
             const activeCam = isGodMode ? godCamera : camera;
             tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
             activeCam.getWorldDirection(tempVec1);
@@ -5516,19 +4367,19 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
                 tempVec2.copy(staticSun.position).project(activeCam);
                 const sunScreenX = (tempVec2.x + 1.0) * 0.5;
                 const sunScreenY = (tempVec2.y + 1.0) * 0.5;
-                godRaysEffect.uniforms.get("uSunScreenPos").value.set(sunScreenX, sunScreenY);
-                
+                godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
+
                 const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
                 const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.5));
                 const twilightFade = timePhase === 2 ? 0.0 : 1.0;
                 const fwdFade = Math.max(0.0, Math.min(1.0, (dotFwd + 0.2) * 2.5));
-                godRaysEffect.uniforms.get("uSunVisible").value = fwdFade * screenFade * twilightFade;
+                godRaysPass.uniforms.uSunVisible.value = fwdFade * screenFade * twilightFade;
             } else {
-                godRaysEffect.uniforms.get("uSunVisible").value = 0.0;
+                godRaysPass.uniforms.uSunVisible.value = 0.0;
             }
         }
 
-        composer.render(dt);
+        await composer.renderAsync();
     }
 
     window.addEventListener('resize', () => {
@@ -5981,9 +4832,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         };
 
         const moonFolder = atmoFolder.addFolder('🌙 Moonlight & Night');
-        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => { 
-            renderer.toneMappingExposure = v; 
-            if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
+        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
+            renderer.toneMappingExposure = v;
         });
         moonFolder.addColor(moonParams, 'moonlightColor').name('Moonlight Color').onChange(v => envConfigs[2].dir = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonlightIntensity', 0, 10, 0.1).name('Moonlight Power').onChange(v => envConfigs[2].dirI = v);
@@ -6342,5 +5192,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
         isInitializingGui = false;
     }
-
-    animate();
+    async function start() {
+        initPostProcessing();
+        renderer.setAnimationLoop(animate);
+    }
+    start();

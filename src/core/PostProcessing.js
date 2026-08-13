@@ -1,168 +1,132 @@
 import * as THREE from 'three';
-import { EffectComposer, RenderPass, EffectPass, BloomEffect, SSAOEffect, NormalPass, Effect } from 'postprocessing';
+import { PostProcessing } from 'three/webgpu';
+import { pass, vec2, vec3, vec4, mix, smoothstep, max, clamp, dot, float, uv, uniform, Loop, fract, sin, length, Fn } from 'three/tsl';
 import { LOW_GFX } from '../config/constants.js';
 import { renderer, scene, camera } from './Engine.js';
+import { buildPortalWarpNode, uWarpIntensity } from '../vfx/PortalWarpPass.js';
 
-export const composer = new EffectComposer(renderer, { multisampling: 0 });
-export const renderPass = new RenderPass(scene, camera);
-composer.addPass(renderPass);
+export let postProcessing;
+export let scenePass;
 
-// Optional Normal Pass for SSAO
-// export const normalPass = new NormalPass(scene, camera);
-// composer.addPass(normalPass);
+export function initPostProcessing() {
+    postProcessing = new PostProcessing(renderer);
+    scenePass = pass(scene, camera);
+    updatePostProcessingPipeline();
+}
 
-// SSAO Effect
-export const ssaoEffect = new SSAOEffect(camera, null, {
-    samples: 5,
-    rings: 2,
-    distanceThreshold: 0.1,
-    distanceFalloff: 0.02,
-    rangeThreshold: 0.015,
-    rangeFalloff: 0.002,
-    luminanceInfluence: 0.7,
-    radius: 12.0,
-    scale: 0.5,
-    bias: 0.025,
-    intensity: 1.0,
-    color: null,
-    resolutionScale: 0.5
+// -- God Rays Settings --
+export const uSunScreenPos = uniform(vec2(0.5, 0.5));
+export const uIntensity = uniform(0.15);
+export const uDecay = uniform(0.90);
+export const uDensity = uniform(0.40);
+export const uWeight = uniform(0.30);
+export const uSunVisible = uniform(1.0);
+export let isGodRaysEnabled = !LOW_GFX;
+
+const pseudoRand = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453123));
+
+const buildGodRaysNode = Fn(([baseTex]) => {
+    const vUv = uv();
+    // Use varying fragment coordinate for dither (simplified)
+    const fragCoord = vUv.mul(1000.0); 
+
+    const deltaUV = vUv.sub(uSunScreenPos).toVar();
+    const dist = length(deltaUV);
+    deltaUV.mulAssign(float(1.0 / 32.0).mul(uDensity));
+
+    const dither = pseudoRand(fragCoord);
+    const sampleUV = vUv.sub(deltaUV.mul(dither)).toVar();
+
+    const illumination = float(0.0).toVar();
+    const currentWeight = float(uWeight).toVar();
+
+    Loop({ start: 0, end: 32 }, () => {
+        sampleUV.subAssign(deltaUV);
+        const samp = scenePass.getTextureNode().sample(sampleUV);
+        const lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
+        const bright = smoothstep(0.70, 0.95, lum);
+        illumination.addAssign(bright.mul(currentWeight));
+        currentWeight.mulAssign(uDecay);
+    });
+
+    const edgeFade = float(1.0).sub(smoothstep(0.4, 1.5, dist));
+    const rayColor = vec3(1.0, 0.95, 0.85).mul(illumination).mul(uIntensity).mul(edgeFade).mul(uSunVisible);
+
+    return vec4(baseTex.rgb.add(rayColor), baseTex.a);
 });
-if (LOW_GFX) {
-    ssaoEffect.blendMode.opacity.value = 0.0;
-}
 
-const _bloomResScale = LOW_GFX ? 0.5 : 1.0;
-export const bloomEffect = new BloomEffect({
-    intensity: 1.5,
-    luminanceThreshold: 0.8,
-    luminanceSmoothing: 0.1,
-    resolutionScale: _bloomResScale
-});
-
-const ghibliSummerFragmentShader = `
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec3 col = inputColor.rgb;
-    float lum = dot(col, vec3(0.299, 0.587, 0.114));
-
-    vec3 warmGold = col * vec3(1.07, 1.02, 0.92);
-    vec3 azureShadow = col * vec3(0.93, 0.98, 1.07);
-    col = mix(azureShadow, warmGold, smoothstep(0.2, 0.75, lum));
-
-    col = mix(vec3(lum), col, 1.18);
-    col += max(vec3(0.0), col - 0.55) * vec3(0.12, 0.09, 0.02);
-
-    vec2 centeredUv = (uv - 0.5) * 2.0;
-    float vign = clamp(1.0 - dot(centeredUv, centeredUv) * 0.14, 0.0, 1.0);
-    col *= vign;
-
-    outputColor = vec4(col, inputColor.a);
-}
-`;
-
-export class GhibliSummerEffect extends Effect {
-    constructor() {
-        super("GhibliSummerEffect", ghibliSummerFragmentShader);
-    }
-}
-
-export const summerEffect = new GhibliSummerEffect();
-
-const godRaysFragmentShader = `
-uniform vec2 uSunScreenPos;
-uniform float uIntensity;
-uniform float uDecay;
-uniform float uDensity;
-uniform float uWeight;
-uniform float uSunVisible;
-
-float pseudoRand(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
-}
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec2 deltaUV = (uv - uSunScreenPos);
-    float dist = length(deltaUV);
-    deltaUV *= (1.0 / 32.0) * uDensity; 
-
-    float dither = pseudoRand(gl_FragCoord.xy);
-    vec2 sampleUV = uv - (deltaUV * dither);
-    
-    float illumination = 0.0;
-    float currentWeight = uWeight;
-    
-    for(int i = 0; i < 32; i++) {
-        sampleUV -= deltaUV;
-        vec4 samp = texture2D(inputBuffer, sampleUV);
-        float lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
-        float bright = smoothstep(0.45, 0.85, lum);
-        illumination += bright * currentWeight;
-        currentWeight *= uDecay;
-    }
-    
-    float edgeFade = 1.0 - smoothstep(0.4, 1.5, dist);
-    vec3 rayColor = vec3(1.0, 0.9, 0.7) * illumination * uIntensity * edgeFade * uSunVisible;
-    
-    outputColor = vec4(inputColor.rgb + rayColor, inputColor.a);
-}
-`;
-
-export class GodRaysEffect extends Effect {
-    constructor() {
-        super("GodRaysEffect", godRaysFragmentShader, {
-            uniforms: new Map([
-                ["uSunScreenPos", new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
-                ["uIntensity", new THREE.Uniform(1.0)],
-                ["uDecay", new THREE.Uniform(0.927)],
-                ["uDensity", new THREE.Uniform(0.50)],
-                ["uWeight", new THREE.Uniform(0.75)],
-                ["uSunVisible", new THREE.Uniform(1.0)]
-            ])
-        });
-    }
-}
-
-export const godRaysEffect = new GodRaysEffect();
-
-const exposureFragmentShader = `
-uniform float uExposure;
-
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec3 color = inputColor.rgb * uExposure;
-    
-    // ACES Filmic Tone Mapping approximation
-    color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
-    
-    outputColor = vec4(color, inputColor.a);
-}
-`;
-
-export class ExposureEffect extends Effect {
-    constructor(exposure = 1.8) {
-        super("ExposureEffect", exposureFragmentShader, {
-            uniforms: new Map([
-                ["uExposure", new THREE.Uniform(exposure)]
-            ])
-        });
-    }
-}
-
-export const exposureEffect = new ExposureEffect(1.8);
-
-export const mainEffectPass = new EffectPass(camera, ssaoEffect, bloomEffect, godRaysEffect, exposureEffect);
-composer.addPass(mainEffectPass);
-
-export const summerEffectPass = new EffectPass(camera, summerEffect);
-composer.addPass(summerEffectPass);
-summerEffectPass.enabled = false;
-
+// -- Ghibli Summer Settings --
 export let isSummerFilterOn = false;
+
+const getLuminance = (col) => dot(col, vec3(0.299, 0.587, 0.114));
+
+const buildGhibliSummerNode = Fn(([baseTex]) => {
+    const col = baseTex.rgb;
+    const lum = getLuminance(col);
+    
+    const warmGold = col.mul(vec3(1.07, 1.02, 0.92));
+    const azureShadow = col.mul(vec3(0.93, 0.98, 1.07));
+    let finalCol = mix(azureShadow, warmGold, smoothstep(0.2, 0.75, lum));
+    
+    finalCol = mix(vec3(lum), finalCol, 1.18);
+    finalCol = finalCol.add(max(vec3(0.0), finalCol.sub(0.55)).mul(vec3(0.12, 0.09, 0.02)));
+    
+    const vUv = uv();
+    const centeredUv = vUv.sub(0.5).mul(2.0);
+    const vign = clamp(float(1.0).sub(dot(centeredUv, centeredUv).mul(0.14)), 0.0, 1.0);
+    finalCol = finalCol.mul(vign);
+    
+    return vec4(finalCol, baseTex.a);
+});
+
+
+// Main setup loop
+export function updatePostProcessingPipeline() {
+    let outputNode = scenePass;
+
+    if (isGodRaysEnabled) {
+        outputNode = buildGodRaysNode(outputNode);
+    }
+    
+    if (isSummerFilterOn) {
+        outputNode = buildGhibliSummerNode(outputNode);
+    }
+    
+    // Always apply warp node at the very end, it manages its own mix intensity
+    outputNode = buildPortalWarpNode(outputNode);
+
+    postProcessing.outputNode = outputNode;
+    postProcessing.needsUpdate = true;
+}
+
+// Initial build removed from here; now called in initPostProcessing()
+
+
+// Provide exports for main.js compatibility
+export const bloomPass = { enabled: false };
+export const godRaysPass = { 
+    enabled: !LOW_GFX,
+    uniforms: {
+        uSunScreenPos: uSunScreenPos,
+        uIntensity: uIntensity,
+        uDecay: uDecay,
+        uDensity: uDensity,
+        uWeight: uWeight,
+        uSunVisible: uSunVisible
+    }
+};
+
+Object.defineProperty(godRaysPass, 'enabled', {
+    get: () => isGodRaysEnabled,
+    set: (v) => { isGodRaysEnabled = v; updatePostProcessingPipeline(); }
+});
 
 export function initPostProcessingUI() {
     const summerBtn = document.getElementById('summer-toggle');
     if (summerBtn) {
         summerBtn.addEventListener('click', () => {
             isSummerFilterOn = !isSummerFilterOn;
-            summerEffectPass.enabled = isSummerFilterOn;
+            updatePostProcessingPipeline();
             if (typeof window.params !== 'undefined') window.params.summerFilter = isSummerFilterOn;
         });
     }
