@@ -1668,7 +1668,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     // ==========================================
     const BILLBOARD_TREE_COUNT = 5000;
     const texLoader = new THREE.TextureLoader();
-    const billboardTex = texLoader.load('assets/tree_billboard_1.png');
+    const billboardTex = texLoader.load('assets/tree_billboard_pine_1_norm.png');
     billboardTex.colorSpace = THREE.SRGBColorSpace;
 
     const billboardMat = new MeshToonNodeMaterial({
@@ -1687,7 +1687,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     instBillboardTrees.visible = false;
     scene.add(instBillboardTrees);
 
-    const jungleBillboardTex = texLoader.load('assets/tree_billboard_4.png');
+    const jungleBillboardTex = texLoader.load('assets/tree_billboard_jungle1.png');
     jungleBillboardTex.colorSpace = THREE.SRGBColorSpace;
     const jungleBillboardMat = new MeshToonNodeMaterial({
         map: jungleBillboardTex,
