@@ -1,159 +1,129 @@
 import * as THREE from 'three';
-import { EffectComposer, RenderPass, EffectPass, BloomEffect, SSAOEffect, NormalPass, Effect } from 'postprocessing';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { LOW_GFX } from '../config/constants.js';
 import { renderer, scene, camera } from './Engine.js';
 
-export const composer = new EffectComposer(renderer, { multisampling: 0 });
+export const composer = new EffectComposer(renderer);
 export const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
-// Optional Normal Pass for SSAO
-// export const normalPass = new NormalPass(scene, camera);
-// composer.addPass(normalPass);
+const _bloomRes = LOW_GFX ? new THREE.Vector2(window.innerWidth * 0.5, window.innerHeight * 0.5) : new THREE.Vector2(window.innerWidth, window.innerHeight);
+export const bloomPass = new UnrealBloomPass(_bloomRes, 0.30, 0.3, 0.82);
+bloomPass.enabled = false;
+composer.addPass(bloomPass);
 
-// SSAO Effect
-export const ssaoEffect = new SSAOEffect(camera, null, {
-    samples: 5,
-    rings: 2,
-    distanceThreshold: 0.1,
-    distanceFalloff: 0.02,
-    rangeThreshold: 0.015,
-    rangeFalloff: 0.002,
-    luminanceInfluence: 0.7,
-    radius: 12.0,
-    scale: 0.5,
-    bias: 0.025,
-    intensity: 1.0,
-    color: null,
-    resolutionScale: 0.5
-});
-if (LOW_GFX) {
-    ssaoEffect.blendMode.opacity.value = 0.0;
-}
+export const GhibliSummerShader = {
+    uniforms: {
+        tDiffuse: { value: null }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    `,
+    fragmentShader: `
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
 
-const _bloomResScale = LOW_GFX ? 0.5 : 1.0;
-export const bloomEffect = new BloomEffect({
-    intensity: 1.5,
-    luminanceThreshold: 0.8,
-    luminanceSmoothing: 0.1,
-    resolutionScale: _bloomResScale
-});
+        void main() {
+            vec4 texel = texture2D( tDiffuse, vUv );
+            vec3 col = texel.rgb;
 
-const ghibliSummerFragmentShader = `
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec3 col = inputColor.rgb;
-    float lum = dot(col, vec3(0.299, 0.587, 0.114));
+            float lum = dot(col, vec3(0.299, 0.587, 0.114));
 
-    vec3 warmGold = col * vec3(1.07, 1.02, 0.92);
-    vec3 azureShadow = col * vec3(0.93, 0.98, 1.07);
-    col = mix(azureShadow, warmGold, smoothstep(0.2, 0.75, lum));
+            vec3 warmGold = col * vec3(1.07, 1.02, 0.92);
+            vec3 azureShadow = col * vec3(0.93, 0.98, 1.07);
+            col = mix(azureShadow, warmGold, smoothstep(0.2, 0.75, lum));
 
-    col = mix(vec3(lum), col, 1.18);
-    col += max(vec3(0.0), col - 0.55) * vec3(0.12, 0.09, 0.02);
+            col = mix(vec3(lum), col, 1.18);
+            col += max(vec3(0.0), col - 0.55) * vec3(0.12, 0.09, 0.02);
 
-    vec2 centeredUv = (uv - 0.5) * 2.0;
-    float vign = clamp(1.0 - dot(centeredUv, centeredUv) * 0.14, 0.0, 1.0);
-    col *= vign;
+            vec2 uv = (vUv - 0.5) * 2.0;
+            float vign = clamp(1.0 - dot(uv, uv) * 0.14, 0.0, 1.0);
+            col *= vign;
 
-    outputColor = vec4(col, inputColor.a);
-}
-`;
+            gl_FragColor = vec4(col, texel.a);
+        }
+    `
+};
 
-export class GhibliSummerEffect extends Effect {
-    constructor() {
-        super("GhibliSummerEffect", ghibliSummerFragmentShader);
-    }
-}
+export const GodRaysShader = {
+    uniforms: {
+        tDiffuse: { value: null },
+        uSunScreenPos: { value: new THREE.Vector2(0.5, 0.5) },
+        uIntensity: { value: 0.15 },
+        uDecay: { value: 0.90 },
+        uDensity: { value: 0.40 },
+        uWeight: { value: 0.30 },
+        uSunVisible: { value: 1.0 }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: `
+        uniform sampler2D tDiffuse;
+        uniform vec2 uSunScreenPos;
+        uniform float uIntensity;
+        uniform float uDecay;
+        uniform float uDensity;
+        uniform float uWeight;
+        uniform float uSunVisible;
+        varying vec2 vUv;
 
-export const summerEffect = new GhibliSummerEffect();
+        float pseudoRand(vec2 p) {
+            return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
+        }
 
-const godRaysFragmentShader = `
-uniform vec2 uSunScreenPos;
-uniform float uIntensity;
-uniform float uDecay;
-uniform float uDensity;
-uniform float uWeight;
-uniform float uSunVisible;
+        void main() {
+            vec4 texel = texture2D(tDiffuse, vUv);
 
-float pseudoRand(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
-}
+            vec2 deltaUV = (vUv - uSunScreenPos);
+            float dist = length(deltaUV);
+            deltaUV *= (1.0 / 32.0) * uDensity;
 
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec2 deltaUV = (uv - uSunScreenPos);
-    float dist = length(deltaUV);
-    deltaUV *= (1.0 / 32.0) * uDensity; 
+            float dither = pseudoRand(gl_FragCoord.xy);
+            vec2 sampleUV = vUv - (deltaUV * dither);
 
-    float dither = pseudoRand(gl_FragCoord.xy);
-    vec2 sampleUV = uv - (deltaUV * dither);
-    
-    float illumination = 0.0;
-    float currentWeight = uWeight;
-    
-    for(int i = 0; i < 32; i++) {
-        sampleUV -= deltaUV;
-        vec4 samp = texture2D(inputBuffer, sampleUV);
-        float lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
-        float bright = smoothstep(0.45, 0.85, lum);
-        illumination += bright * currentWeight;
-        currentWeight *= uDecay;
-    }
-    
-    float edgeFade = 1.0 - smoothstep(0.4, 1.5, dist);
-    vec3 rayColor = vec3(1.0, 0.9, 0.7) * illumination * uIntensity * edgeFade * uSunVisible;
-    
-    outputColor = vec4(inputColor.rgb + rayColor, inputColor.a);
-}
-`;
+            float illumination = 0.0;
+            float currentWeight = uWeight;
 
-export class GodRaysEffect extends Effect {
-    constructor() {
-        super("GodRaysEffect", godRaysFragmentShader, {
-            uniforms: new Map([
-                ["uSunScreenPos", new THREE.Uniform(new THREE.Vector2(0.5, 0.5))],
-                ["uIntensity", new THREE.Uniform(1.0)],
-                ["uDecay", new THREE.Uniform(0.927)],
-                ["uDensity", new THREE.Uniform(0.50)],
-                ["uWeight", new THREE.Uniform(0.75)],
-                ["uSunVisible", new THREE.Uniform(1.0)]
-            ])
-        });
-    }
-}
+            for(int i = 0; i < 32; i++) {
+                sampleUV -= deltaUV;
+                vec4 samp = texture2D(tDiffuse, sampleUV);
+                float lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
+                float bright = smoothstep(0.70, 0.95, lum);
+                illumination += bright * currentWeight;
+                currentWeight *= uDecay;
+            }
 
-export const godRaysEffect = new GodRaysEffect();
+            float edgeFade = 1.0 - smoothstep(0.4, 1.5, dist);
+            vec3 rayColor = vec3(1.0, 0.95, 0.85) * illumination * uIntensity * edgeFade * uSunVisible;
 
-const exposureFragmentShader = `
-uniform float uExposure;
+            gl_FragColor = vec4(texel.rgb + rayColor, texel.a);
+        }
+    `
+};
 
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-    vec3 color = inputColor.rgb * uExposure;
-    
-    // ACES Filmic Tone Mapping approximation
-    color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
-    
-    outputColor = vec4(color, inputColor.a);
-}
-`;
+export const godRaysPass = new ShaderPass(GodRaysShader);
+godRaysPass.enabled = !LOW_GFX;
+composer.addPass(godRaysPass);
 
-export class ExposureEffect extends Effect {
-    constructor(exposure = 1.8) {
-        super("ExposureEffect", exposureFragmentShader, {
-            uniforms: new Map([
-                ["uExposure", new THREE.Uniform(exposure)]
-            ])
-        });
-    }
-}
+export const summerPass = new ShaderPass(GhibliSummerShader);
+summerPass.enabled = false;
+composer.addPass(summerPass);
 
-export const exposureEffect = new ExposureEffect(1.8);
-
-export const mainEffectPass = new EffectPass(camera, ssaoEffect, bloomEffect, godRaysEffect, exposureEffect);
-composer.addPass(mainEffectPass);
-
-export const summerEffectPass = new EffectPass(camera, summerEffect);
-composer.addPass(summerEffectPass);
-summerEffectPass.enabled = false;
+export const outputPass = new OutputPass();
+composer.addPass(outputPass);
 
 export let isSummerFilterOn = false;
 
@@ -162,7 +132,7 @@ export function initPostProcessingUI() {
     if (summerBtn) {
         summerBtn.addEventListener('click', () => {
             isSummerFilterOn = !isSummerFilterOn;
-            summerEffectPass.enabled = isSummerFilterOn;
+            summerPass.enabled = isSummerFilterOn;
             if (typeof window.params !== 'undefined') window.params.summerFilter = isSummerFilterOn;
         });
     }

@@ -29,7 +29,7 @@ import { setupGodMode, toggleGodMode } from './physics/GodMode.js';
 
 
 import { scene, camera, renderer, clock } from './core/Engine.js';
-import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposureEffect, initPostProcessingUI } from './core/PostProcessing.js';
+import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProcessingUI } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -468,7 +468,6 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     });
     perfFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
         renderer.toneMappingExposure = v;
-        if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
     });
     perfFolder.add(params, 'terrainRes', ['256', '128', '64']).name('Terrain Res').onChange(v => {
         terrainRes = parseInt(v);
@@ -496,10 +495,10 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
     });
     perfFolder.add(params, 'bloom').name('Bloom').onChange(v => {
         isBloomOn = v;
-        bloomEffect.blendMode.opacity.value = isBloomOn ? 1.0 : 0.0;
+        bloomPass.enabled = isBloomOn;
     });
-    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysEffect.blendMode.opacity.value = v ? 1.0 : 0.0; });
-    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysEffect.uniforms.get("uIntensity").value = v; });
+    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
+    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
 
 
     // Actions for GUI
@@ -847,6 +846,12 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
     envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
 
+    envFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
+        .name('🎨 Shade Mode')
+        .onChange(v => {
+            toonShaderManager.apply(scene, v);
+            gui.controllersRecursive().forEach(c => { if (c.property === 'shadeMode') c.updateDisplay(); });
+        });
 
     const debugFolder = gui.addFolder('🔧 Debug Render');
     debugFolder.add(params, 'showTerrain').name('Terrain').onChange(v => { terrain.visible = v; });
@@ -5506,7 +5511,7 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
 
 
         // Update God Rays sun screen position
-        if (godRaysEffect.blendMode.opacity.value > 0.0 && typeof staticSun !== 'undefined') {
+        if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
             const activeCam = isGodMode ? godCamera : camera;
             tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
             activeCam.getWorldDirection(tempVec1);
@@ -5516,15 +5521,15 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
                 tempVec2.copy(staticSun.position).project(activeCam);
                 const sunScreenX = (tempVec2.x + 1.0) * 0.5;
                 const sunScreenY = (tempVec2.y + 1.0) * 0.5;
-                godRaysEffect.uniforms.get("uSunScreenPos").value.set(sunScreenX, sunScreenY);
-                
+                godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
+
                 const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
                 const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.5));
                 const twilightFade = timePhase === 2 ? 0.0 : 1.0;
                 const fwdFade = Math.max(0.0, Math.min(1.0, (dotFwd + 0.2) * 2.5));
-                godRaysEffect.uniforms.get("uSunVisible").value = fwdFade * screenFade * twilightFade;
+                godRaysPass.uniforms.uSunVisible.value = fwdFade * screenFade * twilightFade;
             } else {
-                godRaysEffect.uniforms.get("uSunVisible").value = 0.0;
+                godRaysPass.uniforms.uSunVisible.value = 0.0;
             }
         }
 
@@ -5981,9 +5986,8 @@ import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposur
         };
 
         const moonFolder = atmoFolder.addFolder('🌙 Moonlight & Night');
-        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => { 
-            renderer.toneMappingExposure = v; 
-            if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
+        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
+            renderer.toneMappingExposure = v;
         });
         moonFolder.addColor(moonParams, 'moonlightColor').name('Moonlight Color').onChange(v => envConfigs[2].dir = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonlightIntensity', 0, 10, 0.1).name('Moonlight Power').onChange(v => envConfigs[2].dirI = v);

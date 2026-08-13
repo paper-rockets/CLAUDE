@@ -327,12 +327,12 @@ export function createProceduralSky() {
         side: THREE.BackSide,
         transparent: false,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
     });
 
     const geometry = new THREE.SphereGeometry(20000, 64, 32);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.renderOrder = -9999;
+    mesh.renderOrder = -1000;
     mesh.frustumCulled = false;
 
     return { mesh, material, uniforms };
