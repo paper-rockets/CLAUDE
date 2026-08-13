@@ -2088,7 +2088,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     // ==========================================
     const BILLBOARD_TREE_COUNT = 5000;
     const texLoader = new THREE.TextureLoader();
-    const billboardTex = texLoader.load('assets/tree_billboard_1.png');
+    const billboardTex = texLoader.load('assets/tree_billboard_pine_1_norm.png');
     billboardTex.colorSpace = THREE.SRGBColorSpace;
 
     const billboardMat = new THREE.MeshToonMaterial({
@@ -2265,7 +2265,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     jungleBillboardGeo.setAttribute('aLeafHslShift', aBBJungleLeafHslShift);
     jungleBillboardGeo.setAttribute('aBarkHslShift', aBBJungleBarkHslShift);
 
-    const jungleBillboardTex = texLoader.load('assets/tree_billboard_4.png');
+    const jungleBillboardTex = texLoader.load('assets/tree_billboard_jungle1.png');
     jungleBillboardTex.colorSpace = THREE.SRGBColorSpace;
     const jungleBillboardMat = billboardMat.clone();
     jungleBillboardMat.map = jungleBillboardTex;
