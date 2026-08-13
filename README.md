@@ -1,16 +1,12 @@
-# 🧹 Kiki's Flight — Procedural 3D Flying Engine
+# 🧭 Wanderlust — Infinite Procedural 3D Flying Engine
 
-Welcome to **Kiki's Flight**, an infinite procedural 3D flying game built with raw Three.js, toon shading, zero external image textures, custom WebGL shaders, and high-performance instanced mesh recycling.
+Welcome to **Wanderlust**, an infinite procedural 3D flying engine and exploration game built with Three.js, custom WebGL/WebGPU shaders, toon shading, zero external image textures, and high-performance instanced mesh recycling.
 
 ---
 
 ## 🚀 Quick Start (Run Locally)
 
-### **Option 1: Direct File Launch (No Install Needed)**
-1. Double-click `LAUNCH_GAME_SERVER.bat` or `1_run_server.bat` in this folder.
-2. Open your browser to `http://localhost:8000` (or `http://localhost:3000`).
-
-### **Option 2: Node / Vite Dev Server**
+### **Option 1: Modern Dev Server (Recommended)**
 ```bash
 # 1. Install dependencies
 npm install
@@ -18,31 +14,41 @@ npm install
 # 2. Start Vite development server
 npm run dev
 ```
+Open your browser to `http://localhost:3000` (or the port specified in terminal).
+
+### **Option 2: Direct Batch / Local Server**
+1. Double-click `LAUNCH_GAME_SERVER.bat` or run a local static HTTP server.
+2. Navigate to `http://localhost:8000` or `http://localhost:3000`.
 
 ---
 
 ## 🎮 Controls
 
 * **Pitch & Yaw (Steering)**: `W` / `A` / `S` / `D` or `Arrow Keys`
-* **Boost Flight**: Hold `Shift` *(Spawns dynamic aerodynamic wind trails)*
-* **Camera Orbit**: Mouse movement / drag
-* **Time of Day Cycle**: In-game UI button (Smoothly lerps between **Day ☀️**, **Twilight 🌅**, and **Night 🌙**)
+* **Boost Flight**: Hold `Shift` *(Spawns dynamic aerodynamic wind trails & FOV warping)*
+* **Camera Orbit & Look**: Mouse movement / drag
+* **Time of Day & Atmosphere**: In-game UI controls (Seamless transitions between **Day ☀️**, **Twilight 🌅**, and **Night 🌙**)
+* **Weather & Biome Selectors**: Toggle weather effects (rain, snow, dynamic mist) and warp directly between procedural biomes.
 
 ---
 
 ## 🌟 Key Architecture & Engine Features
 
-* **Zero Texture Rule**: 100% of terrain, trees, grass, buildings, clouds, and water are generated procedurally using WebGL primitives and GLSL math. No PNGs or JPGs are loaded.
-* **Infinite Multi-Biome Chunking**: World terrain streams dynamically in a 3x3 grid around player position across **6 distinct biomes**:
+* **Zero Texture Rule**: 100% of terrain, trees, grass, buildings, clouds, and water are generated procedurally using WebGL primitives, mathematical noise, and custom GLSL/WGSL shaders.
+* **Infinite Multi-Biome World Generation**: World terrain streams dynamically in a real-time chunk grid around the player across **9 distinct procedural biomes**:
   1. 🌾 **Plains**: Gentle rolling hills and dense wildflower fields.
-  2. 🌿 **Ghibli Valley**: Emerald grass, procedural Ghibli oaks, and floating seeds.
-  3. 🌴 **Lush Jungle**: High tropical canopies, crooked trunks, and localized volumetric fog.
-  4. 🏝️ **Archipelago**: Oceanic islands, glassy lagoons, and seagull companion AI.
-  5. 🏔️ **Mountains**: Rugged alpine peaks and dense spruce forests.
+  2. 🌿 **Ghibli Valley**: Emerald grass, stylized Ghibli oaks, floating dandelion seeds, and ruins.
+  3. 🌴 **Lush Jungle**: Towering tropical canopies, crooked trunks, and localized volumetric fog.
+  4. 🏝️ **Archipelago**: Oceanic islands, customizable sandy shores, glassy lagoons, and seagull companion AI.
+  5. 🏔️ **Mountains**: Rugged alpine peaks, sheer cliff faces, and dense spruce forests.
   6. 💎 **Crystal Land**: Bioluminescent crystal spires and glowing flora.
-* **35,000+ Instanced Props at 60 FPS**: Micro-props (grass, flowers, rocks, trees) use matrix recycling pool loops (`THREE.InstancedMesh`) to maintain peak performance without runtime garbage collection pauses.
-* **Custom Ocean Fragment Shader**: Shader logic (`waterMat.onBeforeCompile`) generates procedural surface ripples, depth darkening, and inland water ripple-suppression over island heightmaps.
-* **Infinite Cloud Super-Clusters**: 450 puffy `IcosahedronGeometry` blobs clustered into 18 cumulonimbus formations pinned infinitely to camera position.
+  7. 🏜️ **Desert**: Expansive dunes, sandstone mesas, and desert flora.
+  8. 🏜️ **Canyon**: Carved red-rock slot canyons and stratified rock formations.
+  9. ❄️ **North Pole**: Glacial ice sheets, snowy tundras, and arctic atmospheres.
+* **35,000+ Instanced Props at 60 FPS**: Micro-props (grass, flowers, rocks, trees, crystals) utilize matrix recycling pool loops (`THREE.InstancedMesh`) to eliminate runtime garbage collection pauses.
+* **Custom Water & Ocean Shaders**: Fragment shader injection (`waterMat.onBeforeCompile`) generates procedural surface ripples, depth darkening, and inland water ripple-suppression over island heightmaps.
+* **Procedural Volumetric Clouds & Sky**: Raymarched & toon puffy cloud formations pinned dynamically to player position with dynamic Rayleigh/Mie atmospheric scattering.
+* **Dynamic Weather & VFX**: Procedural rain systems, speed-linked wind ribbons, portal warp passes, and biome-specific particle emitters.
 * **Procedural Web Audio API**: Ambient synth chord progressions and speed-linked low-pass wind noise generated natively in-browser without external audio files.
 
 ---
@@ -50,38 +56,40 @@ npm run dev
 ## 📁 Repository Structure
 
 ```
-GAME/
-├── index.html                  # Core Single-File 3D Production Engine
+WANDERLUST/
+├── index.html                  # Main Application Entry Point
 ├── DEVELOPMENT_LOG.md          # Comprehensive Architecture & Project Timeline Log
-├── TerrainEditor.js            # Real-Time In-Game Terrain Heightmap & Biome Tweaker
-├── particleWhaleGenerator.js   # Ambient Sky Particle Whale System
+├── vite.config.ts              # Vite Bundler & Build Configuration
+├── package.json                # Project Dependencies & NPM Scripts
 │
-├── terrain-plains.js           # Plains Biome Generation Module
-├── terrain-ghibli.js           # Ghibli Valley Biome Module
-├── terrain-jungle.js           # Lush Jungle Biome Module
-├── terrain-archipelago.js      # Archipelago Biome Module
-├── terrain-mountains.js        # Mountains Biome Module
-├── terrain-magical.js          # Magical Biome Module
-├── terrain-crystal.js          # Crystal Land Biome Module
+├── src/                        # Modular Engine Source Code
+│   ├── main.js                 # Engine Bootstrapper & Lifecycle
+│   ├── core/                   # Game Loop, Camera, Input Controls
+│   ├── entities/               # Player Character, Broom Physics, Companion AI
+│   ├── environment/            # Atmosphere, Sky Configs, Dynamic Lighting, Clouds
+│   ├── physics/                # Flight Aerodynamics & Terrain Collision
+│   ├── shaders/                # WebGL & WebGPU Custom Shader Library
+│   ├── ui/                     # Real-Time GUI, Biome Selector & Debug Tools
+│   ├── vfx/                    # Weather Particles, Wind Trails, Toon Shaders
+│   └── world/                  # Chunk Manager, Noise Generators & Biome Modules
+│       └── biomes/             # Procedural Generators for all 9 Biomes
 │
-├── kiki-draco.glb              # Draco-Compressed Kiki Character Model
-├── kiki-lowpoly.glb            # Low-Poly Kiki Model Variant
-├── Princess.glb                # Secondary Character Model
-│
-├── LAUNCH_GAME_SERVER.bat      # One-Click Local Python Server Launcher
-├── 1_run_server.bat            # Alternative Batch Server Script
-└── package.json                # Project Dependencies & Vite Scripts
+├── assets/                     # 3D Meshes & Asset Storage
+├── public/                     # Static Game Assets (GLB Models, Billboards)
+└── shaders/                    # Raw GLSL / WGSL Shader Sources
 ```
 
 ---
 
 ## 🛠️ Utility Tools Included
 
-* **GLB & Draco Model Inspector**: Located at `../simple_loader.html` for previewing and inspecting 3D `.glb` assets.
-* **Billboard Generator**: Located at `../billboard_maker.html` for creating procedural foliage billboards.
+* **Terrain & Heightmap Editor**: Real-time in-game parameter tuning for noise octaves, terrain heights, and biome weights.
+* **Model Viewer**: Located at `model_viewer.html` for previewing and inspecting 3D `.glb` assets and animations.
+* **Tree & Billboard Studio**: Tools for generating and previewing optimized procedural foliage billboards.
 
 ---
 
 ## 📄 Documentation
 
 For full architectural details, complete multi-biome specifications, and the project's historical development log, refer to [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md).
+

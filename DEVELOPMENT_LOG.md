@@ -1,15 +1,16 @@
-# 🧹 Kiki's Flying Game — Development Log & Architecture Timeline
+# 🧭 Wanderlust — Development Log & Architecture Timeline
 
-> **A high-performance, procedural 3D flying game built with raw Three.js, toon shading, zero image textures, and multi-biome chunk generation.**
+> **A high-performance, infinite procedural 3D flying and exploration engine built with Three.js, WebGL/WebGPU shaders, toon shading, zero image textures, and dynamic multi-biome chunk generation.**
 
 ---
 
 ## 🌟 Key Technical Highlights
 
-* **Zero Image Textures**: All visuals, models, terrain, and atmospheric effects are procedurally generated via mathematical shaders, primitive geometries, and custom noise functions.
-* **35,000+ Instanced Objects at 60 FPS**: Micro-props (grass, flowers, rocks, trees, clouds) utilize `THREE.InstancedMesh` matrix recycling to maintain peak performance without destroying or re-allocating memory.
-* **Infinite Multi-Biome World**: Seamless chunking engine dynamically swaps between **6 distinct biomes** based on a 2D Simplex noise macro-map.
-* **Custom WebGL Shaders**: Custom fragment shader injection handles oceanic ripples, depth-darkening, and inland water ripple-suppression over land masses.
+* **Zero Image Textures**: All visuals, models, terrain, clouds, and atmospheric effects are procedurally generated via mathematical shaders, primitive geometries, and custom noise functions.
+* **35,000+ Instanced Objects at 60 FPS**: Micro-props (grass, flowers, rocks, trees, crystals, clouds) utilize `THREE.InstancedMesh` matrix recycling to maintain peak performance without destroying or re-allocating memory.
+* **Infinite Multi-Biome World**: Seamless chunking engine dynamically streams across **9 distinct procedural biomes** based on layered Simplex and Perlin noise macro-maps.
+* **Dual WebGL / WebGPU Shader Architecture**: Custom fragment shader injection and WGSL/GLSL compute systems for oceanic ripples, atmospheric scattering, depth-darkening, and terrain blending.
+* **Dynamic Weather & Volumetric VFX**: Real-time procedural rain systems, aerodynamic wind trails, camera FOV warping, and localized volumetric cloud super-clusters.
 * **Procedural Web Audio API**: Ambient synth chord progressions and speed-linked wind low-pass filters generated entirely in-browser without external audio files.
 
 ---
@@ -19,11 +20,14 @@
 | Biome | Visual Style & Props | Lighting & Atmosphere |
 | :--- | :--- | :--- |
 | 🌾 **Plains** | Rolling green hills, dense wildflower fields, soft breeze | Bright sunlight, clear blue skies |
-| 🌿 **Ghibli Valley** | Lush emerald grass, stylized Ghibli oaks, floating dandelion seeds | Warm golden hour sunlight, soft distant fog |
-| 🌴 **Lush Jungle** | High canopy tropical trees, dense undergrowth, crooked palms | Localized jungle fog, moody volumetric light |
-| 🏝️ **Archipelago** | Scattered tropical islands, sandy shores, glassy lagoons | Coastal sea mist, seagull companion birds |
-| 🏔️ **Mountains** | High altitude rugged peaks, alpine conifers, steep rock faces | Crisp cool atmosphere, high elevation clouds |
-| 💎 **Crystal Land** | Bioluminescent crystal clusters, glowing flora, crystal spires | Moody twilight, specular crystal shimmer |
+| 🌿 **Ghibli Valley** | Lush emerald grass, stylized Ghibli oaks, floating dandelion seeds, ancient ruins | Warm golden hour sunlight, soft distant fog |
+| 🌴 **Lush Jungle** | High canopy tropical trees, dense undergrowth, crooked palms, hanging vines | Localized jungle fog, moody volumetric light |
+| 🏝️ **Archipelago** | Scattered tropical islands, shallow sandy beaches, glassy lagoons, seagull AI | Coastal sea mist, clear azure horizon |
+| 🏔️ **Mountains** | High altitude rugged peaks, alpine conifers, steep rock faces, snow caps | Crisp cool atmosphere, high elevation clouds |
+| 💎 **Crystal Land** | Bioluminescent crystal clusters, glowing flora, towering crystal spires | Moody twilight, specular crystal shimmer |
+| 🏜️ **Canyon** | Carved red-rock slot canyons, stratified mesas, desert brush | High-contrast sun, warm dusty atmosphere |
+| 🏜️ **Desert** | Expansive undulating sand dunes, sandstone arches, cacti, oasis springs | Blazing desert sun, heat haze |
+| ❄️ **North Pole** | Glacial ice sheets, frozen pack ice, snowy tundras, aurora effects | Arctic twilight, crystalline frost haze |
 
 ---
 
@@ -33,7 +37,7 @@
 * **Timeframe**: *July 6 – July 12, 2026*
 * **Focus**: Establishing core flight mechanics and terrain rendering.
 * **Milestones**:
-  * Implemented WASD pitch/yaw steering and Shift boost mechanics on Kiki's broom.
+  * Implemented WASD pitch/yaw steering and Shift boost mechanics on flight controller.
   * Designed initial 2D Simplex noise heightmap generation for island landmasses.
   * Implemented raw Three.js toon shading (`MeshToonMaterial`) with a custom grayscale gradient map.
 
@@ -41,8 +45,8 @@
 * **Timeframe**: *July 14 – July 20, 2026*
 * **Focus**: Expanding vegetation density and procedural plant logic.
 * **Milestones**:
-  * Built procedural tree generation algorithms (`ez-tree`) for tropical palms, crooked jungle trunks, and dense canopy foliage.
-  * Implemented high-density instanced grass field shaders (`threex.grass` / `procedural-grass-generator`).
+  * Built procedural tree generation algorithms for tropical palms, crooked jungle trunks, and dense canopy foliage.
+  * Implemented high-density instanced grass field shaders.
   * Added undergrowth foliage, fern scatter, and ground-cover micro-props.
 
 ### 🔹 Stage 3: Multi-Biome Expansion & Dynamic Systems
@@ -63,24 +67,32 @@
   * Optimized prop recycling loops to maintain 60 FPS while handling over 35,000 simultaneous active instances.
 
 ### 🔹 Stage 5: Master Combined Engine & Integrated Tools
-* **Timeframe**: *August 5, 2026 – Present*
+* **Timeframe**: *August 5, 2026*
 * **Focus**: Consolidating all biomes into a single seamless chunking engine.
 * **Milestones**:
-  * Consolidated all 6 biomes into the master runtime (`index.html`).
+  * Consolidated all biomes into the master runtime.
   * Built interactive **Terrain Editor** (`TerrainEditor.js`) for real-time heightmap tweaking.
   * Integrated GLB character model support (Kiki Draco/Lowpoly, Princess model).
-  * Packaged local Python server execution scripts (`1_run_server.bat` / `start_server.bat`).
+  * Packaged local server execution scripts (`1_run_server.bat` / `start_server.bat`).
 
----
-
-### 🔹 Stage 6: Modularization & Modernization
-* **Timeframe**: *August 2026 – Present*
-* **Focus**: Refactoring the monolithic engine into a modern ES module architecture and integrating a build system.
+### 🔹 Stage 6: Modularization & Vite Modernization
+* **Timeframe**: *August 2026*
+* **Focus**: Refactoring monolithic engine into a modern ES module architecture with Vite build system.
 * **Milestones**:
-  * Refactored the monolithic `index.html` engine into dedicated modules under the `src/` directory (Core, Entities, Environment, Physics, Shaders, UI, VFX, World).
-  * Transitioned from legacy Python/batch scripts to a modern **Vite** build system for faster Hot Module Replacement (HMR) and dependency management.
-  * Extracted custom shaders into a dedicated shader management system.
-  * Replaced monolithic terrain generators with modular imports and refactored tree billboard rendering for enhanced performance and visual fidelity.
+  * Refactored monolithic scripts into dedicated modules under `src/` (Core, Entities, Environment, Physics, Shaders, UI, VFX, World).
+  * Integrated **Vite** bundler for instant Hot Module Replacement (HMR) and production builds.
+  * Extracted custom shaders into modular libraries with unified parameter uniforms.
+  * Replaced monolithic terrain generators with modular per-biome scripts.
+
+### 🔹 Stage 7: WebGPU Port, Atmospheric Scattering, Weather & Shoreline Customization
+* **Timeframe**: *August 2026 – Present*
+* **Focus**: Next-generation WebGPU graphics pipeline, dynamic weather, atmospheric skies, and expanded biomes.
+* **Milestones**:
+  * Expanded biome portfolio to **9 total biomes** (including **Canyon**, **Desert**, and **North Pole**).
+  * Built procedural atmospheric scattering sky system with Preetham/Rayleigh-Mie sky models and dynamic zenith/horizon gradients.
+  * Implemented real-time **Dynamic Weather System** with GPU particle rain, splash rings, and localized mist.
+  * Enhanced **Archipelago Beach & Shorelines** with gentle gradient coastal sand transitions and water height alignment.
+  * Added real-time GUI controls for weather triggers, biome teleports, tree billboard editing, and camera FOV dynamics.
 
 ---
 
@@ -88,30 +100,32 @@
 
 ```
 WANDERLUST/
-├── index.html                  # Main Entry Point
+├── index.html                  # Main Application Entry Point
 ├── DEVELOPMENT_LOG.md          # Architecture & Development Log
 ├── vite.config.ts              # Vite Build Configuration
 ├── package.json                # Dependencies and NPM Scripts
-├── public/                     # Static Assets (GLB models, etc.)
-├── assets/                     # Raw Textures and Billboard Assets
+├── public/                     # Static Assets (GLB models, billboards)
+├── assets/                     # 3D Mesh & Texture Assets
 └── src/                        # Modular Game Source Code
-    ├── main.js                 # Engine Initialization
+    ├── main.js                 # Engine Initialization & Main Loop
     ├── core/                   # Game Loop, Renderer, Controls
-    ├── entities/               # Player, NPC, and Object logic
-    ├── environment/            # Biomes, Terrain, Trees, Grass
-    ├── physics/                # Collision and Physics logic
-    ├── shaders/                # Core WebGL Shaders
-    ├── ui/                     # User Interface components
-    ├── vfx/                    # Particle Systems, Clouds
-    └── world/                  # Chunk Manager and World Generation
+    ├── entities/               # Player, Companion AI, Flight Mechanics
+    ├── environment/            # Atmosphere, Sky Configs, Lighting, Clouds
+    ├── physics/                # Flight Aerodynamics & Terrain Collision
+    ├── shaders/                # WebGL & WebGPU Shaders (Atmosphere, Terrain, Water)
+    ├── ui/                     # User Interface, Biome Warping, Debug GUI
+    ├── vfx/                    # Dynamic Weather, Wind Trails, Toon Shaders
+    └── world/                  # Chunk Manager, Terrain Generators, Noise
+        └── biomes/             # 9 Procedural Biome Generator Modules
 ```
 
 ---
 
 ## 📊 Codebase Metrics
 
-* **Total Iteration Snapshots**: 63+ development folders
+* **Total Iteration Snapshots**: 65+ development iterations
 * **Source Files Analyzed**: 2,800+ files across all iterations
 * **Total Code & Markup**: Over 1.4 Million lines of code
-* **Total Text Volume**: 5.9 Million+ words of procedural logic, GLSL shaders, and environment configurations
+* **Total Text Volume**: 5.9 Million+ words of procedural logic, GLSL/WGSL shaders, and environment configurations
 * **Estimated LLM Token Footprint**: ~150M – 300M+ total API tokens generated across iterative development sessions
+
