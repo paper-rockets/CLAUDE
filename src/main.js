@@ -23,11 +23,13 @@ import { getBiomeAt, getWorldHeight, getWorldColor, getIslandData } from './worl
 
 import { PlayerPhysics } from './physics/PlayerPhysics.js';
 import { CameraManager } from './physics/CameraManager.js';
+import { createProceduralSky } from './shaders/atmosphere/proceduralSky.js';
+import { BIOME_SKY_CONFIGS, WEATHER_PRESETS } from './environment/BiomeSkyConfigs.js';
 import { setupGodMode, toggleGodMode } from './physics/GodMode.js';
 
 
 import { scene, camera, renderer, clock } from './core/Engine.js';
-import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProcessingUI } from './core/PostProcessing.js';
+import { composer, renderPass, bloomEffect, godRaysEffect, summerEffect, exposureEffect, initPostProcessingUI } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -44,6 +46,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
     import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
     import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+    import { ToonShaderManager } from './vfx/ToonShaderManager.js';
 
     let isWindOn = false;
     let isRainOn = false;
@@ -315,6 +318,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
+        fogIntensity: 1.0,
         terrainSmoothing: 0.0,
         waterMode: 'realistic',
         toggleRealistic: true,
@@ -369,11 +373,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         enableSkydome: false,
         daySkydomeTexture: Math.random() > 0.5 ? '1' : '2',
         nightSkydomeTexture: '2', // Default to 2 because it has the transparency mask
-        showClouds: true,
-        showCloudsRegular: true,
-        showCloudsHigh: true,
-        showCloudsWispy: true,
-        showCloudsMega: true,
+        showClouds: false,
+        showCloudsRegular: false,
+        showCloudsHigh: false,
+        showCloudsWispy: false,
+        showCloudsMega: false,
         cloudScaleRegular: 1.0,
         cloudScaleHigh: 1.0,
         cloudScaleWispy: 1.0,
@@ -382,7 +386,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         cloudCountHigh: LOW_GFX ? 0 : 24,
         cloudCountWispy: LOW_GFX ? 0 : 30,
         cloudCountMega: LOW_GFX ? 0 : 24,
-        showCloudsHorizon: true,
+        showCloudsHorizon: false,
+        showVolumetricClouds: false,
         cloudCountHorizon: LOW_GFX ? 0 : 45,
         cloudScaleHorizon: 1.0,
         showBirds: true,
@@ -391,7 +396,66 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         showMap: true,
         showGUI: true,
         exposure: 1.8,
+        shadeMode: 'original',
     };
+
+    const toonShaderManager = new ToonShaderManager();
+
+    // SAVE / LOAD PRESETS
+    const settingsManager = {
+        presetName: 'My Preset 1',
+        saveSetting: () => {
+            const currentData = gui.save();
+            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+            saved[settingsManager.presetName] = currentData;
+            localStorage.setItem('wl_custom_presets', JSON.stringify(saved));
+            updatePresetDropdown();
+            alert('Saved preset: ' + settingsManager.presetName);
+        },
+        loadPreset: 'Default',
+        loadSetting: () => {
+            if (settingsManager.loadPreset === 'Default') {
+                gui.reset();
+                return;
+            }
+            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+            if (saved[settingsManager.loadPreset]) {
+                gui.load(saved[settingsManager.loadPreset]);
+            }
+        },
+        deleteSetting: () => {
+            if (settingsManager.loadPreset === 'Default') return alert("Cannot delete Default");
+            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+            delete saved[settingsManager.loadPreset];
+            localStorage.setItem('wl_custom_presets', JSON.stringify(saved));
+            settingsManager.loadPreset = 'Default';
+            updatePresetDropdown();
+            alert('Deleted preset.');
+        },
+        reset: () => {
+            gui.reset();
+        }
+    };
+
+    const customPresetsFolder = gui.addFolder('💾 Save & Load Presets');
+    customPresetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
+    customPresetsFolder.add(settingsManager, 'saveSetting').name('Save Setting');
+    let loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', ['Default']).name('Select Preset');
+    customPresetsFolder.add(settingsManager, 'loadSetting').name('Load Selected');
+    customPresetsFolder.add(settingsManager, 'deleteSetting').name('Delete Selected');
+    customPresetsFolder.add(settingsManager, 'reset').name('Reset to Default');
+
+    function updatePresetDropdown() {
+        const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+        const options = ['Default', ...Object.keys(saved)];
+        if (loadDropdown.options) {
+            loadDropdown = loadDropdown.options(options);
+        } else {
+            loadDropdown.destroy();
+            loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', options).name('Select Preset');
+        }
+    }
+    updatePresetDropdown();
 
     const perfFolder = gui.addFolder('Performance');
     perfFolder.add(params, 'quality', ['Regular', 'Low']).name('Quality').onChange(v => {
@@ -404,6 +468,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
     perfFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
         renderer.toneMappingExposure = v;
+        if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
     });
     perfFolder.add(params, 'terrainRes', ['256', '128', '64']).name('Terrain Res').onChange(v => {
         terrainRes = parseInt(v);
@@ -431,8 +496,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
     perfFolder.add(params, 'bloom').name('Bloom').onChange(v => {
         isBloomOn = v;
-        bloomPass.enabled = isBloomOn;
+        bloomEffect.blendMode.opacity.value = isBloomOn ? 1.0 : 0.0;
     });
+    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysEffect.blendMode.opacity.value = v ? 1.0 : 0.0; });
+    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysEffect.uniforms.get("uIntensity").value = v; });
+
 
     // Actions for GUI
     const guiActions = {
@@ -455,6 +523,51 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         };
         navFolder.add(navParams, zn.name).name(`${zn.name}`);
     });
+
+    // Add Presets folder
+    const presetFolder = gui.addFolder('🌟 Environment Presets');
+    presetFolder.add({ clearDesertDay: () => {
+        // Teleport to Sand Dunes
+        teleportToBiome('Desert Dunes');
+        
+        // No fog at all
+        params.fogPlane = false;
+        if (typeof window.fogGroup !== 'undefined') window.fogGroup.visible = false;
+        
+        // Clear blue sky (day)
+        params.timeOfDay = 'day';
+        
+        // Very little cloud
+        if (typeof cloudParams !== 'undefined') {
+            cloudParams.density = 0.1;
+            
+            // Turn off volumetric raymarched sky clouds for clear sky
+            params.showVolumetricClouds = false;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
+                toonCloudMat.uniforms.uEnableClouds.value = 0.0;
+            }
+            
+            // Apply density to clouds
+            if (typeof instClouds !== 'undefined') {
+                instClouds.count = Math.max(1, Math.floor(params.cloudCountRegular * cloudParams.density));
+                if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
+            }
+            if (typeof instHighClouds !== 'undefined') {
+                instHighClouds.count = Math.max(1, Math.floor(params.cloudCountHigh * cloudParams.density));
+                if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
+            }
+            if (typeof instWispyClouds !== 'undefined') {
+                instWispyClouds.count = Math.max(1, Math.floor(params.cloudCountWispy * cloudParams.density));
+                if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
+            }
+            if (typeof instMegaClouds !== 'undefined') {
+                instMegaClouds.count = Math.max(1, Math.floor(params.cloudCountMega * cloudParams.density));
+                if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
+            }
+        }
+        
+        gui.controllersRecursive().forEach(c => c.updateDisplay());
+    }}, 'clearDesertDay').name('🏜️ Clear Desert Day');
 
     // Add Editor folder (Terrain Editor & Edit Crystals)
     const editorFolder = gui.addFolder('Editor');
@@ -695,6 +808,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             scene.fog.far = 200000;
         }
     });
+    envFolder.add(params, 'fogIntensity', 0.1, 5.0, 0.1).name('Fog Intensity');
     envFolder.add(params, 'wind').name('Wind').onChange(v => { if(isWindOn !== v) document.getElementById('wind-toggle').click(); });
     const rainFolder = envFolder.addFolder('Rain Settings');
     params.rainSize = 2.0;
@@ -730,8 +844,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             fogFolder.title('Ground Fog (' + bName + ')');
         }
     }, 500);
-    envFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
-    envFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
+
     envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
 
 
@@ -813,6 +926,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     debugFolder.add(params, 'showFogPlanes').name('Fog Planes').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     debugFolder.add(params, 'showCrystals').name('Crystals').onChange(v => { instCrystals.visible = v; });
 
+    const shadingFolder = debugFolder.addFolder('🎨 Shade Mode');
+    shadingFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
+        .name('Mode (1/2/3)')
+        .onChange(v => toonShaderManager.apply(scene, v));
 
     debugFolder.add(params, 'showMap').name('World Map').onChange(v => { const el = document.getElementById('world-map'); if(el) el.style.display = v ? 'block' : 'none'; });
     
@@ -879,6 +996,17 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     window.addEventListener('keydown', (e) => {
         if ((e.key === 'h' || e.key === 'H') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
             toggleGUI();
+        }
+    });
+
+    // Shade mode hotkeys: 1=original, 2=hard cel, 3=flat/gouache
+    window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const modeMap = { '1': 'original', '2': 'cel', '3': 'flat' };
+        if (modeMap[e.key]) {
+            params.shadeMode = modeMap[e.key];
+            toonShaderManager.apply(scene, params.shadeMode);
+            gui.controllersRecursive().forEach(c => { if (c.property === 'shadeMode') c.updateDisplay(); });
         }
     });
 
@@ -1294,21 +1422,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     scene.add(dirLight);
 
     // Sun Glare (Lensflare)
-    const flareTextureLoader = new THREE.TextureLoader();
-    const textureFlare0 = flareTextureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lensflare/lensflare0.png');
-    const textureFlare3 = flareTextureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lensflare/lensflare3.png');
-    
     const staticSun = new THREE.Group();
     staticSun.position.set(0, 1500, -20000); // Massive distance so Kiki can fly towards it
     scene.add(staticSun);
-
-    const lensflare = new Lensflare();
-    lensflare.addElement(new LensflareElement(textureFlare0, 1600, 0, dirLight.color)); // Massive permanent horizon glare
-    lensflare.addElement(new LensflareElement(textureFlare3, 60, 0.6));
-    lensflare.addElement(new LensflareElement(textureFlare3, 70, 0.7));
-    lensflare.addElement(new LensflareElement(textureFlare3, 120, 0.9));
-    lensflare.addElement(new LensflareElement(textureFlare3, 70, 1.0));
-    staticSun.add(lensflare);
 
     // Physical Sun Sphere
     const sunGeo = new THREE.SphereGeometry(600, 32, 32);
@@ -1372,9 +1488,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         uShimmerMult: { value: 1.0 }
     };
 
-    const terrainMat = new THREE.MeshToonMaterial({ 
+    const terrainMat = new THREE.MeshStandardMaterial({ 
         vertexColors: true, 
-        gradientMap,
+        roughness: 0.85,
+        metalness: 0.05,
         dithering: true
     });
     
@@ -1386,6 +1503,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         shader.uniforms.uShimmerMult = terrainUniforms.uShimmerMult;
         
         shader.vertexShader = `
+            attribute float aBiomeType;
+            varying float vBiomeType;
             varying vec3 vWorldPos;
             varying vec3 vViewPos;
         ` + shader.vertexShader;
@@ -1394,7 +1513,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             `#include <worldpos_vertex>`,
             `#include <worldpos_vertex>
              vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-             vViewPos = - (modelViewMatrix * vec4(transformed, 1.0)).xyz;`
+             vViewPos = - (modelViewMatrix * vec4(transformed, 1.0)).xyz;
+             vBiomeType = aBiomeType;`
         );
 
         shader.fragmentShader = `
@@ -1402,9 +1522,49 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             uniform vec3 uSunDir;
             uniform float uShimmerMult;
             uniform sampler2D uSandNoiseMap;
+            varying float vBiomeType;
             varying vec3 vWorldPos;
             varying vec3 vViewPos;
+
+            float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453123);
+            }
+            float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                vec2 u = f*f*(3.0-2.0*f);
+                return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
+                           mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
+            }
+            float fbm(vec2 p) {
+                float f = 0.0;
+                f += 0.5000 * noise(p); p = p * 2.02;
+                f += 0.2500 * noise(p); p = p * 2.03;
+                f += 0.1250 * noise(p);
+                return f;
+            }
         ` + shader.fragmentShader;
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+            `#include <color_fragment>`,
+            `#include <color_fragment>
+            
+            // Realistic terrain macro-detail noise overlay
+            vec2 macroUV = vWorldPos.xz * 0.04;
+            float macroNoise = texture2D(uSandNoiseMap, macroUV).r;
+            float microNoise = texture2D(uSandNoiseMap, vWorldPos.xz * 0.15).g;
+            float detailBlend = (macroNoise * 0.6 + microNoise * 0.4) * 0.3 - 0.15;
+            
+            // Apply noise only to non-sand/non-snow (grass/dirt/rock) or globally
+            diffuseColor.rgb = clamp(diffuseColor.rgb + detailBlend, 0.0, 1.0);
+
+            // Animated Cloud Shadows using procedural noise
+            vec2 cloudUV = vWorldPos.xz * 0.0015 + uTime * 0.05;
+            float cloudNoiseVal = fbm(cloudUV);
+            float cloudShadow = smoothstep(0.35, 0.65, cloudNoiseVal) * 0.35;
+            diffuseColor.rgb *= (1.0 - cloudShadow);
+            `
+        );
 
         shader.fragmentShader = shader.fragmentShader.replace(
             `#include <dithering_fragment>`,
@@ -1416,8 +1576,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             vec3 halfDir = normalize(lightDir + viewDir);
             vec3 ref = reflect(-viewDir, norm);
             
-            // 1. Detect Sand / Warm Dune Surface (r > 0.55 and r > b)
-            float isSand = step(0.55, gl_FragColor.r) * step(gl_FragColor.b, gl_FragColor.r * 0.85);
+            // 1. Detect Sand / Warm Dune Surface (explicit attribute)
+            float isSand = step(0.9, vBiomeType) * step(vBiomeType, 1.1);
             
             if (isSand > 0.1) {
                 // Dune Rim Lighting (Fresnel glow along grazing angles and dune ridges)
@@ -1442,8 +1602,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 gl_FragColor.rgb += (rimGlow + specColor) * isSand;
             }
 
-            // 2. Detect Snow / North Pole Glacial Surface (High blue channel b > 0.70 & g > 0.55)
-            float isSnow = step(0.70, gl_FragColor.b) * step(0.55, gl_FragColor.g) * (1.0 - isSand);
+            // 2. Detect Snow / North Pole Glacial Surface (explicit attribute)
+            float isSnow = step(1.9, vBiomeType) * step(vBiomeType, 2.1);
             
             if (isSnow > 0.1) {
                 // Glacial Rim Lighting (Crisp sky-blue rim highlight)
@@ -1480,16 +1640,25 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     matTree.onBeforeCompile = (shader) => {
         shader.uniforms.uPlayerPos = treeUniforms.uPlayerPos;
         shader.uniforms.uTreeScale = treeUniforms.uTreeScale;
+        shader.uniforms.uTime = terrainUniforms.uTime;
         
         shader.vertexShader = `
             uniform vec3 uPlayerPos;
             uniform float uTreeScale;
+            uniform float uTime;
             ${shader.vertexShader}
         `.replace(
             `#include <begin_vertex>`,
             `
             #include <begin_vertex>
             transformed *= uTreeScale;
+            
+            // Wind Sway
+            vec4 worldPos = instanceMatrix * vec4(position, 1.0);
+            float sway = sin(uTime * 2.0 + worldPos.x * 0.05 + worldPos.z * 0.05) * 0.08;
+            float secondarySway = cos(uTime * 3.5 + worldPos.x * 0.1) * 0.03;
+            transformed.x += (sway + secondarySway) * max(0.0, position.y);
+            transformed.z += (sway + secondarySway) * max(0.0, position.y);
             `
         );
     };
@@ -1561,8 +1730,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         const pos = terrainGeo.attributes.position;
         if (!terrainGeo.attributes.color) {
             terrainGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3));
+            terrainGeo.setAttribute('aBiomeType', new THREE.BufferAttribute(new Float32Array(pos.count), 1));
         }
         const colors = terrainGeo.attributes.color;
+        const biomeTypes = terrainGeo.attributes.aBiomeType;
         const norm = terrainGeo.attributes.normal;
 
         for (let i = 0; i < pos.count; i++) {
@@ -1587,8 +1758,16 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             
             // Add dirt / frost path
             const pathMask = getPathStrength(worldX, worldZ);
+            const currentBiome = getBiomeAt(worldX, worldZ);
+            
+            let bType = 0.0;
+            if (currentBiome && currentBiome.name) {
+                if (currentBiome.name.includes('Desert')) bType = 1.0;
+                else if (currentBiome.name.includes('North Pole')) bType = 2.0;
+            }
+            biomeTypes.setX(i, bType);
+
             if (pathMask > 0 && h > 2.0 && h < 25.0) {
-                const currentBiome = getBiomeAt(worldX, worldZ);
                 if (currentBiome && currentBiome.name && currentBiome.name.includes('North Pole')) {
                     tempColor.lerp(new THREE.Color(0xd0edff), pathMask * 0.35);
                 } else if (!currentBiome || !currentBiome.name || (!currentBiome.name.includes('Crystal') && !currentBiome.name.includes('Ocean') && !currentBiome.name.includes('Desert') && !currentBiome.name.includes('Canyon'))) {
@@ -1601,6 +1780,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         
         pos.needsUpdate = true;
         colors.needsUpdate = true;
+        biomeTypes.needsUpdate = true;
         norm.needsUpdate = true;
         
         lastTerrainGridX = gridX;
@@ -2609,6 +2789,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const dummyInit = new THREE.Object3D();
     dummyInit.position.set(0, -1000, 0); // Force teleport on first frame!
     dummyInit.scale.set(0, 0, 0);
+    dummyInit.scale.set(0, 0, 0);
     dummyInit.updateMatrix();
     for (let i = 0; i < MAX_CLOUD_COUNT; i++) instClouds.setMatrixAt(i, dummyInit.matrix);
     for (let i = 0; i < MAX_HIGH_CLOUD_COUNT; i++) instHighClouds.setMatrixAt(i, dummyInit.matrix);
@@ -2638,8 +2819,18 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     scene.add(instFlowers);
     
     // ==========================================
-    // VOLUMETRIC TOON SKY CLOUDS (SpiralNoiseC Raymarched Sky)
+    // PROCEDURAL SKYDOME (replaces PNG cubemap + SpiralNoiseC cloud dome)
     // ==========================================
+    const { mesh: proceduralSkyMesh, material: proceduralSkyMat, uniforms: skyUniforms } = createProceduralSky();
+    window._skyDbg = skyUniforms;
+    scene.add(proceduralSkyMesh);
+    scene.background = null;
+    let currentWeather = 'clear';
+
+    // --- REMOVED: old toon cloud dome + cubemap skybox ---
+    // Kept as dead code reference, remove once procedural sky is validated
+    const _OLD_SKYDOME_REMOVED = true; // marker
+    if (false) { // dead code block
     const toonCloudGeo = new THREE.SphereGeometry(22000, 32, 16);
     const toonCloudMat = new THREE.ShaderMaterial({
         side: THREE.BackSide,
@@ -2733,7 +2924,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     });
 
     const toonCloudDome = new THREE.Mesh(toonCloudGeo, toonCloudMat);
-    scene.add(toonCloudDome);
+    // scene.add(toonCloudDome);
     
 
 
@@ -2745,7 +2936,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const skyboxTexLoader = new THREE.TextureLoader();
 
     // Skydome Implementation
-    const skydomeGeo = new THREE.BoxGeometry(18000, 18000, 18000);
+    const skydomeGeo = new THREE.BoxGeometry(18000, 18000, 18000, 16, 16, 16);
     const dayFaces = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
     const dayMats = dayFaces.map(face => {
         const tex = skyboxTexLoader.load(`assets/skydome/day/${params.daySkydomeTexture}/${face}.png`);
@@ -2784,9 +2975,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     nightSkyboxMesh = new THREE.Mesh(skydomeGeo, nightMats);
     nightSkyboxMesh.renderOrder = -2;
     scene.add(nightSkyboxMesh);
+    } // end dead code block
 
     // Initialize all to hidden
     const dummyMatrix = new THREE.Matrix4();
+    dummyMatrix.makeScale(0, 0, 0);
     dummyMatrix.setPosition(0, -1000, 0);
     [...treeMeshes, instRocks, instBushes, instClouds, instFlowers].forEach(mesh => {
         for(let i=0; i<mesh.count; i++) {
@@ -3098,20 +3291,46 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
 
         // === TREE VISIBILITY: runs EVERY FRAME (not gated by shouldUpdateTerrain) ===
+        // We calculate treesPossibleNearby here so we can fully hide tree meshes and save massive GPU vertex processing
+        let treesPossibleNearby = false;
         {
             const isFreeCamVis = (window.editorState && window.editorState.isEditorMode) || isGodMode;
             const visFocusX = isFreeCamVis ? (isGodMode ? godCamera.position.x : camera.position.x) : playerX;
             const visFocusZ = isFreeCamVis ? (isGodMode ? godCamera.position.z : camera.position.z) : playerZ;
+            
+            const checkDist = 800; // max tree radius
+            const points = [
+                { x: visFocusX, z: visFocusZ },
+                { x: visFocusX + checkDist, z: visFocusZ },
+                { x: visFocusX - checkDist, z: visFocusZ },
+                { x: visFocusX, z: visFocusZ + checkDist },
+                { x: visFocusX, z: visFocusZ - checkDist }
+            ];
+            
+            for (let pIdx = 0; pIdx < points.length; pIdx++) {
+                const p = points[pIdx];
+                const biome = getBiomeAt(p.x, p.z);
+                const islandData = getIslandData(p.x, p.z);
+                if (biome && biome.treesOk && islandData.mask > 0.0) {
+                    treesPossibleNearby = true;
+                    break;
+                }
+            }
+
             // Check BOTH b1 and b2 — at biome borders mainBiome may still be non-jungle
             // even though the terrain is visually blending into jungle
             const _visData = getIslandData(visFocusX, visFocusZ);
             const _b1Jungle = _visData.b1 && _visData.b1.name && _visData.b1.name.toLowerCase().includes('jungle');
             const _b2Jungle = _visData.b2 && _visData.b2.name && _visData.b2.name.toLowerCase().includes('jungle');
             const _inJungle = _b1Jungle || _b2Jungle;
-            if (instTree1) instTree1.visible = params.showTrees && !_inJungle;
-            if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = params.showTrees && !_inJungle);
-            if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = params.showTrees && !_inJungle;
-            if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = params.showTrees;
+            
+            const showAnyTrees = params.showTrees && treesPossibleNearby;
+            
+            if (instTree1) instTree1.visible = showAnyTrees && !_inJungle;
+            if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = showAnyTrees && !_inJungle);
+            if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = showAnyTrees && !_inJungle;
+            if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = showAnyTrees;
+            if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = showAnyTrees);
         }
 
         if (shouldUpdateTerrain) {
@@ -3126,28 +3345,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             const billboardMinDist = 380; // Billboards spawn from 380m out to 800m (40m overlap ring)
             const billboardMaxDist = 800;
 
-            // Check if there are ANY tree-supporting biomes nearby to avoid thrashing on CPU noise calculations
-            const checkDist = 800; // max tree radius
-            const points = [
-                { x: focusX, z: focusZ },
-                { x: focusX + checkDist, z: focusZ },
-                { x: focusX - checkDist, z: focusZ },
-                { x: focusX, z: focusZ + checkDist },
-                { x: focusX, z: focusZ - checkDist }
-            ];
-            let treesPossibleNearby = false;
-            for (let pIdx = 0; pIdx < points.length; pIdx++) {
-                const p = points[pIdx];
-                const biome = getBiomeAt(p.x, p.z);
-                const islandData = getIslandData(p.x, p.z);
-                if (biome && biome.treesOk && islandData.mask > 0.0) {
-                    treesPossibleNearby = true;
-                    break;
-                }
-            }
-
             if (params.showTrees) {
                 const playerInJungle = getBiomeAt(focusX, focusZ).name.toLowerCase().includes('jungle');
+                let treeSpawnAttemptsThisFrame = 0;
+                const MAX_TREE_SPAWN_ATTEMPTS = 50;
 
                 // 1. Update standard pine trees (instTree1)
                 const count1 = instTree1.maxCount || instTree1.count;
@@ -3173,7 +3374,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         let attempts = 0;
 
                         if (!playerInJungle && treesPossibleNearby) {
-                            while(!valid && attempts < 12) {
+                            while(!valid && attempts < 12 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
                                 nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                 nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                 h = getWorldHeight(nx, nz);
@@ -3202,6 +3403,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                 if (!tooClose) valid = true;
                             }
                             attempts++;
+                            treeSpawnAttemptsThisFrame++;
                         }
                     }
 
@@ -3231,6 +3433,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             }
                         } else {
                             dummy.position.set(0, -1000, 0);
+                            dummy.scale.set(0, 0, 0);
                         }
                         dummy.updateMatrix();
                         instTree1.setMatrixAt(i, dummy.matrix);
@@ -3263,7 +3466,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             let attempts = 0;
 
                             if (treesPossibleNearby) {
-                                while(!valid && attempts < 12) {
+                                while(!valid && attempts < 12 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
                                     nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     h = getWorldHeight(nx, nz);
@@ -3294,6 +3497,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                         if (!tooClose) valid = true;
                                     }
                                     attempts++;
+                                    treeSpawnAttemptsThisFrame++;
                                 }
                             }
 
@@ -3325,6 +3529,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                 });
                             } else {
                                 dummy.position.set(0, -1000, 0);
+                                dummy.scale.set(0, 0, 0);
                             }
                             dummy.updateMatrix();
                             window.instJungleTreeParts.forEach(part => {
@@ -3364,7 +3569,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             let attempts = 0;
 
                             if (treesPossibleNearby) {
-                                while(!valid && attempts < 25) {
+                                while(!valid && attempts < 25 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
                                     nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     h = getWorldHeight(nx, nz);
@@ -3394,6 +3599,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                         if (!tooClose) valid = true;
                                     }
                                     attempts++;
+                                    treeSpawnAttemptsThisFrame++;
                                 }
                             }
 
@@ -3416,6 +3622,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                 });
                             } else {
                                 dummy.position.set(0, -1000, 0);
+                                dummy.scale.set(0, 0, 0);
                             }
                             dummy.updateMatrix();
                             window.instPalmTreeParts.forEach(part => {
@@ -3460,7 +3667,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                         let attempts = 0;
 
                         if (treesPossibleNearby && !(playerInJungle && bbIdx === 0)) {
-                            while(!valid && attempts < 15) {
+                            while(!valid && attempts < 15 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
                                 const ang = Math.random() * Math.PI * 2.0;
                                 const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
                                 nx = focusX + Math.cos(ang) * r;
@@ -3479,6 +3686,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                                     valid = true;
                                 }
                                 attempts++;
+                                treeSpawnAttemptsThisFrame++;
                             }
                         }
 
@@ -3531,6 +3739,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                             billboardUpdated = true;
                         } else {
                             dummy.position.set(0, -1000, 0);
+                            dummy.scale.set(0, 0, 0);
                             dummy.updateMatrix();
                             instBB.setMatrixAt(i, dummy.matrix);
                             billboardUpdated = true;
@@ -4116,13 +4325,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
             // Convert material to MeshToonMaterial with in-game gradientMap and preserve texture/alpha test
             const toonMat = new THREE.MeshToonMaterial({
-                color: m.material.color || new THREE.Color(0xffffff),
+                color: new THREE.Color(0xffffff),
                 map: m.material.map,
                 vertexColors: m.material.vertexColors || false,
                 gradientMap: gradientMap,
-                normalMap: m.material.normalMap,
-                normalScale: m.material.normalScale,
-                alphaMap: m.material.alphaMap,
+                // Remove normal/alpha maps to force a flat toon style
                 // Make leaves fully opaque and non-see-through to increase opacity
                 transparent: isLeaf ? false : (m.material.transparent || false),
                 alphaTest: isLeaf ? 0.45 : (m.material.alphaTest || 0.0),
@@ -4214,7 +4421,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     #include <map_fragment>
                     
                     if (diffuseColor.a > 0.01) {
-                        vec3 hsl = rgb2hsl_f(diffuseColor.rgb);
+                        // Override realistic texture color with a flat Ghibli base color for toon shading
+                        vec3 baseCol = ${isBark ? 'vec3(0.35, 0.28, 0.22)' : 'vec3(0.28, 0.45, 0.22)'};
+                        vec3 hsl = rgb2hsl_f(baseCol);
                         vec3 shift = ${isBark ? 'vBarkHslShift' : 'vLeafHslShift'};
                         
                         hsl.x = mod(hsl.x + shift.x, 1.0);
@@ -4243,6 +4452,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             
             // Initialize positions to hidden
             const dummyMatrix = new THREE.Matrix4();
+            dummyMatrix.makeScale(0, 0, 0);
             dummyMatrix.setPosition(0, -1000, 0);
             for(let i=0; i<180; i++) {
                 instMesh.setMatrixAt(i, dummyMatrix);
@@ -4303,13 +4513,11 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             const isLeaf = matName.includes('leaf') || matName.includes('leaves') || matName.includes('frond') || matName.includes('palm') || matName.includes('daun') || meshName.includes('leaf') || meshName.includes('palm');
 
             const toonMat = new THREE.MeshToonMaterial({
-                color: (m.material && m.material.color) ? m.material.color : new THREE.Color(0xffffff),
+                color: new THREE.Color(0xffffff),
                 map: m.material ? m.material.map : null,
                 vertexColors: (m.material && m.material.vertexColors) ? m.material.vertexColors : false,
                 gradientMap: gradientMap,
-                normalMap: m.material ? m.material.normalMap : null,
-                normalScale: m.material ? m.material.normalScale : null,
-                alphaMap: m.material ? m.material.alphaMap : null,
+                // Removed normal maps for flat toon shading
                 transparent: isLeaf ? false : ((m.material && m.material.transparent) || false),
                 alphaTest: isLeaf ? 0.35 : ((m.material && m.material.alphaTest) || 0.0),
                 opacity: 1.0,
@@ -4398,7 +4606,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                     #include <map_fragment>
                     
                     if (diffuseColor.a > 0.01) {
-                        vec3 hsl = rgb2hsl_f(diffuseColor.rgb);
+                        // Override realistic texture color with a flat Ghibli base color for toon shading
+                        vec3 baseCol = ${isBark ? 'vec3(0.45, 0.35, 0.25)' : 'vec3(0.35, 0.55, 0.25)'};
+                        vec3 hsl = rgb2hsl_f(baseCol);
                         vec3 shift = ${isBark ? 'vBarkHslShift' : 'vLeafHslShift'};
                         
                         hsl.x = mod(hsl.x + shift.x, 1.0);
@@ -4426,6 +4636,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             instMesh.frustumCulled = false;
 
             const dummyMatrix = new THREE.Matrix4();
+            dummyMatrix.makeScale(0, 0, 0);
             dummyMatrix.setPosition(0, -1000, 0);
             for (let i = 0; i < maxPalmCount; i++) {
                 instMesh.setMatrixAt(i, dummyMatrix);
@@ -4760,6 +4971,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     const starCount = LOW_GFX ? 2000 : 8000;
     const starGeometry = new THREE.BufferGeometry();
     const starPositions = new Float32Array(starCount * 3);
+    const starPulse = new Float32Array(starCount);
 
     for (let i = 0; i < starCount * 3; i += 3) {
         // Distribute randomly in a sphere well within camera.far (3000)
@@ -4777,9 +4989,13 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         starPositions[i] = x;
         starPositions[i + 1] = y;
         starPositions[i + 2] = z;
+        
+        // Make 10% of stars pulse
+        starPulse[i / 3] = Math.random() < 0.1 ? 1.0 : 0.0;
     }
 
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    starGeometry.setAttribute('pulse', new THREE.BufferAttribute(starPulse, 1));
     const starMaterial = new THREE.PointsMaterial({
         color: 0xffffff,
         size: 1.0,
@@ -4788,6 +5004,34 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         transparent: true,
         opacity: 0.0 // Start invisible — lerps to target based on time-of-day
     });
+    
+    starMaterial.onBeforeCompile = (shader) => {
+        shader.uniforms.time = { value: 0 };
+        starMaterial.userData.shader = shader;
+        shader.vertexShader = `
+            attribute float pulse;
+            varying float vPulse;
+        ` + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace(
+            `#include <begin_vertex>`,
+            `#include <begin_vertex>
+            vPulse = pulse;
+            `
+        );
+        shader.fragmentShader = `
+            uniform float time;
+            varying float vPulse;
+        ` + shader.fragmentShader;
+        shader.fragmentShader = shader.fragmentShader.replace(
+            `vec4 diffuseColor = vec4( diffuse, opacity );`,
+            `vec4 diffuseColor = vec4( diffuse, opacity );
+             if (vPulse > 0.5) {
+                 float pulseAmt = 0.4 + 0.6 * sin(time * 0.5 + gl_FragCoord.x * 0.1 + gl_FragCoord.y * 0.1);
+                 diffuseColor.a *= pulseAmt;
+             }
+            `
+        );
+    };
     const starField = new THREE.Points(starGeometry, starMaterial);
     starField.renderOrder = -3;
     starField.visible = false;
@@ -4881,9 +5125,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     function animate() {
         requestAnimationFrame(animate);
-        if (daySkyboxMesh && nightSkyboxMesh) {
-            camera.getWorldPosition(daySkyboxMesh.position);
-            camera.getWorldPosition(nightSkyboxMesh.position);
+        if (proceduralSkyMesh) {
+            camera.getWorldPosition(proceduralSkyMesh.position);
         }
         if (params.showMap) _drawWorldMap();
         
@@ -4901,6 +5144,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         const time = clock.getElapsedTime();
         
+        if (starMaterial.userData.shader) {
+            starMaterial.userData.shader.uniforms.time.value = time;
+        }
+
         waterUniforms.uTime.value = time;
         if (animeWaterSystem && animeWaterSystem.visible) {
             const activeCam = isGodMode ? godCamera : camera;
@@ -4912,10 +5159,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 terrainUniforms.uSunDir.value.copy(dirLight.position).normalize();
             }
         }
-        if (typeof toonCloudMat !== 'undefined') {
-            toonCloudMat.uniforms.uTime.value = time;
-            if (typeof dirLight !== 'undefined') {
-                toonCloudMat.uniforms.uSunDir.value.copy(dirLight.position).normalize();
+        if (skyUniforms) {
+            skyUniforms.uTime.value = time;
+            if (typeof dirLight !== 'undefined' && typeof playerGrp !== 'undefined') {
+                skyUniforms.uSunPosition.value.copy(dirLight.position).sub(playerGrp.position).normalize();
             }
         }
         if (typeof treeUniforms !== 'undefined') {
@@ -4971,44 +5218,63 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         ambientLight.color.lerp(tempColorTarget.setHex(target.amb), decayEnv);
         ambientLight.intensity += (target.ambI - ambientLight.intensity) * decayEnv;
         dirLight.color.lerp(tempColorTarget.setHex(target.dir), decayEnv);
-        starMaterial.opacity += (target.starOp - starMaterial.opacity) * decayEnv;
-        starField.visible = starMaterial.opacity > 0.02;
-        if (typeof playerGrp !== 'undefined') {
-            starField.position.copy(playerGrp.position);
+        // Hide old star field — procedural sky handles stars now
+        starMaterial.opacity = 0;
+        starField.visible = false;
+
+        // Procedural Sky — per-biome lerp + night factor
+        if (skyUniforms && typeof playerGrp !== 'undefined') {
+            const pYaw = playerPhysics ? playerPhysics.currentYaw : 0;
+            const skyBiomeName = getBiomeAt(
+                playerGrp.position.x + Math.sin(pYaw) * 200,
+                playerGrp.position.z + Math.cos(pYaw) * 200
+            ).name;
+            const biomeTarget = BIOME_SKY_CONFIGS[skyBiomeName] || BIOME_SKY_CONFIGS['🌊 Open Ocean'];
+            const decaySky = 1.0 - Math.exp(-0.8 * dt);
+
+            skyUniforms.uCloudCoverage.value += (biomeTarget.coverage - skyUniforms.uCloudCoverage.value) * decaySky;
+            skyUniforms.uCloudEdge.value += (biomeTarget.edge - skyUniforms.uCloudEdge.value) * decaySky;
+            skyUniforms.uCloudSpeed.value += (biomeTarget.speed - skyUniforms.uCloudSpeed.value) * decaySky;
+            skyUniforms.uCloudTurbulence.value += (biomeTarget.turbulence - skyUniforms.uCloudTurbulence.value) * decaySky;
+            skyUniforms.uStormDarken.value += (biomeTarget.stormDarken - skyUniforms.uStormDarken.value) * decaySky;
+            skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(biomeTarget.skyZenith), decaySky);
+            skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(biomeTarget.skyHorizon), decaySky);
+            skyUniforms.uCloudColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudCol), decaySky);
+            skyUniforms.uCloudShadowColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudShadow), decaySky);
+            skyUniforms.uSunColor.value.lerp(tempColorTarget.setHex(target.dir), decaySky);
+
+            // Weather override (storm/overcast)
+            if (currentWeather !== 'clear') {
+                const wp = WEATHER_PRESETS[currentWeather];
+                if (wp) {
+                    if (wp.coverage !== null) skyUniforms.uCloudCoverage.value += (wp.coverage - skyUniforms.uCloudCoverage.value) * decaySky;
+                    if (wp.edge !== null) skyUniforms.uCloudEdge.value += (wp.edge - skyUniforms.uCloudEdge.value) * decaySky;
+                    if (wp.speed !== null) skyUniforms.uCloudSpeed.value += (wp.speed - skyUniforms.uCloudSpeed.value) * decaySky;
+                    skyUniforms.uCloudTurbulence.value += (wp.turbulence - skyUniforms.uCloudTurbulence.value) * decaySky;
+                    skyUniforms.uStormDarken.value += (wp.stormDarken - skyUniforms.uStormDarken.value) * decaySky;
+                }
+            }
+
+            // Night factor from sun Y position
+            const nightFactor = THREE.MathUtils.smoothstep(-currentSunY, -200, 800);
+            skyUniforms.uNightFactor.value = nightFactor;
+
+            // Dusk factor: peaks when sun is low (sunY ~100-400), 0 at morning (1500) and night (-8000)
+            const duskHigh = 1.0 - THREE.MathUtils.smoothstep(currentSunY, 300, 800);
+            const duskLow = THREE.MathUtils.smoothstep(currentSunY, -500, 0);
+            const duskFactor = duskHigh * duskLow;
+            skyUniforms.uDuskFactor.value = duskFactor;
+            skyUniforms.uStarDensity.value = Math.max(nightFactor, duskFactor * 0.7);
         }
 
-        // Skydome Logic
-        if (params.enableSkydome) {
-            const targetDayOp = (timePhase === 2) ? 0.0 : 1.0;
-            const targetNightOp = (timePhase === 2) ? 1.0 : 0.0;
-            if (daySkyboxMesh) {
-                daySkyboxMesh.material.forEach(m => m.opacity += (targetDayOp - m.opacity) * decayEnv);
-            }
-            if (nightSkyboxMesh) {
-                nightSkyboxMesh.material.forEach(m => m.opacity += (targetNightOp - m.opacity) * decayEnv);
-            }
-            
-            if (typeof instClouds !== 'undefined') instClouds.visible = false;
-            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = false;
-            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = false;
-            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = false;
-            if (typeof instHorizonClouds1 !== 'undefined') instHorizonClouds1.visible = false;
-            if (typeof instHorizonClouds2 !== 'undefined') instHorizonClouds2.visible = false;
-            if (typeof instHorizonClouds3 !== 'undefined') instHorizonClouds3.visible = false;
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 0.0;
-        } else {
-            if (daySkyboxMesh) daySkyboxMesh.material.forEach(m => m.opacity = 0.0);
-            if (nightSkyboxMesh) nightSkyboxMesh.material.forEach(m => m.opacity = 0.0);
-            
-            if (typeof instClouds !== 'undefined') instClouds.visible = params.showClouds && params.showCloudsRegular;
-            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = params.showClouds && params.showCloudsHigh;
-            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = params.showClouds && params.showCloudsWispy;
-            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = params.showClouds && params.showCloudsMega;
-            if (typeof instHorizonClouds1 !== 'undefined') instHorizonClouds1.visible = params.showCloudsHorizon;
-            if (typeof instHorizonClouds2 !== 'undefined') instHorizonClouds2.visible = params.showCloudsHorizon;
-            if (typeof instHorizonClouds3 !== 'undefined') instHorizonClouds3.visible = params.showCloudsHorizon;
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = params.showClouds ? 1.0 : 0.0;
-        }
+        // Instanced mesh clouds remain visible (scene-level 3D clouds)
+        if (typeof instClouds !== 'undefined') instClouds.visible = params.showClouds && params.showCloudsRegular;
+        if (typeof instHighClouds !== 'undefined') instHighClouds.visible = params.showClouds && params.showCloudsHigh;
+        if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = params.showClouds && params.showCloudsWispy;
+        if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = params.showClouds && params.showCloudsMega;
+        if (typeof instHorizonClouds1 !== 'undefined') instHorizonClouds1.visible = params.showCloudsHorizon;
+        if (typeof instHorizonClouds2 !== 'undefined') instHorizonClouds2.visible = params.showCloudsHorizon;
+        if (typeof instHorizonClouds3 !== 'undefined') instHorizonClouds3.visible = params.showCloudsHorizon;
 
 
 
@@ -5162,8 +5428,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // Scale render distance (fog far) to reveal landscape when high
         // Setting it to 850 guarantees that the edge of the world (1200) and tree spawn distance (900) are fully hidden in fog!
-        const dynamicFar = 800 + Math.max(0, playerGrp.position.y - 300.0) * 2.2;
-        const dynamicNear = 10 + Math.max(0, playerGrp.position.y - 300.0) * 0.4;
+        const dynamicFar = (800 + Math.max(0, playerGrp.position.y - 300.0) * 2.2) / params.fogIntensity;
+        const dynamicNear = (10 + Math.max(0, playerGrp.position.y - 300.0) * 0.4) / params.fogIntensity;
         
         if (params.sceneFog) {
             scene.fog.far += (dynamicFar - scene.fog.far) * dt * 2.0;
@@ -5240,7 +5506,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
 
         // Update God Rays sun screen position
-        if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
+        if (godRaysEffect.blendMode.opacity.value > 0.0 && typeof staticSun !== 'undefined') {
             const activeCam = isGodMode ? godCamera : camera;
             tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
             activeCam.getWorldDirection(tempVec1);
@@ -5250,19 +5516,19 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 tempVec2.copy(staticSun.position).project(activeCam);
                 const sunScreenX = (tempVec2.x + 1.0) * 0.5;
                 const sunScreenY = (tempVec2.y + 1.0) * 0.5;
-                godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
+                godRaysEffect.uniforms.get("uSunScreenPos").value.set(sunScreenX, sunScreenY);
                 
                 const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
                 const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.5));
                 const twilightFade = timePhase === 2 ? 0.0 : 1.0;
                 const fwdFade = Math.max(0.0, Math.min(1.0, (dotFwd + 0.2) * 2.5));
-                godRaysPass.uniforms.uSunVisible.value = fwdFade * screenFade * twilightFade;
+                godRaysEffect.uniforms.get("uSunVisible").value = fwdFade * screenFade * twilightFade;
             } else {
-                godRaysPass.uniforms.uSunVisible.value = 0.0;
+                godRaysEffect.uniforms.get("uSunVisible").value = 0.0;
             }
         }
 
-        composer.render();
+        composer.render(dt);
     }
 
     window.addEventListener('resize', () => {
@@ -5645,31 +5911,56 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         });
 
         const atmoFolder = gui.addFolder('Atmosphere');
-        atmoFolder.add(params, 'enableSkydome').name('Enable Skydome');
-        atmoFolder.add(params, 'daySkydomeTexture', ['1', '2']).name('Day Skydome').onChange(v => {
-            dayFaces.forEach((face, i) => {
-                const tex = skyboxTexLoader.load(`assets/skydome/day/${v}/${face}.png`);
-                tex.colorSpace = THREE.SRGBColorSpace;
-                if (daySkyboxMesh) daySkyboxMesh.material[i].map = tex;
-            });
-        });
-        atmoFolder.add(params, 'nightSkydomeTexture', ['1', '2', '3']).name('Night Skydome').onChange(v => {
-            nightFaces.forEach((face, i) => {
-                const tex = skyboxTexLoader.load(`assets/skydome/night/${v}/${face}.png`);
-                tex.colorSpace = THREE.SRGBColorSpace;
-                if (nightSkyboxMesh) {
-                    nightSkyboxMesh.material[i].map = tex;
-                    if (face !== 'ny' && v === '2') {
-                        nightSkyboxMesh.material[i].alphaMap = skyboxTexLoader.load(`assets/skydome/night/${v}/${face} tr.png`);
-                        nightSkyboxMesh.material[i].transparent = true;
-                    } else {
-                        nightSkyboxMesh.material[i].alphaMap = null;
-                        nightSkyboxMesh.material[i].transparent = true;
-                    }
-                    nightSkyboxMesh.material[i].needsUpdate = true;
+
+        // Per-biome procedural sky editor
+        const skyEditorParams = {
+            coverage: 0.45, edge: 0.07, speed: 0.02,
+            skyZenith: '#4a90d9', skyHorizon: '#b8d4e8',
+            cloudCol: '#fff8f0', cloudShadow: '#8898a8',
+            turbulence: 0.0, stormDarken: 0.0,
+            weather: 'clear'
+        };
+        const skyFolder = atmoFolder.addFolder('☁️ Procedural Sky (Per Biome)');
+
+        function writeSkyToConfig(key, val) {
+            if (typeof playerGrp !== 'undefined') {
+                const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+                if (BIOME_SKY_CONFIGS[bName]) BIOME_SKY_CONFIGS[bName][key] = val;
+            }
+        }
+        const skyCtrlCoverage = skyFolder.add(skyEditorParams, 'coverage', 0, 1, 0.01).name('Cloud Coverage').onChange(v => writeSkyToConfig('coverage', v));
+        const skyCtrlEdge = skyFolder.add(skyEditorParams, 'edge', 0.02, 0.25, 0.005).name('Cloud Edge').onChange(v => writeSkyToConfig('edge', v));
+        const skyCtrlSpeed = skyFolder.add(skyEditorParams, 'speed', 0, 0.2, 0.002).name('Cloud Speed').onChange(v => writeSkyToConfig('speed', v));
+        const skyCtrlZenith = skyFolder.addColor(skyEditorParams, 'skyZenith').name('Sky Zenith').onChange(v => writeSkyToConfig('skyZenith', parseInt(v.replace('#',''), 16)));
+        const skyCtrlHorizon = skyFolder.addColor(skyEditorParams, 'skyHorizon').name('Sky Horizon').onChange(v => writeSkyToConfig('skyHorizon', parseInt(v.replace('#',''), 16)));
+        const skyCtrlCloudCol = skyFolder.addColor(skyEditorParams, 'cloudCol').name('Cloud Color').onChange(v => writeSkyToConfig('cloudCol', parseInt(v.replace('#',''), 16)));
+        const skyCtrlCloudShadow = skyFolder.addColor(skyEditorParams, 'cloudShadow').name('Cloud Shadow').onChange(v => writeSkyToConfig('cloudShadow', parseInt(v.replace('#',''), 16)));
+        const skyCtrlTurb = skyFolder.add(skyEditorParams, 'turbulence', 0, 1, 0.01).name('Storm Turbulence').onChange(v => writeSkyToConfig('turbulence', v));
+        const skyCtrlDarken = skyFolder.add(skyEditorParams, 'stormDarken', 0, 1, 0.01).name('Storm Darken').onChange(v => writeSkyToConfig('stormDarken', v));
+        skyFolder.add({ opacity: 1.0 }, 'opacity', 0, 1, 0.01).name('Cloud Opacity').onChange(v => { skyUniforms.uCloudOpacity.value = v; });
+        skyFolder.add(skyEditorParams, 'weather', ['clear', 'storm', 'overcast']).name('Weather').onChange(v => { currentWeather = v; });
+
+        // Update sliders when biome changes (same pattern as Ground Fog)
+        setInterval(() => {
+            if (typeof playerGrp !== 'undefined') {
+                const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+                const cfg = BIOME_SKY_CONFIGS[bName];
+                if (cfg) {
+                    skyEditorParams.coverage = cfg.coverage;
+                    skyEditorParams.edge = cfg.edge;
+                    skyEditorParams.speed = cfg.speed;
+                    skyEditorParams.skyZenith = '#' + cfg.skyZenith.toString(16).padStart(6, '0');
+                    skyEditorParams.skyHorizon = '#' + cfg.skyHorizon.toString(16).padStart(6, '0');
+                    skyEditorParams.cloudCol = '#' + cfg.cloudCol.toString(16).padStart(6, '0');
+                    skyEditorParams.cloudShadow = '#' + cfg.cloudShadow.toString(16).padStart(6, '0');
+                    skyEditorParams.turbulence = cfg.turbulence;
+                    skyEditorParams.stormDarken = cfg.stormDarken;
+                    [skyCtrlCoverage, skyCtrlEdge, skyCtrlSpeed, skyCtrlZenith, skyCtrlHorizon, skyCtrlCloudCol, skyCtrlCloudShadow, skyCtrlTurb, skyCtrlDarken].forEach(c => c.updateDisplay());
+                    skyFolder.title('☁️ Procedural Sky (' + bName + ')');
                 }
-            });
-        });
+            }
+        }, 500);
+
         atmoFolder.addColor(atmoParams, 'skyColor').name('Sky Color').onChange(v => envConfigs[timePhase].bg = parseInt(v.replace('#',''), 16));
         atmoFolder.addColor(atmoParams, 'fogColor').name('Fog Color').onChange(v => envConfigs[timePhase].fog = parseInt(v.replace('#',''), 16));
         atmoFolder.addColor(atmoParams, 'ambColor').name('Ambient Light').onChange(v => envConfigs[timePhase].amb = parseInt(v.replace('#',''), 16));
@@ -5690,7 +5981,10 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         };
 
         const moonFolder = atmoFolder.addFolder('🌙 Moonlight & Night');
-        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => { renderer.toneMappingExposure = v; });
+        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => { 
+            renderer.toneMappingExposure = v; 
+            if (exposureEffect) exposureEffect.uniforms.get("uExposure").value = v;
+        });
         moonFolder.addColor(moonParams, 'moonlightColor').name('Moonlight Color').onChange(v => envConfigs[2].dir = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonlightIntensity', 0, 10, 0.1).name('Moonlight Power').onChange(v => envConfigs[2].dirI = v);
         moonFolder.addColor(moonParams, 'nightAmbColor').name('Night Fill Color').onChange(v => envConfigs[2].amb = parseInt(v.replace('#',''), 16));
@@ -5772,6 +6066,8 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             params.showCloudsHigh = v;
             params.showCloudsWispy = v;
             params.showCloudsMega = v;
+            params.showCloudsHorizon = v;
+            params.showVolumetricClouds = v;
             if (typeof instClouds !== 'undefined') instClouds.visible = v;
             if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v;
             if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v;
@@ -5781,9 +6077,30 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
                 instHorizonClouds2.visible = v;
                 instHorizonClouds3.visible = v;
             }
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
+                toonCloudMat.uniforms.uEnableClouds.value = v ? 1.0 : 0.0;
+            }
             cloudFolder.controllersRecursive().forEach(c => {
-                if (c.property && c.property.startsWith('showClouds')) c.updateDisplay();
+                if (c.property && c.property.startsWith('showClouds') || c.property === 'showVolumetricClouds') c.updateDisplay();
             });
+        });
+
+        const toggleFolder = cloudFolder.addFolder('👁️ Visibility Toggles');
+        toggleFolder.add(params, 'showVolumetricClouds').name('☁️ Volumetric Sky Clouds').onChange(v => {
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
+                toonCloudMat.uniforms.uEnableClouds.value = v ? 1.0 : 0.0;
+            }
+        });
+        toggleFolder.add(params, 'showCloudsRegular').name('🌥️ Regular (Cumulus)').onChange(v => { if (typeof instClouds !== 'undefined') instClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsHigh').name('🌩️ Cumulonimbus').onChange(v => { if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsWispy').name('🌫️ Wispy Clouds').onChange(v => { if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsMega').name('🌌 Mega Clouds').onChange(v => { if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsHorizon').name('🌅 Horizon Clouds (Massive)').onChange(v => { 
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                instHorizonClouds1.visible = v;
+                instHorizonClouds2.visible = v;
+                instHorizonClouds3.visible = v;
+            }
         });
 
         // Global density multiplier
@@ -5833,7 +6150,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // 1. Regular Clouds Subfolder
         const regFolder = cloudFolder.addFolder('🌥️ Regular (Cumulus)');
-        regFolder.add(params, 'showCloudsRegular').name('Show').onChange(v => { if (instClouds) instClouds.visible = v; });
+        regFolder.add(params, 'showCloudsRegular').name('Show').onChange(v => { if (typeof instClouds !== 'undefined') instClouds.visible = v; });
         regFolder.add(params, 'cloudCountRegular', 0, 300, 1).name('Count').onChange(v => {
             CLOUD_COUNT = v;
             if (instClouds) {
@@ -5851,7 +6168,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // 2. Cumulonimbus Clouds Subfolder
         const highFolder = cloudFolder.addFolder('🌩️ Cumulonimbus');
-        highFolder.add(params, 'showCloudsHigh').name('Show').onChange(v => { if (instHighClouds) instHighClouds.visible = v; });
+        highFolder.add(params, 'showCloudsHigh').name('Show').onChange(v => { if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v; });
         highFolder.add(params, 'cloudCountHigh', 0, 100, 1).name('Count').onChange(v => {
             HIGH_CLOUD_COUNT = v;
             if (instHighClouds) {
@@ -5869,7 +6186,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // 3. Wispy Clouds Subfolder
         const wispyFolder = cloudFolder.addFolder('🌫️ Wispy Clouds');
-        wispyFolder.add(params, 'showCloudsWispy').name('Show').onChange(v => { if (instWispyClouds) instWispyClouds.visible = v; });
+        wispyFolder.add(params, 'showCloudsWispy').name('Show').onChange(v => { if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; });
         wispyFolder.add(params, 'cloudCountWispy', 0, 100, 1).name('Count').onChange(v => {
             WISPY_CLOUD_COUNT = v;
             if (instWispyClouds) {
@@ -5887,7 +6204,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
 
         // 4. Mega Clouds Subfolder
         const megaFolder = cloudFolder.addFolder('🌌 Mega Clouds');
-        megaFolder.add(params, 'showCloudsMega').name('Show').onChange(v => { if (instMegaClouds) instMegaClouds.visible = v; });
+        megaFolder.add(params, 'showCloudsMega').name('Show').onChange(v => { if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
         megaFolder.add(params, 'cloudCountMega', 0, 100, 1).name('Count').onChange(v => {
             MEGA_CLOUD_COUNT = v;
             if (instMegaClouds) {
@@ -5902,6 +6219,27 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         });
         megaFolder.add(cloudParams, 'opMega', 0, 1, 0.01).name('Opacity').onChange(v => megaCloudMat.opacity = v);
         megaFolder.close();
+
+        // 5. Horizon Clouds Subfolder
+        const horizonFolder = cloudFolder.addFolder('🌅 Horizon Clouds');
+        horizonFolder.add(params, 'showCloudsHorizon').name('Show').onChange(v => { 
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                instHorizonClouds1.visible = v;
+                instHorizonClouds2.visible = v;
+                instHorizonClouds3.visible = v;
+            }
+        });
+        horizonFolder.add(params, 'cloudCountHorizon', 0, 100, 1).name('Count').onChange(v => {
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                instHorizonClouds1.count = Math.floor(v * cloudParams.density);
+                instHorizonClouds2.count = Math.floor(v * cloudParams.density);
+                instHorizonClouds3.count = Math.floor(v * cloudParams.density);
+                if (instHorizonClouds1.instanceMatrix) instHorizonClouds1.instanceMatrix.needsUpdate = true;
+                if (instHorizonClouds2.instanceMatrix) instHorizonClouds2.instanceMatrix.needsUpdate = true;
+                if (instHorizonClouds3.instanceMatrix) instHorizonClouds3.instanceMatrix.needsUpdate = true;
+            }
+        });
+        horizonFolder.close();
 
         // Tree Editor
         const treeGreenVariations = [0x52c439, 0x38b000, 0x2d8028, 0x76e054, 0x6e4a32];
@@ -5934,18 +6272,17 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         // ==========================================
         // SYSTEM SETTINGS (SAVE/LOAD)
         // ==========================================
-        const sysFolder = gui.addFolder('System Settings');
-        sysFolder.add({
+        perfFolder.add({
             saveSettings: () => {
                 const data = gui.save();
                 localStorage.setItem('flightSettings', JSON.stringify(data));
-                const prevTitle = sysFolder.title || 'System Settings';
-                sysFolder.title('Saved!');
-                setTimeout(() => sysFolder.title(prevTitle), 1500);
+                const prevTitle = perfFolder.title || 'Performance';
+                perfFolder.title('Saved!');
+                setTimeout(() => perfFolder.title(prevTitle), 1500);
             }
         }, 'saveSettings').name('Save All Settings');
         
-        sysFolder.add({
+        perfFolder.add({
             resetSettings: () => {
                 localStorage.removeItem('flightSettings');
                 localStorage.removeItem('gfxQuality');
