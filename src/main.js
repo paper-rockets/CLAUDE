@@ -10,6 +10,7 @@ import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northp
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
 import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
+import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 
@@ -1791,6 +1792,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     animeWaterSystem = new WaterSystem(scene, renderer);
     animeWaterSystem.setVisible(params.showWater);
     window.waterModalUI = new WaterModalUI(animeWaterSystem);
+    animeWaterGUI = new WaterEditorGUI(animeWaterSystem, gui);
 
     // ==========================================
     // RAIN SYSTEM
@@ -3953,7 +3955,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const quatIdentity = new THREE.Quaternion();
 
     let envConfigs = [
-        {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 0.9, dirI: 2.5, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day
+        {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.053, dirI: 2.14, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
         {bg: 0xffa07a, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk (lower sun)
         {bg: 0x162d5a, fog: 0x224888, amb: 0x7788bb, dir: 0xffbb55, ambI: 1.5, dirI: 3.5, starOp: 1.0, sunY: -8000, moonY: 1600, glintCol: 0xffaa44, cloudCol: 0x2e4a80}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
     ];

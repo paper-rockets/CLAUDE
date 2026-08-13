@@ -82,6 +82,7 @@ const buildGhibliSummerNode = Fn(([baseTex]) => {
 
 // Main setup loop
 export function updatePostProcessingPipeline() {
+    if (!postProcessing || !scenePass) return;
     let outputNode = scenePass;
 
     if (isGodRaysEnabled) {
