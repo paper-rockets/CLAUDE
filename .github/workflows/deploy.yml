@@ -43,12 +43,14 @@ jobs:
         run: |
           npm ci
           npm run build
+          cp -r assets/* dist/assets/ 2>/dev/null || true
 
       - name: Build WebGL
         working-directory: webgl
         run: |
           npm ci
           npm run build
+          cp -r assets/* dist/assets/ 2>/dev/null || true
 
       - name: Combine builds
         run: |

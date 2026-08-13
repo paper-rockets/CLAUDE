@@ -10,6 +10,7 @@ import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northp
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
 import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
+import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 
 
@@ -4090,10 +4091,10 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             skyUniforms.uSunColor.value.lerp(tempColorTarget.setHex(target.dir), decaySky);
             
             // Sync Open Sea Time Of Day
-            uZenithColor.value.copy(skyUniforms.uSkyColorZenith.value);
-            uHorizonColor.value.copy(skyUniforms.uSkyColorHorizon.value);
-            uSunColor.value.copy(dirLight.color);
-            uSunDir.value.copy(dirLight.position).normalize();
+            zenithColorUniform.value.copy(skyUniforms.uSkyColorZenith.value);
+            horizonColorUniform.value.copy(skyUniforms.uSkyColorHorizon.value);
+            sunColorUniform.value.copy(dirLight.color);
+            sunDirUniform.value.copy(dirLight.position).normalize();
 
             // Weather override (storm/overcast)
             if (currentWeather !== 'clear') {
@@ -4386,7 +4387,9 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
-        composer.setSize(window.innerWidth, window.innerHeight);
+        if (composer && typeof composer.setSize === 'function') {
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
     });
 
     let timePhase = 0; // 0: Day, 1: Dusk, 2: Deep Twilight
