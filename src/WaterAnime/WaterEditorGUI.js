@@ -31,10 +31,6 @@ export class WaterEditorGUI {
             this.gui = new GUI({ title: '🌊 Ocean & Waves (Kimi Sea)' });
         }
 
-        // Quick button to open full floating modal UI
-        this.gui.add({ openModal: () => { if (window.waterModalUI) window.waterModalUI.toggle(); } }, 'openModal').name('🌊 Open Sea Modal (O)');
-
-        // Color helpers (hex strings for lil-gui)
         const colors = {
             deep: '#' + deepColorUniform.value.getHexString(),
             shallow: '#' + shallowColorUniform.value.getHexString(),
@@ -46,46 +42,22 @@ export class WaterEditorGUI {
             windSpread: 45
         };
 
-        // 1. Ocean Scale, Dynamics & Waves
         const fWaves = this.gui.addFolder('🌊 Waves & Scale');
-        fWaves.add(oceanScaleUniform, 'value', 0.1, 4.0, 0.05).name('Ocean Scale (Density)').onChange(() => {
-            const el = document.getElementById('oc-oceanScale');
-            const valEl = document.getElementById('oc-oceanScaleVal');
-            if (el) el.value = Math.round(oceanScaleUniform.value * 100);
-            if (valEl) valEl.textContent = `${Math.round(oceanScaleUniform.value * 100)}%`;
-        });
-        fWaves.add(waveHeightUniform, 'value', 0.0, 4.0, 0.05).name('Global Wave Height').onChange(() => {
-            const el = document.getElementById('oc-waveHeight');
-            const valEl = document.getElementById('oc-waveHeightVal');
-            if (el) el.value = Math.round(waveHeightUniform.value * 100);
-            if (valEl) valEl.textContent = `${Math.round(waveHeightUniform.value * 100)}%`;
-        });
-        fWaves.add(swellWavelengthUniform, 'value', 0.2, 4.0, 0.05).name('Swell Wavelength').onChange(() => {
-            const el = document.getElementById('oc-swellLength');
-            const valEl = document.getElementById('oc-swellLengthVal');
-            if (el) el.value = Math.round(swellWavelengthUniform.value * 100);
-            if (valEl) valEl.textContent = `${Math.round(swellWavelengthUniform.value * 100)}%`;
-        });
-        fWaves.add(seaUniform, 'value', 0.0, 2.0, 0.01).name('Sea State (Intensity)').onChange(() => {
-            const el = document.getElementById('oc-seaState');
-            const valEl = document.getElementById('oc-seaStateVal');
-            if (el) el.value = Math.round(seaUniform.value * 100);
-            if (valEl) valEl.textContent = `${Math.round(seaUniform.value * 100)}`;
-        });
+        fWaves.add(oceanScaleUniform, 'value', 0.1, 4.0, 0.05).name('Ocean Scale (Density)');
+        fWaves.add(waveHeightUniform, 'value', 0.0, 4.0, 0.05).name('Global Wave Height');
+        fWaves.add(swellWavelengthUniform, 'value', 0.2, 4.0, 0.05).name('Swell Wavelength');
+        fWaves.add(seaUniform, 'value', 0.0, 2.0, 0.01).name('Sea State (Intensity)');
         fWaves.add(speedUniform, 'value', 0.0, 3.0, 0.05).name('Wave Speed');
         fWaves.add(colors, 'windAngle', 0, 360, 1).name('Wind Direction').onChange(v => {
             setWindDirection(v, colors.windSpread);
-            if (window.waterModalUI) window.waterModalUI.updateSpectrumUI();
         });
         fWaves.add(colors, 'windSpread', 0, 100, 1).name('Directional Spread').onChange(v => {
             setWindDirection(colors.windAngle, v);
-            if (window.waterModalUI) window.waterModalUI.updateSpectrumUI();
         });
         fWaves.add(colors, 'heightY', -20.0, 50.0, 0.1).name('Water Level Y').onChange(v => {
             waterSystem.setHeight(v);
         });
 
-        // 2. Water Colors
         const fColors = this.gui.addFolder('🎨 Ocean Colors');
         fColors.addColor(colors, 'deep').name('Deep Abyss Color').onChange(c => deepColorUniform.value.set(c));
         fColors.addColor(colors, 'shallow').name('Shallow Crest Color').onChange(c => shallowColorUniform.value.set(c));
@@ -93,7 +65,6 @@ export class WaterEditorGUI {
         fColors.addColor(colors, 'zenith').name('Zenith Sky Color').onChange(c => zenithColorUniform.value.set(c));
         fColors.addColor(colors, 'sun').name('Sun Specular Color').onChange(c => sunColorUniform.value.set(c));
 
-        // 3. Surface, Foam & Shading
         const fSurface = this.gui.addFolder('✨ Surface & Foam');
         fSurface.add(waterOpacityUniform, 'value', 0.1, 1.0, 0.01).name('Water Opacity');
         fSurface.add(detailAmountUniform, 'value', 0.0, 3.0, 0.05).name('Capillary Choppiness');
@@ -101,11 +72,9 @@ export class WaterEditorGUI {
         fSurface.add(chopPatchinessUniform, 'value', 0.0, 3.0, 0.05).name('Chop Patchiness');
         fSurface.add(foamEnabledUniform, 'value', 0.0, 1.0, 1.0).name('Foam Enabled (0/1)');
 
-        // 4. Multi-directional Spectral Swell Waves
         const fSpectrum = this.gui.addFolder('📊 Spectral Waves');
         fSpectrum.add({ randomize: () => {
             randomizeSeaSpectrum();
-            if (window.waterModalUI) window.waterModalUI.updateSpectrumUI();
         } }, 'randomize').name('🎲 Randomize Wave Spectrum');
 
         WAVE_PARAMS.forEach((p, i) => {

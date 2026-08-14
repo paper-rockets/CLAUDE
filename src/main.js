@@ -9,10 +9,10 @@ import terrainCanyon from './world/biomes/terrain-canyon.js';
 import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northpole.js';
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
-import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
 import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
+import { GroundFogEditor } from './ui/GroundFogEditor.js';
 
 
 import { LOW_GFX, TERRAIN_RES } from './config/constants.js';
@@ -505,12 +505,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     
     // Add Navigation folder (Go To Biome)
     const navFolder = gui.addFolder('Navigation');
+    const navChildren = navFolder.domElement.querySelector('.children');
+    if (navChildren) {
+        navChildren.style.display = 'grid';
+        navChildren.style.gridTemplateColumns = '1fr 1fr';
+        navChildren.style.gap = '0';
+    }
     const navParams = {};
     ZONES.forEach(zn => {
         navParams[zn.name] = () => {
             teleportToBiome(zn.name);
         };
-        navFolder.add(navParams, zn.name).name(`${zn.name}`);
+        const ctrl = navFolder.add(navParams, zn.name).name(`${zn.name}`);
+        ctrl.domElement.style.minWidth = '0';
     });
 
     // Add Presets folder
@@ -651,8 +658,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (window.deleteSelectedModel) window.deleteSelectedModel();
     }}, 'deleteModel').name('🗑️ Delete Selected');
 
-    // 🌊 Open Sea Ocean Modal Editor
-    editorFolder.add({ openOceanModal: () => { if (window.waterModalUI) window.waterModalUI.toggle(); } }, 'openOceanModal').name('🌊 Open Sea Ocean Modal (O)');
+    // 🌊 Open Ocean folder in lil-gui
+    editorFolder.add({ openOceanFolder: () => {
+        if (animeWaterGUI && animeWaterGUI.gui) {
+            const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
+            if (guiEl) guiEl.style.display = '';
+            animeWaterGUI.gui.open();
+            animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }}, 'openOceanFolder').name('🌊 Ocean Editor (O)');
 
     // 🎨 Live Biome Terrain Color & Shimmer Editor - Moved below Water Editor
     const colorEditorFolder = editorFolder.addFolder('🎨 Terrain Color & Shimmer');
@@ -745,6 +759,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     }, 500);
 
+    envFolder.add({ openGroundFogEditor: () => {
+        if (window.groundFogEditor) window.groundFogEditor.toggle();
+    }}, 'openGroundFogEditor').name('🌫️ Ground Fog Editor');
+
     envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
 
     envFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
@@ -785,6 +803,28 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         .onChange(v => toonShaderManager.apply(scene, v));
 
     debugFolder.add(params, 'showMap').name('World Map').onChange(v => { const el = document.getElementById('world-map'); if(el) el.style.display = v ? 'block' : 'none'; });
+
+    // Bird & Flock Settings
+    const birdFolder = debugFolder.addFolder('🐦 Bird & Flock Settings');
+    params.birdCount = LOW_GFX ? 12 : 40;
+    params.birdScale = 0.42;
+    params.birdColor = '#d6e5f5';
+    params.birdFlockRadius = 22;
+    params.birdFlockSpread = 9;
+    params.birdMaxSpeed = 35;
+
+    birdFolder.add(params, 'birdCount', 0, 120, 1).name('Bird Count').onChange(v => {
+        instBirds.count = Math.min(v, MAX_BIRD_COUNT);
+        instBirds.instanceMatrix.needsUpdate = true;
+    });
+    birdFolder.add(params, 'birdScale', 0.1, 2.0, 0.05).name('Bird Size');
+    birdFolder.addColor(params, 'birdColor').name('Bird Color').onChange(v => {
+        matBird.color.set(v);
+    });
+    birdFolder.add(params, 'birdFlockRadius', 5, 80, 1).name('Flock Radius');
+    birdFolder.add(params, 'birdFlockSpread', 1, 30, 1).name('Flock Spread');
+    birdFolder.add(params, 'birdMaxSpeed', 10, 80, 1).name('Max Speed');
+    birdFolder.close();
     
     function teleportToBiome(biomeName) {
         if (typeof playerGrp === 'undefined') return;
@@ -850,16 +890,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         guiToggleBtn.addEventListener('click', () => toggleGUI());
     }
 
+    function openOceanInGui() {
+        const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
+        if (guiEl) guiEl.style.display = '';
+        if (animeWaterGUI && animeWaterGUI.gui) {
+            animeWaterGUI.gui.open();
+            animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
     const oceanToggleBtn = document.getElementById('ocean-toggle-btn');
     if (oceanToggleBtn) {
-        oceanToggleBtn.addEventListener('click', () => {
-            if (window.waterModalUI) window.waterModalUI.toggle();
-        });
+        oceanToggleBtn.addEventListener('click', openOceanInGui);
     }
 
     window.addEventListener('keydown', (e) => {
         if ((e.key === 'o' || e.key === 'O') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-            if (window.waterModalUI) window.waterModalUI.toggle();
+            openOceanInGui();
         }
     });
 
@@ -1842,7 +1889,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Initialize Open Sea Ocean WebGPU System
     animeWaterSystem = new WaterSystem(scene, renderer);
     animeWaterSystem.setVisible(params.showWater);
-    window.waterModalUI = new WaterModalUI(animeWaterSystem);
     animeWaterGUI = new WaterEditorGUI(animeWaterSystem, gui);
 
     // ==========================================
@@ -1964,6 +2010,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     scene.add(fogGroup);
     window.fogGroup = fogGroup;
     window.fogUniforms = fogUniforms;
+    window.fogMat = fogMat;
+
+    window.getBiomeAt = getBiomeAt;
+    const groundFogEditor = new GroundFogEditor();
+    groundFogEditor.startBiomePolling();
+    window.groundFogEditor = groundFogEditor;
 
     treeMeshes.forEach(mesh => {
         mesh.castShadow = false; // MASSIVE FPS GAIN: Stop rendering 9,000+ complex trees into the shadow depth map
@@ -2270,13 +2322,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         return transformed;
     })();
 
-    const instBirds = new THREE.InstancedMesh(geoBird, matBird, BIRD_COUNT);
+    const MAX_BIRD_COUNT = 120;
+    const instBirds = new THREE.InstancedMesh(geoBird, matBird, MAX_BIRD_COUNT);
+    instBirds.count = BIRD_COUNT;
     instBirds.castShadow = true;
     instBirds.frustumCulled = false;
     scene.add(instBirds);
 
-    const birdData = new Float32Array(BIRD_COUNT * 6); 
-    for (let i = 0; i < BIRD_COUNT; i++) {
+    const birdData = new Float32Array(MAX_BIRD_COUNT * 6);
+    for (let i = 0; i < MAX_BIRD_COUNT; i++) {
         birdData[i * 6 + 0] = (Math.random() - 0.5) * 600;
         birdData[i * 6 + 1] = 60 + Math.random() * 80;
         birdData[i * 6 + 2] = (Math.random() - 0.5) * 600;
@@ -2361,7 +2415,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
             // Give each bird an offset slot around Kiki so they soar gracefully around her rather than clumping
             let formAngle = (i / count) * Math.PI * 2.0;
-            let formRadius = 22 + (i % 6) * 9;
+            let formRadius = (params.birdFlockRadius || 22) + (i % 6) * (params.birdFlockSpread || 9);
             let targetX = tX + Math.cos(formAngle) * formRadius;
             let targetY = tY + ((i % 5) - 2) * 3.5;
             let targetZ = tZ + Math.sin(formAngle) * formRadius;
@@ -2375,7 +2429,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 vz += (tz / dToT) * pullFactor * dt;
             }
 
-            let maxSpd = (centerPull > 3.0 && typeof velocity !== 'undefined') ? Math.max(40, velocity * 1.2) : 35;
+            let maxSpd = (centerPull > 3.0 && typeof velocity !== 'undefined') ? Math.max(40, velocity * 1.2) : (params.birdMaxSpeed || 35);
             let spd = Math.sqrt(vx*vx + vy*vy + vz*vz);
             if (spd > maxSpd) { vx *= maxSpd/spd; vy *= maxSpd/spd; vz *= maxSpd/spd; }
             if (spd < 15) { vx *= 15/spd; vy *= 15/spd; vz *= 15/spd; }
@@ -2388,7 +2442,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             let targetYaw = Math.atan2(vx, vz);
             let roll = Math.max(-0.6, Math.min(0.6, sx * 0.05));
             dummy.rotation.set(roll, targetYaw, Math.sin(time * 12 + i) * 0.35);
-            dummy.scale.setScalar(0.42);
+            dummy.scale.setScalar(params.birdScale || 0.42);
             dummy.updateMatrix();
             inst.setMatrixAt(i, dummy.matrix);
         }
@@ -2396,8 +2450,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     }
 
     function updateBirds(playerX, playerY, playerZ, time, dt) {
-        updateBirdsGen(birdData, instBirds, BIRD_COUNT, playerX, playerY + 14, playerZ, time, dt, 5.0);
-        updateBirdsGen(highBirdData, instHighBirds, HIGH_BIRD_COUNT, 0, 400, 0, time, dt, 2.0); // Orbit center
+        const activeBirdCount = instBirds.count;
+        updateBirdsGen(birdData, instBirds, activeBirdCount, playerX, playerY + 14, playerZ, time, dt, 5.0);
+        updateBirdsGen(highBirdData, instHighBirds, HIGH_BIRD_COUNT, 0, 400, 0, time, dt, 2.0);
     }
 
     const dummy = new THREE.Object3D();
@@ -2894,6 +2949,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     playerGrp = new THREE.Group();
     playerGrp.position.set(0, 50, 0);
     scene.add(playerGrp);
+    window.playerGrp = playerGrp;
 
     const playerVisuals = new THREE.Group();
     playerGrp.add(playerVisuals);
@@ -5119,6 +5175,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             guiEl.style.display = 'none';
         }
             
+            // Reorder folders: most-used first
+            const folderOrder = [
+                debugFolder, navFolder, perfFolder, envFolder,
+                atmoFolder, cloudFolder,
+                animeWaterGUI && animeWaterGUI.gui,
+                editorFolder, gameFolder, presetFolder, customPresetsFolder
+            ].filter(Boolean);
+            const guiContainer = gui.domElement.querySelector('.children') || gui.domElement;
+            folderOrder.forEach(f => {
+                const dom = f.domElement || f;
+                if (dom && dom.parentElement) guiContainer.appendChild(dom);
+            });
+
             // Close all folders by default
             if (gui.folders) {
                 gui.folders.forEach(f => {
