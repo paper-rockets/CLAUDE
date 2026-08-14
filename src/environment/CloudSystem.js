@@ -41,7 +41,11 @@ export class CloudSystem {
 
         // Ground Fog Group
         this.fogGroup = new THREE.Group();
-        this.fogUniforms = { uTime: { value: 0 } };
+        this.fogUniforms = {
+            uTime: { value: 0 },
+            uIntensity: { value: 1.0 },
+            uOpacity: { value: 0.35 }
+        };
         this.fogGeo = new THREE.PlaneGeometry(4000, 4000);
         this.fogGeo.rotateX(-Math.PI / 2);
         this.fogMat = new THREE.MeshToonMaterial({
@@ -52,6 +56,8 @@ export class CloudSystem {
         });
         this.fogMat.onBeforeCompile = (shader) => {
             shader.uniforms.uTime = this.fogUniforms.uTime;
+            shader.uniforms.uIntensity = this.fogUniforms.uIntensity;
+            shader.uniforms.uOpacity = this.fogUniforms.uOpacity;
             shader.vertexShader = `varying vec3 vWorldPos;\n` + shader.vertexShader;
             shader.vertexShader = shader.vertexShader.replace(
                 `#include <worldpos_vertex>`,

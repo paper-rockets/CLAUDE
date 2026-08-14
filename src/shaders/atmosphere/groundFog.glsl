@@ -1,5 +1,7 @@
 // Ground Fog Volumetric Shader with Simplex Noise
 uniform float uTime;
+uniform float uIntensity;
+uniform float uOpacity;
 varying vec3 vWorldPos;
 
 vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
@@ -25,10 +27,10 @@ void main() {
     float n1 = snoise(uv + vec2(uTime * 0.03 + yOffset, uTime * 0.02));
     float n2 = snoise(uv * 2.0 - vec2(uTime * 0.02 - yOffset, -uTime * 0.03));
     
-    float noiseAlpha = smoothstep(-0.2, 0.8, n1 + n2 * 0.5);
+    float noiseAlpha = clamp(smoothstep(-0.2, 0.8, n1 + n2 * 0.5) * uIntensity, 0.0, 1.0);
     
     float dist = length(vWorldPos.xz - cameraPosition.xz);
     float edgeFade = 1.0 - smoothstep(1200.0, 1700.0, dist);
     
-    gl_FragColor.a *= noiseAlpha * edgeFade;
+    gl_FragColor.a *= noiseAlpha * edgeFade * uOpacity;
 }

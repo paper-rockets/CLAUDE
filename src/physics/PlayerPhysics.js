@@ -14,6 +14,7 @@ export class PlayerPhysics {
         this.maxBankAngle = Math.PI / 6; 
         this.maxPitchAngle = Math.PI / 10; 
         this.velocity = 18.0; 
+        this.maxAltitude = 3500;
 
         // Shared Temps
         this.eulerRotation = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -97,7 +98,7 @@ export class PlayerPhysics {
             }
         }
         
-        this.character.position.y = Math.min(Math.max(this.character.position.y, minimumFlightHeight), 3500);
+        this.character.position.y = Math.min(Math.max(this.character.position.y, minimumFlightHeight), this.maxAltitude);
 
         // Tree Collisions disabled - Kiki flies above the jungle canopy
     }

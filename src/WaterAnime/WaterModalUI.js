@@ -599,8 +599,36 @@ export class WaterModalUI {
                         </div>
                     </div>
 
-                    <!-- Tab 4: View -->
+                    <!-- Tab 4: View & Performance -->
                     <div class="oc-tab-content" id="oc-tab-view">
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label>Shader Quality Mode</label>
+                            </div>
+                            <div class="oc-preset-grid" style="grid-template-columns: 1fr 1fr;">
+                                <button class="oc-preset-btn active" id="oc-mode-high" data-mode="high">🌟 High (Cinematic)</button>
+                                <button class="oc-preset-btn" id="oc-mode-perf" data-mode="performance">⚡ Fast (High FPS)</button>
+                            </div>
+                        </div>
+
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label>Mesh Density / Resolution</label>
+                            </div>
+                            <div class="oc-preset-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                                <button class="oc-preset-btn active" id="oc-res-512" data-res="512">512 (Ultra)</button>
+                                <button class="oc-preset-btn" id="oc-res-256" data-res="256">256 (Med)</button>
+                                <button class="oc-preset-btn" id="oc-res-128" data-res="128">128 (Fast)</button>
+                            </div>
+                        </div>
+
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label>Distance Quality LOD (Reduces Far Noise)</label>
+                            </div>
+                            <button class="oc-pill-btn active" id="oc-lod-toggle">Distance LOD: ON</button>
+                        </div>
+
                         <div class="oc-control">
                             <div class="oc-control-head">
                                 <label>Surface Wireframe</label>
@@ -791,7 +819,38 @@ export class WaterModalUI {
         modal.querySelector('#oc-col-sun').addEventListener('input', e => sunColorUniform.value.set(e.target.value));
         modal.querySelector('#oc-col-horizon').addEventListener('input', e => horizonColorUniform.value.set(e.target.value));
 
-        // Tab 4: View Wireframe
+        // Tab 4: View & Performance
+        const modeHighBtn = modal.querySelector('#oc-mode-high');
+        const modePerfBtn = modal.querySelector('#oc-mode-perf');
+        if (modeHighBtn && modePerfBtn) {
+            modeHighBtn.addEventListener('click', () => {
+                this.waterSystem.setQualityMode('high');
+                this.syncQualityUI();
+            });
+            modePerfBtn.addEventListener('click', () => {
+                this.waterSystem.setQualityMode('performance');
+                this.syncQualityUI();
+            });
+        }
+
+        ['512', '256', '128'].forEach(res => {
+            const btn = modal.querySelector(`#oc-res-${res}`);
+            if (btn) {
+                btn.addEventListener('click', () => {
+                    this.waterSystem.setMeshResolution(res);
+                    this.syncQualityUI();
+                });
+            }
+        });
+
+        const lodBtn = modal.querySelector('#oc-lod-toggle');
+        if (lodBtn) {
+            lodBtn.addEventListener('click', () => {
+                this.waterSystem.setDistanceLod(!this.waterSystem.distanceLod);
+                this.syncQualityUI();
+            });
+        }
+
         const wireframeBtn = modal.querySelector('#oc-wireframe-toggle');
         wireframeBtn.addEventListener('click', () => {
             if (this.waterSystem.openSeaMaterial) {
@@ -821,8 +880,35 @@ export class WaterModalUI {
             foamAmountUniform.value = 1.0;
             detailAmountUniform.value = 1.0;
             this.waterSystem.setHeight(2.4);
+            this.waterSystem.setQualityMode('high');
+            this.syncQualityUI();
             presetBtns[0].click();
         });
+    }
+
+    syncQualityUI() {
+        const isHigh = this.waterSystem.qualityMode === 'high';
+        const modeHighBtn = this.dom.querySelector('#oc-mode-high');
+        const modePerfBtn = this.dom.querySelector('#oc-mode-perf');
+        if (modeHighBtn && modePerfBtn) {
+            modeHighBtn.classList.toggle('active', isHigh);
+            modePerfBtn.classList.toggle('active', !isHigh);
+        }
+
+        const currentRes = String(this.waterSystem.meshResolution);
+        ['512', '256', '128'].forEach(res => {
+            const btn = this.dom.querySelector(`#oc-res-${res}`);
+            if (btn) {
+                btn.classList.toggle('active', currentRes === res);
+            }
+        });
+
+        const lodBtn = this.dom.querySelector('#oc-lod-toggle');
+        if (lodBtn) {
+            const isOn = this.waterSystem.distanceLod;
+            lodBtn.classList.toggle('active', isOn);
+            lodBtn.textContent = isOn ? 'Distance LOD: ON' : 'Distance LOD: OFF';
+        }
     }
 
     updateSpectrumUI() {

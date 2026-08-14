@@ -6,7 +6,7 @@ const container = document.getElementById('app');
 
 export const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8cbce6);
-scene.fog = new THREE.Fog(0x8cbce6, 200, 4000);
+scene.fog = new THREE.Fog(0x8cbce6, 100, 8000);
 
 export const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 2.0, 30000);
 camera.position.set(0, 9, 26);
