@@ -57,7 +57,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     let shadowDistMode = LOW_GFX ? 'Close' : 'Med';
     let isBloomOn = false;
     let isHD = true;
-    let cameraZoomDist = 12.0;
+    let cameraZoomDist = parseFloat(localStorage.getItem('wl_zoomDist')) || 12.0;
     let currentFrame = 0;
     let logicTimer = 0;
     let animeWaterSystem = null;
@@ -1190,8 +1190,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     window.addEventListener('wheel', (e) => {
         if ((window.editorState && window.editorState.isEditorMode) || isGodMode) return;
         cameraZoomDist += Math.sign(e.deltaY) * 4.0;
-        cameraZoomDist = Math.max(0.5, Math.min(100.0, cameraZoomDist));
+        cameraZoomDist = Math.max(5.0, Math.min(300.0, cameraZoomDist));
         if (cameraManager) cameraManager.setZoom(cameraZoomDist);
+        localStorage.setItem('wl_zoomDist', cameraZoomDist);
     }, { passive: true });
     
 
@@ -4903,8 +4904,9 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
             const newDist = Math.sqrt(dx*dx + dy*dy);
             
             cameraZoomDist = initialZoomDist * (initialPinchDist / newDist);
-            cameraZoomDist = Math.max(5.0, Math.min(100.0, cameraZoomDist));
-            
+            cameraZoomDist = Math.max(5.0, Math.min(300.0, cameraZoomDist));
+            localStorage.setItem('wl_zoomDist', cameraZoomDist);
+
             const zoomToggleBtn = document.getElementById('zoom-toggle');
             if (zoomToggleBtn) {
                 if (cameraZoomDist > 25.0) zoomToggleBtn.innerText = 'Zoom In';
@@ -5543,7 +5545,7 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         composer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    let timePhase = 0; // 0: Day, 1: Dusk, 2: Deep Twilight
+    let timePhase = parseInt(localStorage.getItem('wl_timePhase')) || 0; // 0: Day, 1: Dusk, 2: Deep Twilight
     
     // ... lighting targets for lerping
     const envTargets = {
@@ -5555,11 +5557,16 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
     
     const timeToggleBtn = document.getElementById('time-toggle');
     if (timeToggleBtn) {
+        if (timePhase === 1) timeToggleBtn.innerText = '🌇';
+        else if (timePhase === 2) timeToggleBtn.innerText = '🌙';
+        else timeToggleBtn.innerText = '☀️';
+
         timeToggleBtn.addEventListener('click', () => {
             timePhase = (timePhase + 1) % 3;
             if (timePhase === 0) timeToggleBtn.innerText = '☀️';
             else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
             else timeToggleBtn.innerText = '🌙';
+            localStorage.setItem('wl_timePhase', timePhase);
         });
     }
 
@@ -6345,6 +6352,15 @@ import { composer, renderPass, bloomPass, godRaysPass, summerPass, initPostProce
         // ---------------------------
 
         isInitializingGui = false;
+
+        let _autoSaveTimer = null;
+        gui.onChange(() => {
+            if (isInitializingGui) return;
+            clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = setTimeout(() => {
+                localStorage.setItem('flightSettings', JSON.stringify(gui.save()));
+            }, 800);
+        });
     }
 
     animate();

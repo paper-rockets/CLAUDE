@@ -45,6 +45,6 @@ export class CameraManager {
     }
     
     setZoom(dist) {
-        this.cameraZoomDist = Math.max(0.5, Math.min(100.0, dist));
+        this.cameraZoomDist = Math.max(5.0, Math.min(300.0, dist));
     }
 }
