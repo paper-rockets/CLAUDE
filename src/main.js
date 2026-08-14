@@ -9,6 +9,7 @@ import terrainCanyon from './world/biomes/terrain-canyon.js';
 import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northpole.js';
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
+import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
 import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
@@ -909,7 +910,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     window.addEventListener('keydown', (e) => {
         if ((e.key === 'o' || e.key === 'O') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-            openOceanInGui();
+            if (window.waterModalUI) window.waterModalUI.toggle();
+            else openOceanInGui();
         }
         if ((e.key === 'g' || e.key === 'G') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
             const godBtn = document.getElementById('god-mode-btn');
@@ -1901,6 +1903,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Initialize Open Sea Ocean WebGPU System
     animeWaterSystem = new WaterSystem(scene, renderer);
     animeWaterSystem.setVisible(params.showWater);
+    window.waterModalUI = new WaterModalUI(animeWaterSystem);
     animeWaterGUI = new WaterEditorGUI(animeWaterSystem, gui);
 
     // ==========================================
