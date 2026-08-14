@@ -132,37 +132,8 @@ canvas { display: block; touch-action: none; }
   border: none;
   background: transparent;
   transition: transform 0.15s ease, opacity 0.15s ease, text-shadow 0.15s ease;
-=======
-#joystick-base {
-  position: absolute; left: 40px; bottom: 40px;
-  width: 100px; height: 100px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.07); border: 1.5px solid rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(8px);
-  pointer-events: auto;
-}
-
-#joystick-knob {
-  position: absolute; left: 50%; top: 50%;
-  width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255,255,255,0.25);
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-
-#boost-btn {
-  position: fixed; right: 20px; bottom: 25px;
-  width: 75px; height: 75px; border-radius: 50%;
-  color: rgba(255,255,255,0.7); font-weight: bold; font-size: 13px;
-  display: flex; align-items: center; justify-content: center;
-  user-select: none; pointer-events: auto;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
-  backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, 0.12); border: 1.5px solid rgba(255, 255, 255, 0.28);
-  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
->>>>>>> origin/main
   z-index: 20;
 }
-#boost-btn:active { background: rgba(255,255,255,0.25); }
 
 #boost-btn:active {
   transform: scale(0.92);
@@ -221,34 +192,4 @@ canvas { display: block; touch-action: none; }
 
 @media (max-width: 768px) {
   #world-map { display: none !important; }
-  #god-mode-btn, #ocean-toggle-btn, #biome-label { display: none !important; }
-  #top-bar { padding: 4px 10px !important; gap: 8px !important; }
 }
-body.immersive #top-bar,
-body.immersive #world-map,
-body.immersive #crystal-editor,
-body.immersive .dg.ac { display: none !important; }
-body.immersive #immersive-exit { display: flex !important; }
-
-#ui-stack {
-  position: fixed; right: 16px; top: 16px;
-  z-index: 10; pointer-events: auto;
-  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
-}
-#ui-stack button {
-  color: rgba(60, 50, 70, 0.9); background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(8px); padding: 8px 14px;
-  border-radius: 8px; font-size: 13px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.4); font-weight: bold; width: fit-content;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-#ui-stack button:hover {
-  background: rgba(255, 255, 255, 0.85);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  #touch-controls { display: none; }
-}
-.dg { zoom: 1.2 !important; }
-.dg.ac { zoom: 1.2 !important; }
