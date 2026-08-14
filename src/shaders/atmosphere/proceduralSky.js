@@ -20,6 +20,35 @@ const noise = Fn(([p]) => {
     );
 });
 
+// 3D gradient noise hash (https://www.shadertoy.com/view/Xsl3Dl)
+const hash3D = Fn(([p]) => {
+    const sinInput = vec3(
+        dot(p, vec3(127.1, 311.7, 74.7)),
+        dot(p, vec3(269.5, 183.3, 246.1)),
+        dot(p, vec3(113.5, 271.9, 124.6))
+    );
+    return fract(sin(sinInput).mul(43758.5453123)).mul(2.0).sub(1.0);
+});
+
+const noise3D = Fn(([p]) => {
+    const i = p.floor().toVar();
+    const f = p.fract().toVar();
+    const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+    return mix(
+        mix(
+            mix(dot(hash3D(i.add(vec3(0,0,0))), f.sub(vec3(0,0,0))),
+                dot(hash3D(i.add(vec3(1,0,0))), f.sub(vec3(1,0,0))), u.x),
+            mix(dot(hash3D(i.add(vec3(0,1,0))), f.sub(vec3(0,1,0))),
+                dot(hash3D(i.add(vec3(1,1,0))), f.sub(vec3(1,1,0))), u.x), u.y),
+        mix(
+            mix(dot(hash3D(i.add(vec3(0,0,1))), f.sub(vec3(0,0,1))),
+                dot(hash3D(i.add(vec3(1,0,1))), f.sub(vec3(1,0,1))), u.x),
+            mix(dot(hash3D(i.add(vec3(0,1,1))), f.sub(vec3(0,1,1))),
+                dot(hash3D(i.add(vec3(1,1,1))), f.sub(vec3(1,1,1))), u.x), u.y),
+        u.z
+    );
+});
+
 const fbm = Fn(([p]) => {
     let f = float(0.0).toVar();
     let currP = vec2(p).toVar();
@@ -74,10 +103,10 @@ export function createProceduralSky() {
 
         // Night sky gradient with procedural starfield
         const nightBase = vec3(0.015, 0.02, 0.06);
-        const starUV = dir.xz.div(clamp(abs(dir.y).add(0.2), 0.1, 1.0)).mul(300.0);
-        const starHash = fract(sin(dot(starUV.floor(), vec2(12.9898, 78.233))).mul(43758.5453));
-        const star = smoothstep(0.985, 1.0, starHash).mul(sin(uTime.mul(2.0).add(starHash.mul(10.0))).mul(0.3).add(0.7));
-        const nightSky = nightBase.add(star.mul(uNightFactor));
+        const starsBase = pow(clamp(noise3D(dir.mul(400.0)), 0.0, 1.0), float(25.0)).mul(500.0);
+        const starsFlicker = mix(float(0.4), float(1.4), noise3D(dir.mul(200.0).add(vec3(uTime, uTime, uTime))));
+        const star = starsBase.mul(starsFlicker);
+        const nightSky = nightBase.add(vec3(star).mul(uNightFactor));
 
         // Blend Day -> Dusk -> Night
         let sky = mix(baseSky.add(sunGlow).add(sunDisc), duskGlow.add(baseSky.mul(0.5)), uDuskFactor);
