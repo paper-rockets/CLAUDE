@@ -2,6 +2,13 @@
 
 Welcome to **Kiki's Flight**, an infinite procedural 3D flying game built with raw Three.js, toon shading, zero external image textures, custom WebGL shaders, and high-performance instanced mesh recycling.
 
+## ▶️ Play Now
+
+| Version | Link | Notes |
+|---|---|---|
+| 🚀 **WebGPU** (recommended) | [paper-rockets.github.io/Wanderlust](https://paper-rockets.github.io/Wanderlust/) | Best performance, Chrome/Edge 113+ |
+| 🌐 **WebGL** (compatible) | [paper-rockets.github.io/Wanderlust/webgl](https://paper-rockets.github.io/Wanderlust/webgl/) | Works on all modern browsers |
+
 ---
 
 ## 🚀 Quick Start (Run Locally)
