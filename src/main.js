@@ -3577,12 +3577,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let pcControlsShown = false;
 
     window.addEventListener('keydown', e => {
-        if (!pcControlsShown && e.key !== 'F12' && e.key !== 'F5') {
-            document.getElementById('touch-controls').style.display = 'none';
-            document.getElementById('pc-controls-hint').style.display = 'block';
+        const pcHint = document.getElementById('pc-controls-hint');
+        if (pcHint && !pcControlsShown && e.key !== 'F12' && e.key !== 'F5') {
+            pcHint.style.display = 'block';
             pcControlsShown = true;
-            // Hide the hint after 10 seconds
-            setTimeout(() => { document.getElementById('pc-controls-hint').style.opacity = '0'; }, 10000);
+            setTimeout(() => { 
+                const h = document.getElementById('pc-controls-hint');
+                if (h) h.style.opacity = '0'; 
+            }, 10000);
         }
 
         if(e.key.toLowerCase() === 'w' || e.key === 'ArrowUp') keys.w = true;
@@ -3618,8 +3620,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let activeTouchId = null;
     const maxRadius = 60;
 
-    joyBase.style.opacity = '0'; // Hide by default
-    joyBase.style.pointerEvents = 'none';
+    if (joyBase) {
+        joyBase.style.opacity = '0'; // Hide by default
+        joyBase.style.pointerEvents = 'none';
+    }
 
     let initialPinchDist = null;
     let initialZoomDist = null;
@@ -3633,12 +3637,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             activeTouchId = touch.identifier;
             
             // Move joyBase to touch point
-            joyBase.style.left = (touch.clientX - 50) + 'px';
-            joyBase.style.top = (touch.clientY - 50) + 'px';
-            joyBase.style.bottom = 'auto';
-            joyBase.style.opacity = '1';
-            joyBase.style.background = 'rgba(255,255,255,0.18)';
-            joyBase.style.borderColor = 'rgba(255,255,255,0.4)';
+            if (joyBase) {
+                joyBase.style.left = (touch.clientX - 50) + 'px';
+                joyBase.style.top = (touch.clientY - 50) + 'px';
+                joyBase.style.bottom = 'auto';
+                joyBase.style.opacity = '1';
+                joyBase.style.background = 'rgba(255,255,255,0.18)';
+                joyBase.style.borderColor = 'rgba(255,255,255,0.4)';
+            }
             
             updateJoystick(touch);
         } else if (e.touches.length === 2) {
@@ -3679,10 +3685,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const resetJoystick = () => {
         activeTouchId = null;
         touchState.x = 0; touchState.y = 0;
-        joyKnob.style.transform = `translate(-50%, -50%)`;
-        joyBase.style.opacity = '0';
-        joyBase.style.background = '';
-        joyBase.style.borderColor = '';
+        if (joyKnob) joyKnob.style.transform = `translate(-50%, -50%)`;
+        if (joyBase) {
+            joyBase.style.opacity = '0';
+            joyBase.style.background = '';
+            joyBase.style.borderColor = '';
+        }
     };
 
     window.addEventListener('touchend', e => {
@@ -3699,6 +3707,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     });
 
     function updateJoystick(touch) {
+        if (!joyBase || !joyKnob) return;
         const rect = joyBase.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
@@ -3715,14 +3724,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     }
 
     const boostBtn = document.getElementById('boost-btn');
-    const startBoost = (e) => { e.preventDefault(); touchState.boost = true; boostBtn.style.transform = 'scale(0.9)'; };
-    const resetBoost = (e) => { e.preventDefault(); touchState.boost = false; boostBtn.style.transform = 'scale(1)'; };
-    boostBtn.addEventListener('touchstart', startBoost);
-    boostBtn.addEventListener('mousedown', startBoost);
-    boostBtn.addEventListener('touchend', resetBoost);
-    boostBtn.addEventListener('touchcancel', resetBoost);
-    boostBtn.addEventListener('mouseup', resetBoost);
-    boostBtn.addEventListener('mouseleave', resetBoost);
+    if (boostBtn) {
+        const startBoost = (e) => { e.preventDefault(); touchState.boost = true; boostBtn.style.transform = 'scale(0.9)'; };
+        const resetBoost = (e) => { e.preventDefault(); touchState.boost = false; boostBtn.style.transform = 'scale(1)'; };
+        boostBtn.addEventListener('touchstart', startBoost);
+        boostBtn.addEventListener('mousedown', startBoost);
+        boostBtn.addEventListener('touchend', resetBoost);
+        boostBtn.addEventListener('touchcancel', resetBoost);
+        boostBtn.addEventListener('mouseup', resetBoost);
+        boostBtn.addEventListener('mouseleave', resetBoost);
+    }
 
 
 
