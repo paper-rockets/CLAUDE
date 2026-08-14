@@ -2,8 +2,33 @@ import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
     Fn, vec2, vec3, vec4, uniform, positionWorld, cameraPosition, normalize,
-    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs
+    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs, max
 } from 'three/tsl';
+
+const hash = Fn(([p]) => {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453123));
+});
+
+const noise = Fn(([p]) => {
+    const i = p.floor();
+    const f = p.fract();
+    const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
+    return mix(
+        mix(hash(i.add(vec2(0.0, 0.0))), hash(i.add(vec2(1.0, 0.0))), u.x),
+        mix(hash(i.add(vec2(0.0, 1.0))), hash(i.add(vec2(1.0, 1.0))), u.x),
+        u.y
+    );
+});
+
+const fbm = Fn(([p]) => {
+    let f = float(0.0).toVar();
+    let currP = vec2(p).toVar();
+    f.addAssign(noise(currP).mul(0.5000)); currP.mulAssign(2.02);
+    f.addAssign(noise(currP).mul(0.2500)); currP.mulAssign(2.03);
+    f.addAssign(noise(currP).mul(0.1250)); currP.mulAssign(2.01);
+    f.addAssign(noise(currP).mul(0.0625));
+    return f;
+});
 
 export function createProceduralSky() {
     const uTime = uniform(0.0);
@@ -58,10 +83,54 @@ export function createProceduralSky() {
         let sky = mix(baseSky.add(sunGlow).add(sunDisc), duskGlow.add(baseSky.mul(0.5)), uDuskFactor);
         sky = mix(sky, nightSky, uNightFactor);
 
-        // Storm darkening
+        // Storm darkening for base sky
         sky = mix(sky, vec3(0.12, 0.14, 0.18), uStormDarken);
 
-        return vec4(sky, 1.0);
+        // ==========================================
+        // PROCEDURAL CLOUDS LAYER (TSL)
+        // ==========================================
+        // Upper hemisphere dome projection
+        const skyDomeDist = float(1.0).div(max(dir.y.add(0.15), float(0.08)));
+        const cloudUV = dir.xz.mul(skyDomeDist).mul(0.45);
+
+        // Wind drift & movement
+        const windOffset = vec2(uTime.mul(uCloudSpeed).mul(0.15), uTime.mul(uCloudSpeed).mul(0.08));
+        const uvSample = cloudUV.add(windOffset);
+
+        // Billowy Anime / Ghibli FBM Cloud Density with Domain Warping
+        const q = vec2(fbm(uvSample), fbm(uvSample.add(vec2(5.2, 1.3))));
+        const warpedUV = uvSample.add(q.mul(0.8).add(q.mul(uCloudTurbulence)));
+        const cloudNoise = fbm(warpedUV);
+
+        // Biome Coverage & Soft Edge Thresholding
+        const lowThreshold = float(1.0).sub(uCloudCoverage);
+        const highThreshold = lowThreshold.add(max(uCloudEdge, float(0.02)));
+        const cloudAlpha = smoothstep(lowThreshold, highThreshold, cloudNoise);
+
+        // Horizon fade so clouds blend cleanly above the horizon
+        const horizonFade = smoothstep(0.02, 0.22, dir.y);
+        const finalAlpha = cloudAlpha.mul(horizonFade).mul(uCloudOpacity);
+
+        // Cloud Lighting & Rim / Silver Lining
+        const sunDiffuse = clamp(sunDot.mul(0.5).add(0.5), 0.0, 1.0);
+        const silverLining = pow(clamp(sunDot, 0.0, 1.0), 4.0).mul(0.4);
+
+        // Base cloud color with directional shading
+        const dayCloudCol = mix(uCloudShadowColor, uCloudColor, sunDiffuse.add(silverLining));
+
+        // Sunset & Dusk tinting
+        const sunsetCloudCol = mix(dayCloudCol, vec3(1.0, 0.6, 0.45), uDuskFactor.mul(0.7));
+
+        // Night sky darkening
+        const nightCloudCol = mix(sunsetCloudCol, vec3(0.04, 0.05, 0.1), uNightFactor.mul(0.85));
+
+        // Storm darkening
+        const finalCloudCol = mix(nightCloudCol, vec3(0.1, 0.12, 0.15), uStormDarken.mul(0.8));
+
+        // Composite procedural clouds over sky
+        const compositeSky = mix(sky, finalCloudCol, finalAlpha);
+
+        return vec4(compositeSky, 1.0);
     })();
 
     const geometry = new THREE.SphereGeometry(20000, 64, 32);

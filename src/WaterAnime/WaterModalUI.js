@@ -408,10 +408,10 @@ export class WaterModalUI {
 
                         <div class="oc-control">
                             <div class="oc-control-head">
-                                <label for="oc-oceanScale">Ocean Tile Scale</label>
+                                <label for="oc-oceanScale">Ocean Scale / Wave Scale</label>
                                 <span class="oc-value" id="oc-oceanScaleVal">100%</span>
                             </div>
-                            <input class="oc-slider" type="range" id="oc-oceanScale" min="50" max="300" value="100"/>
+                            <input class="oc-slider" type="range" id="oc-oceanScale" min="10" max="400" value="100"/>
                         </div>
 
                         <div class="oc-control">

@@ -52,12 +52,19 @@ export const foamSpreadUniform = uniform(0.65);
 export const foamOpacityUniform = uniform(1.0);
 
 /* ============================================================
-   Gerstner Swell — 3 Multi-directional Spectral Components
+   Gerstner Swell — 5 Multi-directional Spectral Components
    ============================================================ */
 export let WAVE_PARAMS = [
-  { dir: [1.0, 0.25], wavelength: 74.0, steepness: 0.12, phase: 0.0 },
-  { dir: [0.65, 0.75], wavelength: 32.0, steepness: 0.09, phase: 1.2 },
-  { dir: [-0.72, 0.68], wavelength: 14.5, steepness: 0.06, phase: 2.4 }
+  // Primary ocean swell - long wavelength (160m), high amplitude
+  { dir: [0.92, 0.38], wavelength: 160.0, steepness: 0.22, phase: 0.0 },
+  // Secondary cross-swell (88m)
+  { dir: [0.38, 0.92], wavelength: 88.0, steepness: 0.16, phase: 1.4 },
+  // Medium choppy wind wave (42m)
+  { dir: [-0.65, 0.76], wavelength: 42.0, steepness: 0.12, phase: 2.8 },
+  // High-frequency surface chop (20m)
+  { dir: [0.78, -0.62], wavelength: 20.0, steepness: 0.08, phase: 4.1 },
+  // Capillary detail wave (9.5m)
+  { dir: [-0.85, -0.52], wavelength: 9.5, steepness: 0.05, phase: 5.5 }
 ];
 
 export let WAVES = WAVE_PARAMS.map(({ dir, wavelength, steepness, phase }) => {
@@ -88,10 +95,10 @@ export function updateWaveUniforms(i) {
 }
 
 export function randomizeSeaSpectrum() {
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < WAVES.length; i++) {
     const angle = (Math.random() * 0.9 - 0.45) + (i % 2 === 0 ? 0 : Math.PI * 0.62);
-    const wavelength = 75.0 * Math.pow(0.48, i) * (0.85 + Math.random() * 0.35);
-    const steepness = 0.12 * Math.pow(0.75, i) * (0.8 + Math.random() * 0.4);
+    const wavelength = 160.0 * Math.pow(0.55, i) * (0.85 + Math.random() * 0.35);
+    const steepness = 0.22 * Math.pow(0.72, i) * (0.8 + Math.random() * 0.4);
     
     WAVE_PARAMS[i] = {
       dir: [Math.cos(angle), Math.sin(angle)],
@@ -120,16 +127,17 @@ export function setWindDirection(angleDeg, spreadPercent = 45) {
 const wavePhase = (w, xz, time) =>
   w.k.mul(dot(vec2(w.dx, w.dz), xz).sub(time.mul(w.c))).add(w.phase);
 
-// displaced surface point for a given parametric xz
-const wavePosition = Fn(([rawXz, time, sea]) => {
-  const xz = rawXz.mul(oceanScaleUniform).toVar();
-  const p = vec3(xz.x, 0.0, xz.y).toVar();
+// displaced surface point for a given parametric xz (sampled in world space for true physical waves)
+const wavePosition = Fn(([localXz, time, sea]) => {
+  const worldXz = localXz.add(cameraPosition.xz);
+  const xz = worldXz.mul(oceanScaleUniform).toVar();
+  const p = vec3(localXz.x, float(0.0), localXz.y).toVar();
   for (const w of WAVES) {
-    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform);
+    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform).mul(waveHeightUniform);
     const f = wavePhase(w, xz, time);
-    p.x.addAssign(a.mul(w.dx).mul(cos(f)));
-    p.y.addAssign(a.mul(sin(f)).mul(waveHeightUniform));
-    p.z.addAssign(a.mul(w.dz).mul(cos(f)));
+    p.x.addAssign(a.mul(w.dx).mul(cos(f)).mul(0.35));
+    p.y.addAssign(a.mul(sin(f)));
+    p.z.addAssign(a.mul(w.dz).mul(cos(f)).mul(0.35));
   }
   return p;
 });
@@ -177,8 +185,8 @@ const waveCrest = Fn(([rawXz, time, sea]) => {
   const xz = rawXz.mul(oceanScaleUniform).toVar();
   const h = float(0.0).toVar();
   for (const w of WAVES) {
-    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform);
-    h.addAssign(a.mul(sin(wavePhase(w, xz, time))).mul(waveHeightUniform));
+    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform).mul(waveHeightUniform);
+    h.addAssign(a.mul(sin(wavePhase(w, xz, time))));
   }
   return h;
 });

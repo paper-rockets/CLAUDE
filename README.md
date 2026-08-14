@@ -2,6 +2,13 @@
 
 Welcome to **Wanderlust**, an infinite procedural 3D flying engine and exploration game built with Three.js, custom WebGL/WebGPU shaders, toon shading, zero external image textures, and high-performance instanced mesh recycling.
 
+## ▶️ Play Now
+
+| Version | Link | Notes |
+|---|---|---|
+| 🚀 **WebGPU** (recommended) | [paper-rockets.github.io/Wanderlust](https://paper-rockets.github.io/Wanderlust/) | Best performance, Chrome/Edge 113+ |
+| 🌐 **WebGL** (compatible) | [paper-rockets.github.io/Wanderlust/webgl](https://paper-rockets.github.io/Wanderlust/webgl/) | Works on all modern browsers |
+
 ---
 
 ## 🚀 Quick Start (Run Locally)

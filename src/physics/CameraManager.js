@@ -16,7 +16,7 @@ export class CameraManager {
     
     update(delta, playerGrp, currentYaw, isBoosting) {
         const defaultCamDist = this.cameraZoomDist;
-        const defaultCamHeight = this.cameraZoomDist * 0.33;
+        const defaultCamHeight = this.cameraZoomDist * 0.15;
         
         // Smoothly lerp camera to default distance using exponential decay
         const decayZoom = 1.0 - Math.exp(-5.0 * delta);
@@ -34,7 +34,7 @@ export class CameraManager {
         this.camera.quaternion.slerp(this.quatIdentity, decayCameraQuat);
         
         // Single unified cameraBase tracking pass per frame (exponential lerp)
-        const decayCamPos = 1.0 - Math.exp(-14.0 * delta);
+        const decayCamPos = 1.0 - Math.exp(-22.0 * delta);
         this.cameraBase.position.lerp(playerGrp.position, decayCamPos);
         
         // Speed zoom effect
@@ -45,6 +45,6 @@ export class CameraManager {
     }
     
     setZoom(dist) {
-        this.cameraZoomDist = Math.max(0.5, Math.min(100.0, dist));
+        this.cameraZoomDist = Math.max(5.0, Math.min(300.0, dist));
     }
 }

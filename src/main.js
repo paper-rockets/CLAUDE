@@ -10,6 +10,7 @@ import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northp
 
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
 import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
+import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 
@@ -70,7 +71,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let shadowDistMode = LOW_GFX ? 'Close' : 'Med';
     let isBloomOn = false;
     let isHD = true;
-    let cameraZoomDist = 12.0;
+    let cameraZoomDist = parseFloat(localStorage.getItem('wl_zoomDist')) || 12.0;
     let currentFrame = 0;
     let logicTimer = 0;
     let animeWaterSystem = null;
@@ -1059,8 +1060,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.addEventListener('wheel', (e) => {
         if ((window.editorState && window.editorState.isEditorMode) || isGodMode) return;
         cameraZoomDist += Math.sign(e.deltaY) * 4.0;
-        cameraZoomDist = Math.max(0.5, Math.min(100.0, cameraZoomDist));
+        cameraZoomDist = Math.max(5.0, Math.min(300.0, cameraZoomDist));
         if (cameraManager) cameraManager.setZoom(cameraZoomDist);
+        localStorage.setItem('wl_zoomDist', cameraZoomDist);
     }, { passive: true });
     
 
@@ -1841,6 +1843,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     animeWaterSystem = new WaterSystem(scene, renderer);
     animeWaterSystem.setVisible(params.showWater);
     window.waterModalUI = new WaterModalUI(animeWaterSystem);
+    animeWaterGUI = new WaterEditorGUI(animeWaterSystem, gui);
 
     // ==========================================
     // RAIN SYSTEM
@@ -3224,15 +3227,33 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 // Strip embedded/dark vertex colors from GLB file if any
                 if (g.attributes.color) g.deleteAttribute('color');
 
-                const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
-                const childName = (m.name || '').toLowerCase();
-                const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || 
-                               childName.includes('bark') || childName.includes('trunk') || childName.includes('wood') || 
-                               matName.includes('m_trunk') || childName.includes('m_trunk');
-
                 const vertCount = g.attributes.position.count;
                 const isBarkArr = new Float32Array(vertCount);
-                isBarkArr.fill(isBark ? 1.0 : 0.0);
+
+                if (Array.isArray(m.material) && g.groups && g.groups.length > 0) {
+                    const indexAttr = g.index;
+                    g.groups.forEach((group) => {
+                        const mat = m.material[group.materialIndex];
+                        const matName = (mat && mat.name) ? mat.name.toLowerCase() : '';
+                        const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || matName.includes('m_trunk');
+                        const start = group.start;
+                        const count = group.count;
+                        for (let i = start; i < start + count; i++) {
+                            const vertIdx = indexAttr ? indexAttr.getX(i) : i;
+                            if (vertIdx < vertCount) {
+                                isBarkArr[vertIdx] = isBark ? 1.0 : 0.0;
+                            }
+                        }
+                    });
+                } else {
+                    const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
+                    const childName = (m.name || '').toLowerCase();
+                    const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || 
+                                   childName.includes('bark') || childName.includes('trunk') || childName.includes('wood') || 
+                                   matName.includes('m_trunk') || childName.includes('m_trunk');
+                    isBarkArr.fill(isBark ? 1.0 : 0.0);
+                }
+
                 g.setAttribute('aIsBark', new THREE.BufferAttribute(isBarkArr, 1));
 
                 if (!g.index) {
@@ -3595,7 +3616,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const joyBase = document.getElementById('joystick-base');
     const joyKnob = document.getElementById('joystick-knob');
     let activeTouchId = null;
-    const maxRadius = 40;
+    const maxRadius = 60;
 
     joyBase.style.opacity = '0'; // Hide by default
     joyBase.style.pointerEvents = 'none';
@@ -3616,6 +3637,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             joyBase.style.top = (touch.clientY - 50) + 'px';
             joyBase.style.bottom = 'auto';
             joyBase.style.opacity = '1';
+            joyBase.style.background = 'rgba(255,255,255,0.18)';
+            joyBase.style.borderColor = 'rgba(255,255,255,0.4)';
             
             updateJoystick(touch);
         } else if (e.touches.length === 2) {
@@ -3638,8 +3661,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const newDist = Math.sqrt(dx*dx + dy*dy);
             
             cameraZoomDist = initialZoomDist * (initialPinchDist / newDist);
-            cameraZoomDist = Math.max(5.0, Math.min(100.0, cameraZoomDist));
-            
+            cameraZoomDist = Math.max(5.0, Math.min(300.0, cameraZoomDist));
+            localStorage.setItem('wl_zoomDist', cameraZoomDist);
+
             const zoomToggleBtn = document.getElementById('zoom-toggle');
             if (zoomToggleBtn) {
                 if (cameraZoomDist > 25.0) zoomToggleBtn.innerText = 'Zoom In';
@@ -3657,6 +3681,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         touchState.x = 0; touchState.y = 0;
         joyKnob.style.transform = `translate(-50%, -50%)`;
         joyBase.style.opacity = '0';
+        joyBase.style.background = '';
+        joyBase.style.borderColor = '';
     };
 
     window.addEventListener('touchend', e => {
@@ -3818,7 +3844,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const quatIdentity = new THREE.Quaternion();
 
     let envConfigs = [
-        {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 0.9, dirI: 2.5, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day
+        {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.053, dirI: 2.14, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
         {bg: 0xffa07a, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk (lower sun)
         {bg: 0x162d5a, fog: 0x224888, amb: 0x7788bb, dir: 0xffbb55, ambI: 1.5, dirI: 3.5, starOp: 1.0, sunY: -8000, moonY: 1600, glintCol: 0xffaa44, cloudCol: 0x2e4a80}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
     ];
@@ -4286,7 +4312,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     });
 
-    let timePhase = 0; // 0: Day, 1: Dusk, 2: Deep Twilight
+    let timePhase = parseInt(localStorage.getItem('wl_timePhase')) || 0; // 0: Day, 1: Dusk, 2: Deep Twilight
     
     // ... lighting targets for lerping
     const envTargets = {
@@ -4298,11 +4324,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     
     const timeToggleBtn = document.getElementById('time-toggle');
     if (timeToggleBtn) {
+        // Restore saved time phase icon on load
+        if (timePhase === 1) timeToggleBtn.innerText = '🌇';
+        else if (timePhase === 2) timeToggleBtn.innerText = '🌙';
+        else timeToggleBtn.innerText = '☀️';
+
         timeToggleBtn.addEventListener('click', () => {
             timePhase = (timePhase + 1) % 3;
             if (timePhase === 0) timeToggleBtn.innerText = '☼';
             else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
             else timeToggleBtn.innerText = '🌙';
+            localStorage.setItem('wl_timePhase', timePhase);
         });
     }
 
@@ -5089,6 +5121,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         // ---------------------------
 
         isInitializingGui = false;
+
+        // Auto-save all gui settings whenever anything changes (debounced 800ms)
+        let _autoSaveTimer = null;
+        gui.onChange(() => {
+            if (isInitializingGui) return;
+            clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = setTimeout(() => {
+                localStorage.setItem('flightSettings', JSON.stringify(gui.save()));
+            }, 800);
+        });
     }
     async function start() {
         initPostProcessing();
