@@ -3945,7 +3945,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
 
     async function animate() {
-        if (proceduralSkyMesh) {
+        if (proceduralSkyMesh && !isGodMode) {
             camera.getWorldPosition(proceduralSkyMesh.position);
         }
         if (params.showMap) _drawWorldMap();
