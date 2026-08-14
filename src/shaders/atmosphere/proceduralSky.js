@@ -49,9 +49,9 @@ export function createProceduralSky() {
     const uDuskFactor = uniform(0.0);
 
     const material = new MeshBasicNodeMaterial({
-        side: THREE.DoubleSide,
+        side: THREE.BackSide,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         fog: false
     });
 
