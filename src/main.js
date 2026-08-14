@@ -3734,7 +3734,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const joyBase = document.getElementById('joystick-base');
     const joyKnob = document.getElementById('joystick-knob');
     let activeTouchId = null;
-    const maxRadius = 40;
+    const maxRadius = 60;
 
     joyBase.style.opacity = '0'; // Hide by default
     joyBase.style.pointerEvents = 'none';
@@ -3755,6 +3755,8 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             joyBase.style.top = (touch.clientY - 50) + 'px';
             joyBase.style.bottom = 'auto';
             joyBase.style.opacity = '1';
+            joyBase.style.background = 'rgba(255,255,255,0.18)';
+            joyBase.style.borderColor = 'rgba(255,255,255,0.4)';
             
             updateJoystick(touch);
         } else if (e.touches.length === 2) {
@@ -3797,6 +3799,8 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         touchState.x = 0; touchState.y = 0;
         joyKnob.style.transform = `translate(-50%, -50%)`;
         joyBase.style.opacity = '0';
+        joyBase.style.background = '';
+        joyBase.style.borderColor = '';
     };
 
     window.addEventListener('touchend', e => {
