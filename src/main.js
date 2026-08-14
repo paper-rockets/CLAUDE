@@ -25,13 +25,13 @@ import { PlayerPhysics } from './physics/PlayerPhysics.js';
 import { CameraManager } from './physics/CameraManager.js';
 import { createProceduralSky } from './shaders/atmosphere/proceduralSky.js';
 import { BIOME_SKY_CONFIGS, WEATHER_PRESETS } from './environment/BiomeSkyConfigs.js';
-import { setupGodMode, toggleGodMode } from './physics/GodMode.js';
+import { setupGodMode, toggleGodMode, updateGodMode } from './physics/GodMode.js';
 
 
 import { MeshToonNodeMaterial, MeshStandardNodeMaterial, MeshBasicNodeMaterial, PointsNodeMaterial } from 'three/webgpu';
 import { uniform, texture, Fn, positionLocal, abs, positionGeometry, sin, step, positionWorld, normalWorld, cameraPosition, float, vec2, vec3, vec4, dot, fract, mix, pow, clamp, normalize, smoothstep as tslSmoothstep, attribute } from 'three/tsl';
 import { scene, camera, renderer, clock } from './core/Engine.js';
-import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI } from './core/PostProcessing.js';
+import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -46,10 +46,20 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
     import { ToonShaderManager } from './vfx/ToonShaderManager.js';
     import { createTerrainMaterial } from './shaders/materials/TerrainNodeMaterial.js';
+    import { createTreeMaterial } from './shaders/materials/TreeNodeMaterial.js';
     import { windSwayNode } from './shaders/materials/WindSwayNode.js';
 
     // Wait for WebGPU Backend to initialize before doing ANY graph or material allocations
     await renderer.init();
+
+    const BASE_URL = import.meta.env.BASE_URL || './';
+    function resolveAssetUrl(p) {
+        if (!p) return p;
+        if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('data:') || p.startsWith('blob:')) return p;
+        const cleanPath = p.replace(/^\.?\//, '');
+        const cleanBase = BASE_URL.endsWith('/') ? BASE_URL : (BASE_URL + '/');
+        return `${cleanBase}${cleanPath}`;
+    }
 
     let isWindOn = false;
     let isRainOn = false;
@@ -373,7 +383,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         showFogPlanes: true,
         showCrystals: false,
         showMap: false,
-        showGUI: true,
+        showGUI: false,
         exposure: 1.8,
         shadeMode: 'original',
     };
@@ -750,7 +760,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         if (animeWaterSystem) animeWaterSystem.setVisible(v);
     });
 
-    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; if(typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = v; if(window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v); if(window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v); });
+    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = false; if(typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = false; if(window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v); if(window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v); });
     function updateCloudScale(instMesh, newMulti, oldMulti) {
         if (typeof instMesh === 'undefined') return;
         const ratio = newMulti / oldMulti;
@@ -819,14 +829,18 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     }
 
     function toggleGUI(show) {
-        const isVisible = typeof show === 'boolean' ? show : (gui.domElement.style.display === 'none');
-        gui.domElement.style.display = isVisible ? '' : 'none';
-        const mapEl = document.getElementById('world-map');
-        if (mapEl) mapEl.style.display = isVisible ? 'block' : 'none';
-        const boostBtn = document.getElementById('boost-btn');
-        if (boostBtn) boostBtn.style.right = isVisible ? '275px' : '20px';
+        const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
+        if (!guiEl) return;
+        const isCurrentlyHidden = guiEl.style.display === 'none' || (typeof window !== 'undefined' && window.getComputedStyle(guiEl).display === 'none');
+        const isVisible = typeof show === 'boolean' ? show : isCurrentlyHidden;
+        guiEl.style.display = isVisible ? 'block' : 'none';
         params.showGUI = isVisible;
-        params.showMap = isVisible;
+        
+        const cogBtn = document.getElementById('gui-toggle-btn');
+        if (cogBtn) {
+            cogBtn.style.opacity = isVisible ? '1' : '0.85';
+            cogBtn.style.transform = isVisible ? 'rotate(45deg)' : 'none';
+        }
     }
     debugFolder.add(params, 'showGUI').name('lil-gui Panel').onChange(v => toggleGUI(v));
 
@@ -859,9 +873,8 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         }
     });
 
-
+    const fsToggleBtn = document.getElementById('fullscreen-toggle');
     const topFullscreenBtn = document.getElementById('top-fullscreen-btn');
-    const hiddenFullscreenBtn = document.getElementById('fullscreen-toggle');
 
     function toggleFullscreen() {
         if (!document.fullscreenElement) {
@@ -873,23 +886,35 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         }
     }
 
+    if (fsToggleBtn) {
+        fsToggleBtn.addEventListener('click', toggleFullscreen);
+    }
     if (topFullscreenBtn) {
         topFullscreenBtn.addEventListener('click', toggleFullscreen);
-    }
-    if (hiddenFullscreenBtn) {
-        // Keep fallback support
-        hiddenFullscreenBtn.addEventListener('click', toggleFullscreen);
     }
 
     document.addEventListener('fullscreenchange', () => {
         const isFS = !!document.fullscreenElement;
-        if (topFullscreenBtn) {
-            topFullscreenBtn.innerHTML = isFS ? '🗵 Exit Full' : '⛶ Fullscreen';
+        if (fsToggleBtn) {
+            fsToggleBtn.innerText = isFS ? '🗵' : '⛶';
         }
-        if (hiddenFullscreenBtn) {
-            hiddenFullscreenBtn.innerHTML = isFS ? 'Exit Fullscreen' : 'Fullscreen';
+        if (topFullscreenBtn) {
+            topFullscreenBtn.innerText = isFS ? '🗵' : '⛶';
         }
     });
+
+    const sparkleBtn = document.getElementById('sparkle-btn');
+    if (sparkleBtn) {
+        sparkleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const charBtn = document.getElementById('char-toggle');
+            if (charBtn) charBtn.click();
+            sparkleBtn.style.transform = 'scale(1.3) rotate(45deg)';
+            setTimeout(() => {
+                sparkleBtn.style.transform = '';
+            }, 250);
+        });
+    }
     
     // Mobile Drawer Event Handlers
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
@@ -991,7 +1016,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
                 godControls = gm.godControls;
             }
             toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
-                renderPass.camera = cam;
+                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
             });
     
         } else {
@@ -1008,7 +1033,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             btn.style.color = '#000';
 
             toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
-                renderPass.camera = cam;
+                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
             });
     
         }
@@ -1242,12 +1267,12 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         uTreeScale: uniform(1.5)
     };
     
-    const matTree = new MeshToonNodeMaterial({
-        vertexColors: true,
-        gradientMap,
-        dithering: true
-    });
-    matTree.positionNode = windSwayNode(terrainUniforms.uTime, treeUniforms.uTreeScale);
+    const matTree = createTreeMaterial(
+        terrainUniforms.uTime,
+        terrainUniforms.uSunDir,
+        treeUniforms.uTreeScale,
+        gradientMap
+    );
 
 
 
@@ -1383,7 +1408,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const FLOWER_COUNT = 0; // Optimized for FPS
     const TREE_MULT = 0.15; // Doubled tree count so entire landscape and horizon are filled with dense forests
     
-    function applyColor(geometry, colorHex) {
+    function applyColor(geometry, colorHex, isBark = false) {
         const color = new THREE.Color(colorHex);
         const colors = [];
         const count = geometry.attributes.position.count;
@@ -1391,24 +1416,27 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             colors.push(color.r, color.g, color.b);
         }
         geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        const isBarkArr = new Float32Array(count);
+        isBarkArr.fill(isBark ? 1.0 : 0.0);
+        geometry.setAttribute('aIsBark', new THREE.BufferAttribute(isBarkArr, 1));
     }
 
     // Tree 1: Tall Pine with Organic Rounded Crown
     const t1Geos = [];
     const t1Trunk = new THREE.CylinderGeometry(0.35, 0.55, 2.5, 6);
     t1Trunk.translate(0, 1.25, 0);
-    applyColor(t1Trunk, 0x8a7560);
+    applyColor(t1Trunk, 0x4d3222, true);
     t1Geos.push(t1Trunk);
     for(let i=0; i<3; i++) {
         const cone = new THREE.ConeGeometry(2.4 - i*0.6, 2.8, 8);
         cone.translate(0, 3 + i*1.7, 0);
-        applyColor(cone, 0x61c759);
+        applyColor(cone, i === 0 ? 0x194d22 : (i === 1 ? 0x236830 : 0x32853f), false);
         t1Geos.push(cone);
     }
     const t1Crown = new THREE.DodecahedronGeometry(1.0, 1);
     t1Crown.scale(1.0, 1.4, 1.0);
     t1Crown.translate(0, 8.2, 0);
-    applyColor(t1Crown, 0x76d86b);
+    applyColor(t1Crown, 0x4ca84f, false);
     t1Geos.push(t1Crown);
     const geoTree1 = BufferGeometryUtils.mergeGeometries(t1Geos.map(g => g.index ? g.toNonIndexed() : g), false);
 
@@ -1416,18 +1444,18 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const t2Geos = [];
     const t2Trunk = new THREE.CylinderGeometry(0.45, 0.75, 2.2, 6);
     t2Trunk.translate(0, 1.1, 0);
-    applyColor(t2Trunk, 0x8a725a);
+    applyColor(t2Trunk, 0x4a2f1e, true);
     t2Geos.push(t2Trunk);
     for(let i=0; i<3; i++) {
         const cone = new THREE.ConeGeometry(3.2 - i*0.7, 3.0, 8);
         cone.translate(0, 2.6 + i*1.6, 0);
-        applyColor(cone, 0x55b853);
+        applyColor(cone, i === 0 ? 0x15441e : (i === 1 ? 0x205e2a : 0x2d7c38), false);
         t2Geos.push(cone);
     }
     const t2Crown = new THREE.DodecahedronGeometry(1.2, 1);
     t2Crown.scale(1.1, 1.3, 1.1);
     t2Crown.translate(0, 7.8, 0);
-    applyColor(t2Crown, 0x6cd368);
+    applyColor(t2Crown, 0x429944, false);
     t2Geos.push(t2Crown);
     const geoTree2 = BufferGeometryUtils.mergeGeometries(t2Geos.map(g => g.index ? g.toNonIndexed() : g), false);
 
@@ -1435,20 +1463,20 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const t3Geos = [];
     const t3Trunk = new THREE.CylinderGeometry(0.35, 0.55, 3.5, 6);
     t3Trunk.translate(0, 1.75, 0);
-    applyColor(t3Trunk, 0x8a725a);
+    applyColor(t3Trunk, 0x4a2f1e, true);
     t3Geos.push(t3Trunk);
     const t3Leaf1 = new THREE.ConeGeometry(2.6, 3.2, 8);
     t3Leaf1.translate(0, 4.0, 0);
-    applyColor(t3Leaf1, 0x5bb959);
+    applyColor(t3Leaf1, 0x1a4f23, false);
     t3Geos.push(t3Leaf1);
     const t3Leaf2 = new THREE.ConeGeometry(2.0, 2.8, 8);
     t3Leaf2.translate(0, 5.8, 0);
-    applyColor(t3Leaf2, 0x6ed167);
+    applyColor(t3Leaf2, 0x277435, false);
     t3Geos.push(t3Leaf2);
     const t3Crown = new THREE.DodecahedronGeometry(1.2, 1);
     t3Crown.scale(1.0, 1.3, 1.0);
     t3Crown.translate(0, 7.8, 0);
-    applyColor(t3Crown, 0x8be47b);
+    applyColor(t3Crown, 0x3d9441, false);
     t3Geos.push(t3Crown);
     const geoTree3 = BufferGeometryUtils.mergeGeometries(t3Geos.map(g => g.index ? g.toNonIndexed() : g), false);
 
@@ -1456,19 +1484,19 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const t4Geos = [];
     const t4Trunk = new THREE.CylinderGeometry(0.35, 0.65, 3.0, 6);
     t4Trunk.translate(0, 1.5, 0);
-    applyColor(t4Trunk, 0x6a5649);
+    applyColor(t4Trunk, 0x462d1d, true);
     t4Geos.push(t4Trunk);
     const t4Leaf1 = new THREE.ConeGeometry(2.8, 3.0, 8);
     t4Leaf1.translate(0, 3.6, 0);
-    applyColor(t4Leaf1, 0x3d9c5d);
+    applyColor(t4Leaf1, 0x14401c, false);
     t4Geos.push(t4Leaf1);
     const t4Leaf2 = new THREE.ConeGeometry(2.1, 2.6, 8);
     t4Leaf2.translate(0, 5.2, 0);
-    applyColor(t4Leaf2, 0x48b26f);
+    applyColor(t4Leaf2, 0x21632d, false);
     t4Geos.push(t4Leaf2);
     const t4Crown = new THREE.DodecahedronGeometry(1.1, 1);
     t4Crown.scale(1.0, 1.3, 1.0);
-    applyColor(t4Crown, 0x61cc86);
+    applyColor(t4Crown, 0x34823c, false);
     t4Geos.push(t4Crown);
     const geoTree4 = BufferGeometryUtils.mergeGeometries(t4Geos.map(g => g.index ? g.toNonIndexed() : g), false);
 
@@ -1658,18 +1686,41 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     }
     geoCloud.computeVertexNormals();
 
-    // Meshes — Single 3D GLB Pine tree instanced mesh (Pine_ultra_fast.glb, 800 count)
-    const instTree1 = new THREE.InstancedMesh(geoTree1, matTree, 800);
-    scene.add(instTree1);
+    // Meshes — 10 Distinct 3D Stylized Pine Tree Instanced Meshes
+    const PINE_CONFIGS = [
+        { key: 'pine_var1', name: 'Stylized Pine 1 (Tall Majestic)', path: 'assets/stylized_pine_var1.glb', count: 120, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 0 },
+        { key: 'pine_var2', name: 'Stylized Pine 2 (Full Tiered)', path: 'assets/stylized_pine_var2.glb', count: 120, height: 22.0, fallbackGeo: geoTree2, clusterGroup: 0 },
+        { key: 'pine_var3', name: 'Stylized Pine 3 (Mountain)', path: 'assets/Pine/stylized_pine_var3.glb', count: 110, height: 21.0, fallbackGeo: geoTree3, clusterGroup: 0 },
+        { key: 'pine_var4', name: 'Stylized Pine 4 (Dense Alpine)', path: 'assets/Pine/stylized_pine_var4.glb', count: 110, height: 20.0, fallbackGeo: geoTree4, clusterGroup: 1 },
+        { key: 'pine_fast', name: 'Pine (Ultra Fast Classic)', path: 'assets/Pine_ultra_fast.glb', count: 90, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 1 },
+        { key: 'pine_fast1', name: 'Pine Alt (Ultra Fast Spire)', path: 'assets/Pine_1_ultra_fast.glb', count: 80, height: 22.0, fallbackGeo: geoTree3, clusterGroup: 1 },
+        { key: 'pine_small1', name: 'Small Stylized Pine 1', path: 'assets/small_stylized_pine_var1.glb', count: 90, height: 15.0, fallbackGeo: geoTree2, clusterGroup: 2 },
+        { key: 'pine_small2', name: 'Small Stylized Pine 2 (Highland)', path: 'assets/Pine/small_stylized_pine_var2.glb', count: 90, height: 14.0, fallbackGeo: geoTree3, clusterGroup: 2 },
+        { key: 'pine_small3', name: 'Small Stylized Pine 3 (Dwarf)', path: 'assets/small_stylized_pine_var3.glb', count: 80, height: 12.0, fallbackGeo: geoTree1, clusterGroup: 2 },
+        { key: 'pine_sapling', name: 'Sapling Pine', path: 'assets/Pine/sapling_stylized_pine.glb', count: 80, height: 8.0, fallbackGeo: geoTree4, clusterGroup: 2 }
+    ];
 
+    const pineTreeMeshes = PINE_CONFIGS.map(cfg => {
+        const mesh = new THREE.InstancedMesh(cfg.fallbackGeo, matTree, cfg.count);
+        mesh.name = cfg.key;
+        mesh.maxCount = cfg.count;
+        mesh.config = cfg;
+        mesh.castShadow = false;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+        scene.add(mesh);
+        return mesh;
+    });
 
+    const instTree1 = pineTreeMeshes[0]; // backward-compatibility alias
+    const treeMeshes = [...pineTreeMeshes];
 
     // ==========================================
-    // DISTANT HORIZON BILLBOARD TREES (SINGLE REAL TREE PNG WITH SIZE & COLOR VARIATION)
+    // DISTANT HORIZON BILLBOARD TREES (DISABLED EVERYWHERE)
     // ==========================================
-    const BILLBOARD_TREE_COUNT = 5000;
+    const BILLBOARD_TREE_COUNT = 0;
     const texLoader = new THREE.TextureLoader();
-    const billboardTex = texLoader.load('assets/tree_billboard_pine_1_norm.png');
+    const billboardTex = texLoader.load(resolveAssetUrl('assets/tree_billboard_pine_1_norm.png'));
     billboardTex.colorSpace = THREE.SRGBColorSpace;
 
     const billboardMat = new MeshToonNodeMaterial({
@@ -1683,12 +1734,12 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const billboardGeo = new THREE.PlaneGeometry(12, 21.6);
     billboardGeo.translate(0, 10.8, 0);
 
-    const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 3500);
+    const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 1);
     instBillboardTrees.frustumCulled = false;
     instBillboardTrees.visible = false;
-    scene.add(instBillboardTrees);
+    // Billboard trees disabled everywhere - not added to scene
 
-    const jungleBillboardTex = texLoader.load('assets/tree_billboard_jungle1.png');
+    const jungleBillboardTex = texLoader.load(resolveAssetUrl('assets/tree_billboard_jungle1.png'));
     jungleBillboardTex.colorSpace = THREE.SRGBColorSpace;
     const jungleBillboardMat = new MeshToonNodeMaterial({
         map: jungleBillboardTex,
@@ -1699,10 +1750,10 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     });
 
     const jungleBillboardGeo = billboardGeo.clone();
-    const instJungleBillboardTrees = new THREE.InstancedMesh(jungleBillboardGeo, jungleBillboardMat, 1500);
+    const instJungleBillboardTrees = new THREE.InstancedMesh(jungleBillboardGeo, jungleBillboardMat, 1);
     instJungleBillboardTrees.frustumCulled = false;
     instJungleBillboardTrees.visible = false;
-    scene.add(instJungleBillboardTrees);
+    // Billboard trees disabled everywhere - not added to scene
 
     // Exact color matching palette derived directly from 3D GLB Pine tree foliage colors
     const billboardTints = [
@@ -1713,7 +1764,6 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         new THREE.Color(0x38b000)  // Deep Forest Green
     ];
 
-    const treeMeshes = [instTree1];
     treeMeshes.forEach(mesh => {
         mesh.maxCount = mesh.count;
     });
@@ -2510,10 +2560,10 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             
             const showAnyTrees = params.showTrees && treesPossibleNearby;
             
-            if (instTree1) instTree1.visible = showAnyTrees && !_inJungle;
+            if (treeMeshes) treeMeshes.forEach(m => m.visible = showAnyTrees && !_inJungle);
             if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = showAnyTrees && !_inJungle);
-            if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = showAnyTrees && !_inJungle;
-            if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = showAnyTrees;
+            if (typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = false;
+            if (typeof instJungleBillboardTrees !== 'undefined') instJungleBillboardTrees.visible = false;
             if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = showAnyTrees);
         }
 
@@ -2532,99 +2582,102 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             if (params.showTrees) {
                 const playerInJungle = getBiomeAt(focusX, focusZ).name.toLowerCase().includes('jungle');
                 let treeSpawnAttemptsThisFrame = 0;
-                const MAX_TREE_SPAWN_ATTEMPTS = 50;
+                const MAX_TREE_SPAWN_ATTEMPTS = 60;
 
-                // 1. Update standard pine trees (instTree1)
-                const count1 = instTree1.maxCount || instTree1.count;
-                let tree1Updated = false;
-                for (let i = (currentFrame + 0) % 15; i < count1; i += 15) {
-                    instTree1.getMatrixAt(i, dummy.matrix);
-                    dummy.position.setFromMatrixPosition(dummy.matrix);
-
-                    // Optimization: if already despawned and no trees can spawn nearby, skip completely!
-                    if (dummy.position.y < -500 && !treesPossibleNearby) {
-                        continue;
-                    }
-
-                    // Also evict any pine that snuck into a jungle tile (biome border cleanup)
-                    const treeInJungle = dummy.position.y > 0 && getBiomeAt(dummy.position.x, dummy.position.z).name.toLowerCase().includes('jungle');
-                    if (playerInJungle || treeInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
-                        if (dummy.position.y > 0) {
-                            treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
-                        }
-
-                        let valid = false;
-                        let nx, nz, h, pathVal, bName = '';
-                        let attempts = 0;
-
-                        if (!playerInJungle && treesPossibleNearby) {
-                            while(!valid && attempts < 12 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
-                                nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
-                                h = getWorldHeight(nx, nz);
-                                pathVal = getPathStrength(nx, nz);
-                                bName = getBiomeAt(nx, nz).name;
-
-                                let isForest = true;
-                                let biomeMatch = !bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
-                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                                let elevationValid = (h >= 6.8 && h <= 55.0) && islandMaskOk;
-
-                            if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
-                                let cx = Math.floor(nx / TREE_CELL_SIZE);
-                                let cz = Math.floor(nz / TREE_CELL_SIZE);
-                                let tooClose = false;
-                                for (let dx = -1; dx <= 1 && !tooClose; dx++) {
-                                    for (let dz = -1; dz <= 1 && !tooClose; dz++) {
-                                        const ncx = (cx + dx + 32768) & 0xFFFF;
-                                        const ncz = (cz + dz + 32768) & 0xFFFF;
-                                        let neighbor = treeGrid.get((ncx << 16) | ncz);
-                                        if (neighbor) {
-                                            if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 20) tooClose = true;
-                                        }
-                                    }
-                                }
-                                if (!tooClose) valid = true;
-                            }
-                            attempts++;
-                            treeSpawnAttemptsThisFrame++;
-                        }
-                    }
-
-                    if (valid) {
-                            treeGrid.set(getTreeCell(nx, nz), {x: nx, z: nz});
-                            dummy.position.set(nx, h, nz);
-                            dummy.rotation.set(0, Math.random() * Math.PI * 2.0, 0);
-                            let baseS = 0.92 + Math.random() * 0.45;
-                            dummy.scale.set(baseS * (0.92 + Math.random() * 0.16), baseS * (0.94 + Math.random() * 0.12), baseS * (0.92 + Math.random() * 0.16));
-
-                            const leafHslAttr = instTree1.geometry.getAttribute('aLeafHslShift');
-                            const barkHslAttr = instTree1.geometry.getAttribute('aBarkHslShift');
-                            if (leafHslAttr && barkHslAttr) {
-                                if (window.treeBillboardEditor) {
-                                    const activeVars = window.treeBillboardEditor.getActiveVariants();
-                                    if (activeVars.length > 0) {
-                                        const v = activeVars[Math.floor(Math.random() * activeVars.length)];
-                                        leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
-                                        barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
-                                    } else {
-                                        leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
-                                        barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
-                                    }
-                                }
-                                leafHslAttr.needsUpdate = true;
-                                barkHslAttr.needsUpdate = true;
-                            }
-                        } else {
-                            dummy.position.set(0, -1000, 0);
-                            dummy.scale.set(0, 0, 0);
-                        }
-                        dummy.updateMatrix();
-                        instTree1.setMatrixAt(i, dummy.matrix);
-                        tree1Updated = true;
-                    }
+                // Multi-scale spatial noise for natural species grove clustering
+                function getForestClusterGroup(x, z) {
+                    const n1 = Math.sin(x * 0.005 + z * 0.004) * Math.cos(x * 0.004 - z * 0.005);
+                    const n2 = Math.sin(x * 0.012 + z * 0.010) * 0.3;
+                    const val = n1 + n2;
+                    if (val < -0.15) return 0;      // Grove A: Majestic / Tall Mountain Pines (Var 1, 2, 3)
+                    else if (val < 0.25) return 1; // Grove B: Dense Alpine Evergreen Pines (Var 4, Fast, Fast 1)
+                    else return 2;                 // Grove C: Highland Dwarf Pines & Saplings (Small 1, 2, 3, Sapling)
                 }
-                if (tree1Updated) instTree1.instanceMatrix.needsUpdate = true;
+
+                // 1. Update all 10 distinct stylized pine tree meshes with natural species groves
+                pineTreeMeshes.forEach((mesh, pIdx) => {
+                    const count = mesh.maxCount || mesh.count;
+                    const clusterGroup = (mesh.config && mesh.config.clusterGroup !== undefined) ? mesh.config.clusterGroup : 0;
+                    let meshUpdated = false;
+                    for (let i = (currentFrame + pIdx * 2) % 15; i < count; i += 15) {
+                        mesh.getMatrixAt(i, dummy.matrix);
+                        dummy.position.setFromMatrixPosition(dummy.matrix);
+
+                        // Optimization: if already despawned and no trees can spawn nearby, skip completely!
+                        if (dummy.position.y < -500 && !treesPossibleNearby) {
+                            continue;
+                        }
+
+                        // Also evict any pine that snuck into a jungle tile (biome border cleanup)
+                        const treeInJungle = dummy.position.y > 0 && getBiomeAt(dummy.position.x, dummy.position.z).name.toLowerCase().includes('jungle');
+                        if (playerInJungle || treeInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
+                            if (dummy.position.y > 0) {
+                                treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
+                            }
+
+                            let valid = false;
+                            let nx, nz, h, pathVal, bName = '';
+                            let attempts = 0;
+
+                            if (!playerInJungle && treesPossibleNearby) {
+                                while(!valid && attempts < 14 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
+                                    nx = focusX + (Math.random() - 0.5) * dense3dRadius * 2.0;
+                                    nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
+
+                                    // Natural species grove clustering filter (85% affinity for matching grove, 15% mixed undergrowth)
+                                    const localGrove = getForestClusterGroup(nx, nz);
+                                    if (localGrove !== clusterGroup && Math.random() > 0.15) {
+                                        attempts++;
+                                        continue;
+                                    }
+
+                                    h = getWorldHeight(nx, nz);
+                                    pathVal = getPathStrength(nx, nz);
+                                    bName = getBiomeAt(nx, nz).name;
+
+                                    let isForest = true;
+                                    let biomeMatch = !bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
+                                    let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
+                                    let elevationValid = (h >= 6.8 && h <= 55.0) && islandMaskOk;
+
+                                    if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
+                                        let cx = Math.floor(nx / TREE_CELL_SIZE);
+                                        let cz = Math.floor(nz / TREE_CELL_SIZE);
+                                        let tooClose = false;
+                                        for (let dx = -1; dx <= 1 && !tooClose; dx++) {
+                                            for (let dz = -1; dz <= 1 && !tooClose; dz++) {
+                                                const ncx = (cx + dx + 32768) & 0xFFFF;
+                                                const ncz = (cz + dz + 32768) & 0xFFFF;
+                                                let neighbor = treeGrid.get((ncx << 16) | ncz);
+                                                if (neighbor) {
+                                                    if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 20) tooClose = true;
+                                                }
+                                            }
+                                        }
+                                        if (!tooClose) valid = true;
+                                    }
+                                    attempts++;
+                                    treeSpawnAttemptsThisFrame++;
+                                }
+                            }
+
+                            if (valid) {
+                                treeGrid.set(getTreeCell(nx, nz), {x: nx, z: nz});
+                                dummy.position.set(nx, h, nz);
+                                dummy.rotation.set(0, Math.random() * Math.PI * 2.0, 0);
+                                let baseS = 0.90 + Math.random() * 0.40;
+                                dummy.scale.set(baseS * (0.92 + Math.random() * 0.16), baseS * (0.94 + Math.random() * 0.12), baseS * (0.92 + Math.random() * 0.16));
+                            } else {
+                                dummy.position.set(0, -1000, 0);
+                                dummy.scale.set(0, 0, 0);
+                            }
+                            dummy.updateMatrix();
+                            mesh.setMatrixAt(i, dummy.matrix);
+                            meshUpdated = true;
+                        }
+                    }
+                    if (meshUpdated) mesh.instanceMatrix.needsUpdate = true;
+                });
 
                 // 2. Update jungle trees (instJungleTreeParts)
                 if (window.instJungleTreeParts && window.instJungleTreeParts.length > 0) {
@@ -2822,119 +2875,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
                     }
                 }
 
-            // Single Billboard Tree (380m to 800m with Hysteresis overlap for zero popping)
-            const camX = camera.position.x;
-            const camZ = camera.position.z;
-
-            [instBillboardTrees, instJungleBillboardTrees].forEach((instBB, bbIdx) => {
-                let billboardUpdated = false;
-                const bbCount = instBB.count;
-                // Batch update 1/30th of billboards per frame (phase offset +7 + bbIdx * 3)
-                const phase = (currentFrame + 7 + bbIdx * 3) % 30;
-                for (let i = phase; i < bbCount; i += 30) {
-                    instBB.getMatrixAt(i, dummy.matrix);
-                    dummy.position.setFromMatrixPosition(dummy.matrix);
-
-                    // Optimization: if already despawned and no trees can spawn nearby, skip completely!
-                    if (dummy.position.y < -500 && !treesPossibleNearby) {
-                        continue;
-                    }
-
-                    const dX = dummy.position.x - focusX;
-                    const dZ = dummy.position.z - focusZ;
-                    const dSq = dX * dX + dZ * dZ;
-
-                    // Despawn only if inside 360m (after 3D tree is already spawned) or beyond 830m
-                    if (playerInJungle || dSq < 360 * 360 || dSq > 830 * 830 || dummy.position.y < -500) {
-                        let valid = false;
-                        let nx, nz, h, bName = '';
-                        let attempts = 0;
-
-                        if (treesPossibleNearby && !(playerInJungle && bbIdx === 0)) {
-                            while(!valid && attempts < 15 && treeSpawnAttemptsThisFrame < MAX_TREE_SPAWN_ATTEMPTS) {
-                                const ang = Math.random() * Math.PI * 2.0;
-                                const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
-                                nx = focusX + Math.cos(ang) * r;
-                                nz = focusZ + Math.sin(ang) * r;
-                                h = getWorldHeight(nx, nz);
-                                bName = getBiomeAt(nx, nz).name;
-
-                                let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                                let isJungle = bName.toLowerCase().includes('jungle');
-                                let biomeMatch = playerInJungle ? (bbIdx === 1) : ((bbIdx === 1) ? isJungle : !isJungle);
-
-                                // Distant billboard heights should match their 3D tree counter-parts
-                                let maxBBH = (bbIdx === 1) ? 110.0 : 55.0;
-
-                                if (h >= 6.5 && h <= maxBBH && islandMaskOk && getPathStrength(nx, nz) < 0.20 && isTreeZone(nx, nz) && biomeMatch && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty')) {
-                                    valid = true;
-                                }
-                                attempts++;
-                                treeSpawnAttemptsThisFrame++;
-                            }
-                        }
-
-                        if (valid) {
-                            dummy.position.set(nx, h, nz);
-                            dummy.rotation.set(0, 0, 0);
-                            
-                            // Dynamic scale & aspect ratio variation for natural forest canopy height
-                            let s = (bbIdx === 1) ? (1.5 + Math.random() * 1.5) : (0.88 + Math.random() * 0.65);
-                            let aspect = 0.88 + Math.random() * 0.24;
-                            dummy.scale.set(s * aspect, s * (0.94 + Math.random() * 0.18), s * aspect);
-                            dummy.updateMatrix();
-                            instBB.setMatrixAt(i, dummy.matrix);
-
-                            // HSL variation from active variants (or default billboardTints)
-                            const leafHslAttr = instBB.geometry.getAttribute('aLeafHslShift');
-                            const barkHslAttr = instBB.geometry.getAttribute('aBarkHslShift');
-                            
-                            if (leafHslAttr && barkHslAttr) {
-                                if (window.treeBillboardEditor) {
-                                    const activeVars = window.treeBillboardEditor.getActiveVariants();
-                                    if (activeVars.length > 0) {
-                                        const v = activeVars[Math.floor(Math.random() * activeVars.length)];
-                                        leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
-                                        barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
-                                    } else {
-                                        // Fallback to random default tints (leaves only, trunk is 0)
-                                        const defaultTint = billboardTints[Math.floor(Math.random() * billboardTints.length)];
-                                        const preset = window.treeBillboardEditor.getCurrentPreset();
-                                        const baseColor = new THREE.Color(preset.baseColorHex);
-                                        const baseHSL = { h: 0, s: 0, l: 0 };
-                                        baseColor.getHSL(baseHSL);
-                                        const tintHSL = { h: 0, s: 0, l: 0 };
-                                        defaultTint.getHSL(tintHSL);
-                                        
-                                        let dh = tintHSL.h - baseHSL.h;
-                                        let ds = tintHSL.s - baseHSL.s;
-                                        let dl = tintHSL.l - baseHSL.l;
-                                        leafHslAttr.setXYZ(i, dh, ds, dl);
-                                        barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
-                                    }
-                                } else {
-                                    leafHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
-                                    barkHslAttr.setXYZ(i, 0.0, 0.0, 0.0);
-                                }
-                                leafHslAttr.needsUpdate = true;
-                                barkHslAttr.needsUpdate = true;
-                            }
-
-                            billboardUpdated = true;
-                        } else {
-                            dummy.position.set(0, -1000, 0);
-                            dummy.scale.set(0, 0, 0);
-                            dummy.updateMatrix();
-                            instBB.setMatrixAt(i, dummy.matrix);
-                            billboardUpdated = true;
-                        }
-                    }
-                }
-
-                if (billboardUpdated) {
-                    instBB.instanceMatrix.needsUpdate = true;
-                }
-            });
+            // Single Billboard Tree (DISABLED EVERYWHERE)
             }
 
         } // End of shouldUpdateTerrain block
@@ -3258,7 +3199,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     // Merges Bark + Leaves primitives into ONE geometry with vertex colors.
     // 1 InstancedMesh = 1 draw call per tree slot (not 2).
 
-    function applyGLBPineTree(gltf, targetInstancedMeshes, targetHeight, leafColorVariants) {
+    function applyGLBPineTree(gltf, targetInstancedMeshes, targetHeight) {
         gltf.scene.updateMatrixWorld(true);
         const childMeshes = [];
         gltf.scene.traverse((child) => {
@@ -3271,43 +3212,25 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
 
-        const defaultLeafColors = leafColorVariants || [
-            new THREE.Color(0x52c439), // Vibrant Spring Green
-            new THREE.Color(0x2ea84b), // Lush Emerald Green
-            new THREE.Color(0x44c838), // Sunlit Highland Green
-            new THREE.Color(0x64d848)  // Bright Alpine Green
-        ];
-        const barkColor = new THREE.Color(0x6e4a32); // Warm rich wood brown
-
-        targetInstancedMeshes.forEach((instMesh, meshIdx) => {
-            const leafColor = defaultLeafColors[meshIdx % defaultLeafColors.length];
+        targetInstancedMeshes.forEach((instMesh) => {
             const geos = [];
 
-            childMeshes.forEach((m, idx) => {
+            childMeshes.forEach((m) => {
                 const g = m.geometry.clone();
                 g.applyMatrix4(m.matrixWorld);
                 g.translate(0, offsetY, 0);
                 g.scale(sc, sc, sc);
 
-                // Strip embedded/dark vertex colors from GLB file
+                // Strip embedded/dark vertex colors from GLB file if any
                 if (g.attributes.color) g.deleteAttribute('color');
 
                 const matName = (m.material && m.material.name) ? m.material.name.toLowerCase() : '';
                 const childName = (m.name || '').toLowerCase();
-                const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || childName.includes('bark') || childName.includes('trunk') || childName.includes('wood') || idx === 0;
+                const isBark = matName.includes('bark') || matName.includes('trunk') || matName.includes('wood') || 
+                               childName.includes('bark') || childName.includes('trunk') || childName.includes('wood') || 
+                               matName.includes('m_trunk') || childName.includes('m_trunk');
 
                 const vertCount = g.attributes.position.count;
-                const colors = new Float32Array(vertCount * 3);
-                const c = isBark ? barkColor : leafColor;
-
-                for (let i = 0; i < vertCount; i++) {
-                    colors[i * 3]     = c.r;
-                    colors[i * 3 + 1] = c.g;
-                    colors[i * 3 + 2] = c.b;
-                }
-                g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-                // Add aIsBark vertex attribute (1.0 for bark, 0.0 for leaves)
                 const isBarkArr = new Float32Array(vertCount);
                 isBarkArr.fill(isBark ? 1.0 : 0.0);
                 g.setAttribute('aIsBark', new THREE.BufferAttribute(isBarkArr, 1));
@@ -3325,42 +3248,33 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
 
             const mergedGeom = BufferGeometryUtils.mergeGeometries(geos, false);
             if (!mergedGeom) return;
+            mergedGeom.computeVertexNormals();
             mergedGeom.computeBoundingBox();
             mergedGeom.computeBoundingSphere();
 
-            // Initialize instanced buffer attributes for HSL shifts
-            const count = instMesh.count;
-            const leafHslArr = new Float32Array(count * 3);
-            const barkHslArr = new Float32Array(count * 3);
-            
-            const aLeafHslShift = new THREE.InstancedBufferAttribute(leafHslArr, 3);
-            const aBarkHslShift = new THREE.InstancedBufferAttribute(barkHslArr, 3);
-            
-            mergedGeom.setAttribute('aLeafHslShift', aLeafHslShift);
-            mergedGeom.setAttribute('aBarkHslShift', aBarkHslShift);
-
-            const mergedMat = new MeshToonNodeMaterial({
-                vertexColors: true,
-                gradientMap: gradientMap,
-                side: THREE.DoubleSide,
-                dithering: true
-            });
-
             instMesh.geometry = mergedGeom;
-            instMesh.material = mergedMat;
+            instMesh.material = matTree;
             instMesh.instanceColor = null;
+            instMesh.instanceMatrix.needsUpdate = true;
         });
     }
 
-    // Only load Pine_ultra_fast.glb for all 800 3D tree instances
-    gltfLoader.load('assets/Pine_ultra_fast.glb', (gltf) => {
-        applyGLBPineTree(gltf, [instTree1], 22.0);
+    // Asynchronously load ALL 10 GLTF Pine tree assets into their respective instanced meshes
+    PINE_CONFIGS.forEach((cfg, idx) => {
+        const instMesh = pineTreeMeshes[idx];
+        const fullUrl = resolveAssetUrl(cfg.path);
+        gltfLoader.load(fullUrl, (gltf) => {
+            applyGLBPineTree(gltf, [instMesh], cfg.height);
+            console.log('✓ Successfully loaded and applied pine model:', cfg.name, fullUrl);
+        }, undefined, (err) => {
+            console.error('Failed to load pine model:', fullUrl, err);
+        });
     });
 
     window.instJungleTreeParts = [];
 
     // Load Big_tree_03_ivy.glb for all 600 3D jungle tree instances
-    gltfLoader.load('assets/nature_jungle_assets_extracted/super_compressed/TREE/Big_tree_03_ivy.glb', (gltf) => {
+    gltfLoader.load(resolveAssetUrl('assets/nature_jungle_assets_extracted/super_compressed/TREE/Big_tree_03_ivy.glb'), (gltf) => {
         gltf.scene.updateMatrixWorld(true);
         const childMeshes = [];
         gltf.scene.traverse((child) => {
@@ -3446,7 +3360,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     window.instPalmTreeParts = [];
 
     // Load Palm1_VAR5.glb for 3D palm tree instances near water
-    gltfLoader.load('assets/Palm1_VAR5/Palm1_VAR5.glb', (gltf) => {
+    gltfLoader.load(resolveAssetUrl('assets/Palm1_VAR5/Palm1_VAR5.glb'), (gltf) => {
         gltf.scene.updateMatrixWorld(true);
         const childMeshes = [];
         gltf.scene.traverse((child) => {
@@ -3529,24 +3443,10 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     window.treeBillboardEditor = treeBillboardEditor;
 
     treeBillboardEditor.onApply((preset, variants) => {
-        gltfLoader.load(preset.glbPath, (gltf) => {
-            applyGLBPineTree(gltf, [instTree1], preset.targetHeight);
-            
-            // Randomly assign active variant colors to 3D tree instances via HSL shift attributes
-            if (variants && variants.length > 0) {
-                const count = instTree1.count;
-                const leafHslAttr = instTree1.geometry.getAttribute('aLeafHslShift');
-                const barkHslAttr = instTree1.geometry.getAttribute('aBarkHslShift');
-                if (leafHslAttr && barkHslAttr) {
-                    for (let i = 0; i < count; i++) {
-                        const v = variants[Math.floor(Math.random() * variants.length)];
-                        leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
-                        barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
-                    }
-                    leafHslAttr.needsUpdate = true;
-                    barkHslAttr.needsUpdate = true;
-                }
-            }
+        const fullUrl = resolveAssetUrl(preset.glbPath);
+        gltfLoader.load(fullUrl, (gltf) => {
+            const targetMesh = pineTreeMeshes.find(m => m.config && m.config.path === preset.glbPath) || pineTreeMeshes[0];
+            applyGLBPineTree(gltf, [targetMesh], preset.targetHeight);
         });
 
         // Also assign variant colors to 3D jungle tree parts
@@ -3567,49 +3467,13 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             });
         }
 
-        // Update distant billboard texture & variant colors
-        texLoader.load(preset.billboardPath, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            billboardMat.map = tex;
-            billboardMat.needsUpdate = true;
-
-            if (variants && variants.length > 0) {
-                const count = instBillboardTrees.count;
-                const leafHslAttr = instBillboardTrees.geometry.getAttribute('aLeafHslShift');
-                const barkHslAttr = instBillboardTrees.geometry.getAttribute('aBarkHslShift');
-                if (leafHslAttr && barkHslAttr) {
-                    for (let i = 0; i < count; i++) {
-                        const v = variants[Math.floor(Math.random() * variants.length)];
-                        leafHslAttr.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
-                        barkHslAttr.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
-                    }
-                    leafHslAttr.needsUpdate = true;
-                    barkHslAttr.needsUpdate = true;
-                }
-            }
-        });
-
-        // Also assign variant colors to distant jungle billboard trees
-        if (variants && variants.length > 0 && typeof instJungleBillboardTrees !== 'undefined') {
-            const countJ = instJungleBillboardTrees.count;
-            const leafHslAttrJ = instJungleBillboardTrees.geometry.getAttribute('aLeafHslShift');
-            const barkHslAttrJ = instJungleBillboardTrees.geometry.getAttribute('aBarkHslShift');
-            if (leafHslAttrJ && barkHslAttrJ) {
-                for (let i = 0; i < countJ; i++) {
-                    const v = variants[Math.floor(Math.random() * variants.length)];
-                    leafHslAttrJ.setXYZ(i, v.leafHueShift / 360.0, v.leafSatShift / 100.0, v.leafLitShift / 100.0);
-                    barkHslAttrJ.setXYZ(i, v.barkHueShift / 360.0, v.barkSatShift / 100.0, v.barkLitShift / 100.0);
-                }
-                leafHslAttrJ.needsUpdate = true;
-                barkHslAttrJ.needsUpdate = true;
-            }
-        }
+        // Distant billboard trees disabled everywhere
     });
 
 
 
     gltfLoader.load(
-        'kiki-lowpoly.glb',
+        resolveAssetUrl('kiki-lowpoly.glb'),
         (gltf) => {
             kikiModel = gltf.scene;
             const box = new THREE.Box3().setFromObject(kikiModel);
@@ -3641,7 +3505,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
 
     // Load Princess on a Whale GLTF Model
     gltfLoader.load(
-        'Princess.glb',
+        resolveAssetUrl('Princess.glb'),
         (gltf) => {
             whaleModel = gltf.scene;
             const box = new THREE.Box3().setFromObject(whaleModel);
@@ -3946,6 +3810,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     const tempVec1 = new THREE.Vector3();
     const tempVec2 = new THREE.Vector3();
     const tempVec3 = new THREE.Vector3();
+    const tempVecHorizon = new THREE.Vector3();
     const tempVecSunFwd = new THREE.Vector3();
     const tempVecMoonOff = new THREE.Vector3();
     const tempVecToLight = new THREE.Vector3();
@@ -4037,20 +3902,17 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
         const currentAlt = Math.max(0, Math.round(playerGrp.position.y - currentGroundY));
 
         const now = performance.now();
-        if (now - lastFpsTime >= 1000) {
-            currentFps = framesThisSecond;
+        if (now - lastFpsTime >= 500) {
+            currentFps = Math.round((framesThisSecond * 1000) / (now - lastFpsTime));
             framesThisSecond = 0;
             lastFpsTime = now;
-            // Only update DOM text once per second to prevent browser layout thrashing!
-            const currZn = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            const isMobileUser = document.documentElement.classList.contains('mobile-user');
-            if (isMobileUser) {
-                const timeStr = timePhase === 0 ? 'Morning' : (timePhase === 1 ? 'Sunset' : 'Night');
-                document.getElementById('fps-counter').innerText = `> FPS: ${currentFps} | ALT: ${currentAlt}m | BIO: ${currZn.name} | TOD: ${timeStr}`;
-            } else {
-                document.getElementById('fps-counter').innerText = currentFps + ' FPS | ALT: ' + currentAlt + 'm';
-                document.getElementById('biome-label').innerText = '| BIOME: ' + currZn.name;
+            const fpsEl = document.getElementById('fps-counter');
+            if (fpsEl) {
+                fpsEl.innerText = `FPS${currentFps}`;
             }
+            const currZn = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            const biomeEl = document.getElementById('biome-label');
+            if (biomeEl) biomeEl.innerText = currZn.name;
         }
 
         
@@ -4233,12 +4095,15 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             right: keys.d || touchState.x > 0.1
         };
 
+        if (isGodMode && godControls) {
+            updateGodMode(dt, keys, godControls, godCamera);
+        }
+
         if (playerPhysics) {
             playerPhysics.update(dt, inputState, isBraking, isBoosting, isFlightPaused, treeGrid);
             
             if (cameraManager) {
                 cameraManager.update(dt, playerGrp, playerPhysics.currentYaw, isBoosting);
-                if (isGodMode && godControls) godControls.update();
             }
         }
     
@@ -4357,27 +4222,56 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
 
 
 
-        // Update God Rays sun screen position
+        // Update God Rays sun screen position & horizon line
         if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
             const activeCam = isGodMode ? godCamera : camera;
-            tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
             activeCam.getWorldDirection(tempVec1);
+
+            // Compute exact screen-space horizon Y position to mask god rays away from ocean/ground
+            const camHorizX = tempVec1.x;
+            const camHorizZ = tempVec1.z;
+            const horizLen = Math.hypot(camHorizX, camHorizZ);
+            if (horizLen > 0.001) {
+                tempVecHorizon.set(
+                    activeCam.position.x + (camHorizX / horizLen) * 50000,
+                    0.0,
+                    activeCam.position.z + (camHorizZ / horizLen) * 50000
+                );
+                tempVecHorizon.project(activeCam);
+                const horizonScreenY = (tempVecHorizon.y + 1.0) * 0.5;
+                if (godRaysPass.uniforms.uHorizonY) {
+                    godRaysPass.uniforms.uHorizonY.value = THREE.MathUtils.clamp(horizonScreenY, -0.2, 1.2);
+                }
+            }
+
+            tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
             const dotFwd = tempVec1.dot(tempVecSunFwd);
 
-            if (dotFwd > -0.2) {
+            // Sun must strictly be in front of the camera to avoid negative-W clip inversion (projecting behind camera onto bottom-left water)
+            if (dotFwd > 0.05) {
                 tempVec2.copy(staticSun.position).project(activeCam);
-                const sunScreenX = (tempVec2.x + 1.0) * 0.5;
-                const sunScreenY = (tempVec2.y + 1.0) * 0.5;
-                godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
+                if (tempVec2.z < 1.0) {
+                    const sunScreenX = (tempVec2.x + 1.0) * 0.5;
+                    const sunScreenY = (tempVec2.y + 1.0) * 0.5;
+                    godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
 
-                const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
-                const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.5));
-                const twilightFade = timePhase === 2 ? 0.0 : 1.0;
-                const fwdFade = Math.max(0.0, Math.min(1.0, (dotFwd + 0.2) * 2.5));
-                godRaysPass.uniforms.uSunVisible.value = fwdFade * screenFade * twilightFade;
+                    const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
+                    const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.6));
+                    const twilightFade = timePhase === 2 ? 0.0 : 1.0;
+                    const fwdFade = THREE.MathUtils.smoothstep(dotFwd, 0.05, 0.35);
+                    const sunHeightFade = THREE.MathUtils.smoothstep(staticSun.position.y, -100, 300);
+
+                    godRaysPass.uniforms.uSunVisible.value = fwdFade * screenFade * twilightFade * sunHeightFade;
+                } else {
+                    godRaysPass.uniforms.uSunVisible.value = 0.0;
+                }
             } else {
                 godRaysPass.uniforms.uSunVisible.value = 0.0;
             }
+        }
+
+        if (typeof scenePass !== 'undefined' && scenePass) {
+            scenePass.camera = isGodMode ? godCamera : camera;
         }
 
         await composer.renderAsync();
@@ -4406,7 +4300,7 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
     if (timeToggleBtn) {
         timeToggleBtn.addEventListener('click', () => {
             timePhase = (timePhase + 1) % 3;
-            if (timePhase === 0) timeToggleBtn.innerText = '☀️';
+            if (timePhase === 0) timeToggleBtn.innerText = '☼';
             else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
             else timeToggleBtn.innerText = '🌙';
         });
@@ -5168,17 +5062,18 @@ import { postProcessing as composer, initPostProcessing, bloomPass, godRaysPass,
             console.error('Failed to load settings', e);
         }
 
-        // --- Dock GUI Panel Flush to Top-Right Edge ---
-        const guiEl = document.querySelector('.lil-gui.root');
+        // --- Dock GUI Panel Flush to Top-Right Edge (Hidden by default, toggled via cog wheel) ---
+        const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
         if (guiEl) {
             guiEl.style.position = 'fixed';
-            guiEl.style.right = '0px';
-            guiEl.style.top = '0px';
+            guiEl.style.right = '14px';
+            guiEl.style.top = '54px';
             guiEl.style.left = 'auto';
             guiEl.style.margin = '0';
             guiEl.style.zIndex = '1000';
-            guiEl.style.maxHeight = '95vh';
+            guiEl.style.maxHeight = 'calc(100vh - 72px)';
             guiEl.style.overflowY = 'auto';
+            guiEl.style.display = 'none';
         }
             
             // Close all folders by default

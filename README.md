@@ -83,13 +83,31 @@ WANDERLUST/
 
 ## 🛠️ Utility Tools Included
 
+* **Mobile Simulator & Dev Testbench**: Located at `mobile_test.html` for testing mobile responsive viewports, touch joysticks, landscape/portrait switching, and hardware presets right on PC.
 * **Terrain & Heightmap Editor**: Real-time in-game parameter tuning for noise octaves, terrain heights, and biome weights.
 * **Model Viewer**: Located at `model_viewer.html` for previewing and inspecting 3D `.glb` assets and animations.
 * **Tree & Billboard Studio**: Tools for generating and previewing optimized procedural foliage billboards.
+
 
 ---
 
 ## 📄 Documentation
 
 For full architectural details, complete multi-biome specifications, and the project's historical development log, refer to [`DEVELOPMENT_LOG.md`](DEVELOPMENT_LOG.md).
+
+---
+
+## 🙏 Acknowledgements & Credits
+
+* **WebGPU Ocean Shader (`src/WaterAnime/OpenSeaOcean.js`)**: 
+  * The core Three.js TSL / WebGPU Gerstner wave and FBM micro-surface shader foundation was adapted from the [Kimi AI "Open Sea — Realtime Ocean" Prototype](https://qdtipu6rd2myk.ok.kimi.link/?id=2077778000455245824&share_id=19f6b13b-b432-8eb2-8000-0000c67df4cd).
+  * Expanded and enhanced in Wanderlust with dynamic object wake physics, CPU buoyancy calculations, real-time GUI editors, and shoreline depth intersections.
+* **Procedural Math & Graphics Foundations**:
+  * **Inigo Quilez ([iquilezles.org](https://iquilezles.org))**: Smooth Voronoi distance fields and caustics.
+  * **Stefan Gustavson & Ashima Arts**: WebGL Simplex noise (`webgl-noise`).
+  * **nimitz / David Hoskins**: Volumetric cloud raymarching (`SpiralNoiseC`).
+  * **thatgamecompany & Alan Zucconi**: Specular sand glitter and dune lighting concepts (*Journey*).
+  * **Jerry Tessendorf & Mark Finch (GPU Gems)**: Gerstner wave models and simulation.
+  * **Kenny Mitchell (GPU Gems 3)**: Volumetric light scattering post-processing.
+
 

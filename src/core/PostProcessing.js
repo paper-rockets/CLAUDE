@@ -16,6 +16,7 @@ export function initPostProcessing() {
 
 // -- God Rays Settings --
 export const uSunScreenPos = uniform(vec2(0.5, 0.5));
+export const uHorizonY = uniform(0.5);
 export const uIntensity = uniform(0.15);
 export const uDecay = uniform(0.90);
 export const uDensity = uniform(0.40);
@@ -42,15 +43,23 @@ const buildGodRaysNode = Fn(([baseTex]) => {
 
     Loop({ start: 0, end: 32 }, () => {
         sampleUV.subAssign(deltaUV);
+
+        // Mask emitter by distance to sun position so only the sun disc & immediate sky corona can cast rays, NOT water foam or ocean reflections
+        const sampleDistToSun = length(sampleUV.sub(uSunScreenPos));
+        const sunMask = smoothstep(float(0.42), float(0.03), sampleDistToSun);
+
         const samp = scenePass.getTextureNode().sample(sampleUV);
         const lum = dot(samp.rgb, vec3(0.299, 0.587, 0.114));
-        const bright = smoothstep(0.70, 0.95, lum);
+        const bright = smoothstep(0.75, 0.98, lum).mul(sunMask);
+
         illumination.addAssign(bright.mul(currentWeight));
         currentWeight.mulAssign(uDecay);
     });
 
-    const edgeFade = float(1.0).sub(smoothstep(0.4, 1.5, dist));
-    const rayColor = vec3(1.0, 0.95, 0.85).mul(illumination).mul(uIntensity).mul(edgeFade).mul(uSunVisible);
+    const edgeFade = float(1.0).sub(smoothstep(0.3, 1.4, dist));
+    // Softly fade out below the horizon line so sun rays illuminate the sky & atmosphere, but do NOT overlay artificial streaks on the water surface
+    const skyFactor = smoothstep(uHorizonY.sub(0.06), uHorizonY.add(0.08), vUv.y);
+    const rayColor = vec3(1.0, 0.96, 0.88).mul(illumination).mul(uIntensity).mul(edgeFade).mul(uSunVisible).mul(skyFactor);
 
     return vec4(baseTex.rgb.add(rayColor), baseTex.a);
 });
@@ -108,6 +117,7 @@ export const godRaysPass = {
     enabled: !LOW_GFX,
     uniforms: {
         uSunScreenPos: uSunScreenPos,
+        uHorizonY: uHorizonY,
         uIntensity: uIntensity,
         uDecay: uDecay,
         uDensity: uDensity,

@@ -21,6 +21,7 @@ export default defineConfig(() => {
           main: path.resolve(__dirname, 'index.html'),
           model_viewer: path.resolve(__dirname, 'model_viewer.html'),
           tree_viewer: path.resolve(__dirname, 'tree_viewer.html'),
+          mobile_test: path.resolve(__dirname, 'mobile_test.html'),
         },
       },
     },

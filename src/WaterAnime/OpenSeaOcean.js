@@ -1,3 +1,17 @@
+/**
+ * OpenSeaOcean.js — Realtime WebGPU / TSL Gerstner Ocean Simulation
+ *
+ * Core Three.js TSL wave & FBM micro-surface shader adapted from:
+ * "Open Sea — Realtime Ocean" (Kimi AI Prototype)
+ * https://qdtipu6rd2myk.ok.kimi.link/?id=2077778000455245824&share_id=19f6b13b-b432-8eb2-8000-0000c67df4cd
+ *
+ * Enhanced for Wanderlust with:
+ * - Dynamic interactive GUI & modal editor controls
+ * - Dynamic object ripples & Kelvin V-wake shockwave physics
+ * - Realtime CPU wave height/normal buoyancy calculations for player & aircraft
+ * - Horizon concealment & biome lighting integration
+ */
+
 import * as THREE from 'three/webgpu';
 import {
   Fn, uniform, float, vec2, vec3, vec4,
@@ -228,15 +242,7 @@ export const createOpenSeaMaterial = () => {
 
   const scaledTime = timeUniform.mul(speedUniform);
   const gerstnerP = wavePosition(positionLocal.xz, scaledTime, seaUniform);
-  const objRippleY = objectRippleDisplacement(
-    positionLocal.xz,
-    scaledTime,
-    objPosUniform,
-    objRadiusUniform,
-    objActiveUniform,
-    objRippleStrengthUniform
-  );
-  oceanMaterial.positionNode = vec3(gerstnerP.x, gerstnerP.y.add(objRippleY), gerstnerP.z);
+  oceanMaterial.positionNode = vec3(gerstnerP.x, gerstnerP.y, gerstnerP.z);
 
   oceanMaterial.colorNode = Fn(() => {
     const P = positionWorld.toVar();
@@ -288,15 +294,7 @@ export const createOpenSeaMaterial = () => {
       .mul(0.5).add(0.5);
     const foam = smoothstep(0.5, 0.95, foamNoise).mul(smoothstep(1.0, 2.0, crest)).mul(foamAmountUniform).mul(foamEnabledUniform).mul(foamDecayUniform);
 
-    const distToObj = distance(P.xz, objPosUniform.xz);
-    const foamDist = distToObj.sub(objRadiusUniform);
-    const contactRing = smoothstep(foamSpreadUniform, float(0.0), foamDist.abs());
-    const ringNoise1 = fbm(P.xz.mul(3.8).add(vec2(scaledTime.mul(0.4), scaledTime.mul(0.25)))).mul(0.5).add(0.5);
-    const ringNoise2 = fbm(P.xz.mul(9.2).add(vec2(scaledTime.mul(-0.6), scaledTime.mul(0.55)))).mul(0.5).add(0.5);
-    const organicFoamMask = smoothstep(0.25, 0.75, ringNoise1.mul(ringNoise2).mul(1.6));
-    const objectFoam = contactRing.mul(organicFoamMask).mul(0.75).mul(foamOpacityUniform).mul(objActiveUniform).mul(foamEnabledUniform).mul(foamDecayUniform);
-
-    color.assign(mix(color, vec3(0.92, 0.96, 1.0), clamp(foam.add(objectFoam).mul(0.85), 0.0, 1.0)));
+    color.assign(mix(color, vec3(0.92, 0.96, 1.0), clamp(foam.mul(0.85), 0.0, 1.0)));
 
     // Atmospheric horizon concealment
     const camDist = distance(cameraPosition, P);

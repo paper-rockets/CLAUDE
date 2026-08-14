@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { DRACOExporter } from 'three/addons/exporters/DRACOExporter.js';
+// @ts-ignore
 import GUI from 'lil-gui';
 
 export class GhibliGenerator {

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -734,7 +734,7 @@ import { composer, bloomPass, godRaysPass, summerPass, initPostProcessingUI } fr
     shaderToggleControllers['toon07'] = waterShaderFolder.add(params, 'toggleToon07').name('≡ƒîÇ Toon Layered Ripple 07').onChange(v => activateWaterShader('toon07', v));
     debugWaterDropdownController = waterShaderFolder.add(params, 'waterMode', ['realistic', 'anime', 'windWaker', 'windWakerDeep', 'toon06', 'toon07']).name('Active Mode').onChange(v => activateWaterShader(v, true));
 
-    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = v; });
+    debugFolder.add(params, 'showTrees').name('Trees').onChange(v => { treeMeshes.forEach(m => m.visible = v); if(typeof instBillboardTrees !== 'undefined') instBillboardTrees.visible = false; });
     debugFolder.add(params, 'showClouds').name('Clouds').onChange(v => { instClouds.visible = v; if(typeof instHighClouds !== 'undefined') instHighClouds.visible = v; if(typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
     debugFolder.add(params, 'showBirds').name('Birds').onChange(v => { if(typeof instBirds !== 'undefined') instBirds.visible = v; if(typeof flockGrp !== 'undefined') flockGrp.visible = v; });
     debugFolder.add(params, 'showFogPlanes').name('Fog Planes').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
@@ -1790,8 +1790,9 @@ import { composer, bloomPass, godRaysPass, summerPass, initPostProcessingUI } fr
     const billboardGeo = new THREE.PlaneGeometry(12, 21.6);
     billboardGeo.translate(0, 10.8, 0);
 
-    const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, BILLBOARD_TREE_COUNT);
-    scene.add(instBillboardTrees);
+    const instBillboardTrees = new THREE.InstancedMesh(billboardGeo, billboardMat, 1);
+    instBillboardTrees.visible = false;
+    // scene.add(instBillboardTrees); // BILLBOARD TREES DISABLED EVERYWHERE
 
     // Exact color matching palette derived directly from 3D GLB Pine tree foliage colors
     const billboardTints = [
@@ -2647,71 +2648,7 @@ import { composer, bloomPass, godRaysPass, summerPass, initPostProcessingUI } fr
                 }
             });
 
-            // Single Billboard Tree (380m to 800m with Hysteresis overlap for zero popping)
-            const camX = camera.position.x;
-            const camZ = camera.position.z;
-            let billboardUpdated = false;
-            let billboardColorUpdated = false;
-
-            const bbCount = instBillboardTrees.count;
-            // Batch update 1/30th of billboards per frame (phase offset +7)
-            for (let i = (currentFrame + 7) % 30; i < bbCount; i += 30) {
-                instBillboardTrees.getMatrixAt(i, dummy.matrix);
-                dummy.position.setFromMatrixPosition(dummy.matrix);
-
-                const dX = dummy.position.x - focusX;
-                const dZ = dummy.position.z - focusZ;
-                const dSq = dX * dX + dZ * dZ;
-
-                // Despawn only if inside 360m (after 3D tree is already spawned) or beyond 830m
-                if (dSq < 360 * 360 || dSq > 830 * 830 || dummy.position.y < -500) {
-                    const ang = Math.random() * Math.PI * 2.0;
-                    const r = billboardMinDist + Math.random() * (billboardMaxDist - billboardMinDist);
-                    const nx = focusX + Math.cos(ang) * r;
-                    const nz = focusZ + Math.sin(ang) * r;
-                    const h = getWorldHeight(nx, nz);
-
-                    let bName = getBiomeAt(nx, nz).name;
-                    let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-
-                    if (h >= 6.5 && h <= 55.0 && islandMaskOk && getPathStrength(nx, nz) < 0.20 && isTreeZone(nx, nz) && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty')) {
-                        dummy.position.set(nx, h, nz);
-                        dummy.rotation.set(0, 0, 0);
-                        
-                        // Dynamic scale & aspect ratio variation for natural forest canopy height
-                        let s = 0.88 + Math.random() * 0.65;
-                        let aspect = 0.88 + Math.random() * 0.24;
-                        dummy.scale.set(s * aspect, s * (0.94 + Math.random() * 0.18), s * aspect);
-                        dummy.updateMatrix();
-                        instBillboardTrees.setMatrixAt(i, dummy.matrix);
-
-                        // Color variation from active variants (or default billboardTints)
-                        let tint;
-                        if (window.treeBillboardEditor) {
-                            const activeVars = window.treeBillboardEditor.getActiveVariants();
-                            tint = activeVars.length > 0 ? activeVars[Math.floor(Math.random() * activeVars.length)].colorObj : billboardTints[Math.floor(Math.random() * billboardTints.length)];
-                        } else {
-                            tint = billboardTints[Math.floor(Math.random() * billboardTints.length)];
-                        }
-                        instBillboardTrees.setColorAt(i, tint);
-
-                        billboardUpdated = true;
-                        billboardColorUpdated = true;
-                    } else {
-                        dummy.position.set(0, -1000, 0);
-                        dummy.updateMatrix();
-                        instBillboardTrees.setMatrixAt(i, dummy.matrix);
-                        billboardUpdated = true;
-                    }
-                }
-            }
-
-            if (billboardUpdated) {
-                instBillboardTrees.instanceMatrix.needsUpdate = true;
-            }
-            if (billboardColorUpdated && instBillboardTrees.instanceColor) {
-                instBillboardTrees.instanceColor.needsUpdate = true;
-            }
+            // Single Billboard Tree (DISABLED EVERYWHERE)
             }
 
         } // End of shouldUpdateTerrain block
@@ -2905,21 +2842,7 @@ import { composer, bloomPass, godRaysPass, summerPass, initPostProcessingUI } fr
             }
         });
 
-        // Update distant billboard texture & variant colors
-        texLoader.load(preset.billboardPath, (tex) => {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            billboardMat.map = tex;
-            billboardMat.needsUpdate = true;
-
-            if (variants && variants.length > 0) {
-                const count = instBillboardTrees.count;
-                for (let i = 0; i < count; i++) {
-                    const v = variants[Math.floor(Math.random() * variants.length)];
-                    instBillboardTrees.setColorAt(i, v.colorObj);
-                }
-                if (instBillboardTrees.instanceColor) instBillboardTrees.instanceColor.needsUpdate = true;
-            }
-        });
+        // Distant billboard trees disabled everywhere
     });
 
 

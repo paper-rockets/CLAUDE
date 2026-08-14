@@ -73,13 +73,11 @@ export class WaterSystem {
             this.openSeaMesh.position.z = camera.position.z;
         }
 
-        // Player interaction displacement & wake
+        // Player tracking
         if (playerPos) {
             objPosUniform.value.copy(playerPos);
-            objActiveUniform.value = 1.0;
-        } else {
-            objActiveUniform.value = 0.0;
         }
+        objActiveUniform.value = 0.0;
     }
 
     dispose() {

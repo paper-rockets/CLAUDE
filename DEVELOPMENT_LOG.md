@@ -94,6 +94,16 @@
   * Enhanced **Archipelago Beach & Shorelines** with gentle gradient coastal sand transitions and water height alignment.
   * Added real-time GUI controls for weather triggers, biome teleports, tree billboard editing, and camera FOV dynamics.
 
+### 🔹 Stage 6: WebGPU Multi-Model Pine Forest & Natural Species Groves
+* **Timeframe**: *August 2026*
+* **Focus**: WebGPU TSL tree foliage shader upgrade and multi-model species grove ecosystem.
+* **Milestones**:
+  * Loaded **10 distinct 3D stylized pine tree models** into unified instanced mesh pools (tall majestic pines, layered mountain pines, dense alpine pines, dwarf pines, and saplings).
+  * Built **WebGPU TSL Ghibli/Anime Foliage Shader** (`TreeNodeMaterial.js`) featuring multi-tiered height color gradients (deep spruce shadows `#13381e` -> rich evergreen `#236e31` -> sunlit warm tips `#6bbe3d` -> golden crown tips `#88db46`).
+  * Implemented **Sun Backlight & Subsurface Scattering (`emissiveNode`)** producing warm translucent glowing needle rims when looking towards the sun.
+  * Created **Multi-Scale Species Grove Clustering** (`getForestClusterGroup`) using 2D spatial noise so trees grow in cohesive, organic forest groves rather than uniform random scatter.
+  * Integrated **Organic Wind Sway Animation (`positionNode`)** with height-attenuated multi-frequency wind waves.
+
 ---
 
 ## 🏗️ Engine Architecture & File Structure
