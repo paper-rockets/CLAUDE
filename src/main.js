@@ -4082,7 +4082,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const duskLow = THREE.MathUtils.smoothstep(currentSunY, -500, 0);
             const duskFactor = duskHigh * duskLow;
             skyUniforms.uDuskFactor.value = duskFactor;
-            skyUniforms.uStarDensity.value = Math.max(nightFactor, duskFactor * 0.7);
+
         }
 
         // Instanced mesh clouds remain visible (scene-level 3D clouds)
