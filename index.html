@@ -23,14 +23,15 @@
     #joystick-base {
       position: absolute; left: 40px; bottom: 40px;
       width: 100px; height: 100px; border-radius: 50%;
-      background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.07); border: 1.5px solid rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(8px);
       pointer-events: auto;
     }
-    
+
     #joystick-knob {
       position: absolute; left: 50%; top: 50%;
       width: 40px; height: 40px; border-radius: 50%;
-      background: rgba(255, 255, 255, 0.3);
+      background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255,255,255,0.25);
       transform: translate(-50%, -50%);
       pointer-events: none;
     }
@@ -38,18 +39,38 @@
     #boost-btn {
       position: fixed; right: 20px; bottom: 25px;
       width: 75px; height: 75px; border-radius: 50%;
-      color: white; font-weight: bold; font-size: 14px;
+      color: rgba(255,255,255,0.7); font-weight: bold; font-size: 13px;
       display: flex; align-items: center; justify-content: center;
       user-select: none; pointer-events: auto;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-      backdrop-filter: blur(4px);
-      background: rgba(59, 130, 246, 0.75); border: 2px solid rgba(96, 165, 250, 0.9);
-      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.12); border: 1.5px solid rgba(255, 255, 255, 0.28);
+      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
       z-index: 20;
     }
+    #boost-btn:active { background: rgba(255,255,255,0.25); }
 
     @media (max-width: 768px) {
       #world-map { display: none !important; }
+      #god-mode-btn, #ocean-toggle-btn, #biome-label { display: none !important; }
+      #top-bar { padding: 4px 10px !important; gap: 8px !important; }
+      #top-bar button { font-size: 13px; }
+    }
+
+    body.immersive #top-bar,
+    body.immersive #world-map,
+    body.immersive #crystal-editor,
+    body.immersive .dg.ac { display: none !important; }
+    body.immersive #immersive-exit { display: flex !important; }
+
+    #immersive-exit {
+      display: none;
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      z-index: 30; pointer-events: auto;
+      background: rgba(0,0,0,0.35); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 20px;
+      color: rgba(255,255,255,0.7); font-size: 11px; font-family: monospace;
+      padding: 5px 14px; cursor: pointer; letter-spacing: 0.5px;
     }
 
     #ui-stack {
@@ -109,7 +130,10 @@ console.error = function(...args) {
     <button id="god-mode-btn" style="background: #ffaa00; border: none; color: #000; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px; margin-left: 6px; text-transform: uppercase;">👁️ God Mode</button>
     <button id="ocean-toggle-btn" style="background: rgba(143, 233, 228, 0.25); border: 1px solid #8fe9e4; color: #8fe9e4; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px;">🌊 Ocean (O)</button>
     <button id="gui-toggle-btn" style="background: rgba(255,255,255,0.25); border: 1px solid rgba(255,255,255,0.5); color: white; cursor: pointer; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px;">⚙️ Settings (H)</button>
+    <button id="immersive-toggle" style="background: none; border: none; color: rgba(255,255,255,0.6); cursor: pointer; font-size: 15px; padding: 0;" title="Full Screen">⛶</button>
   </div>
+
+  <button id="immersive-exit" title="Exit Full Screen">tap to show UI</button>
 
   <!-- World Map Overlay -->
   <div id="world-map" style="display: none; position: fixed; bottom: 20px; left: 20px; z-index: 15; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); border-radius: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.3); width: 230px; box-sizing: border-box; box-shadow: 0 8px 32px rgba(0,0,0,0.6); transition: all 0.25s ease-in-out;">
@@ -192,6 +216,17 @@ console.error = function(...args) {
   <div id="pc-controls-hint" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); color: white; padding: 10px 20px; border-radius: 8px; font-family: sans-serif; pointer-events: none; z-index: 100;">
     Controls: WASD/Arrows to move, Shift to Boost, Space to Brake, Scroll Wheel to Zoom
   </div>
+
+  <script>
+    (function() {
+      var toggle = document.getElementById('immersive-toggle');
+      var exit = document.getElementById('immersive-exit');
+      function enterImmersive() { document.body.classList.add('immersive'); }
+      function exitImmersive() { document.body.classList.remove('immersive'); }
+      if (toggle) toggle.addEventListener('click', enterImmersive);
+      if (exit) exit.addEventListener('click', exitImmersive);
+    })();
+  </script>
 
   <script type="importmap">
   {
