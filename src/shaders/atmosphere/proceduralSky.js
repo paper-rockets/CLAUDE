@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
     Fn, vec2, vec3, vec4, uniform, positionWorld, cameraPosition, normalize,
-    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs, max, If
+    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs, max
 } from 'three/tsl';
 
 const hash = Fn(([p]) => {
@@ -20,34 +20,6 @@ const noise = Fn(([p]) => {
     );
 });
 
-// 3D gradient noise hash (https://www.shadertoy.com/view/Xsl3Dl)
-const hash3D = Fn(([p]) => {
-    const sinInput = vec3(
-        dot(p, vec3(127.1, 311.7, 74.7)),
-        dot(p, vec3(269.5, 183.3, 246.1)),
-        dot(p, vec3(113.5, 271.9, 124.6))
-    );
-    return fract(sin(sinInput).mul(43758.5453123)).mul(2.0).sub(1.0);
-});
-
-const noise3D = Fn(([p]) => {
-    const i = p.floor().toVar();
-    const f = p.fract().toVar();
-    const u = f.mul(f).mul(float(3.0).sub(f.mul(2.0)));
-    return mix(
-        mix(
-            mix(dot(hash3D(i.add(vec3(0,0,0))), f.sub(vec3(0,0,0))),
-                dot(hash3D(i.add(vec3(1,0,0))), f.sub(vec3(1,0,0))), u.x),
-            mix(dot(hash3D(i.add(vec3(0,1,0))), f.sub(vec3(0,1,0))),
-                dot(hash3D(i.add(vec3(1,1,0))), f.sub(vec3(1,1,0))), u.x), u.y),
-        mix(
-            mix(dot(hash3D(i.add(vec3(0,0,1))), f.sub(vec3(0,0,1))),
-                dot(hash3D(i.add(vec3(1,0,1))), f.sub(vec3(1,0,1))), u.x),
-            mix(dot(hash3D(i.add(vec3(0,1,1))), f.sub(vec3(0,1,1))),
-                dot(hash3D(i.add(vec3(1,1,1))), f.sub(vec3(1,1,1))), u.x), u.y),
-        u.z
-    );
-});
 
 const fbm = Fn(([p]) => {
     let f = float(0.0).toVar();
@@ -72,7 +44,6 @@ export function createProceduralSky() {
     const uCloudSpeed = uniform(0.02);
     const uCloudTurbulence = uniform(0.0);
     const uCloudOpacity = uniform(1.0);
-    const uStarDensity = uniform(0.0);
     const uStormDarken = uniform(0.0);
     const uNightFactor = uniform(0.0);
     const uDuskFactor = uniform(0.0);
@@ -101,15 +72,9 @@ export function createProceduralSky() {
         const horizonBand = pow(clamp(float(1.0).sub(abs(dir.y)), 0.0, 1.0), 3.0);
         const duskGlow = horizonBand.mul(vec3(1.0, 0.45, 0.25)).mul(uDuskFactor).mul(1.2);
 
-        // Night sky gradient with procedural starfield (only computed at night)
+        // Night sky gradient
         const nightBase = vec3(0.015, 0.02, 0.06);
-        const starVal = float(0.0).toVar();
-        If(uNightFactor.greaterThan(0.01), () => {
-            const starsBase = pow(clamp(noise3D(dir.mul(400.0)), 0.0, 1.0), float(25.0)).mul(500.0);
-            const starsFlicker = mix(float(0.4), float(1.4), noise3D(dir.mul(200.0).add(vec3(uTime, uTime, uTime))));
-            starVal.assign(starsBase.mul(starsFlicker));
-        });
-        const nightSky = nightBase.add(vec3(starVal).mul(uNightFactor));
+        const nightSky = nightBase;
 
         // Blend Day -> Dusk -> Night
         let sky = mix(baseSky.add(sunGlow).add(sunDisc), duskGlow.add(baseSky.mul(0.5)), uDuskFactor);
@@ -176,7 +141,7 @@ export function createProceduralSky() {
         uniforms: {
             uTime, uSunPosition, uSkyColorZenith, uSkyColorHorizon, uSunColor,
             uCloudColor, uCloudShadowColor, uCloudCoverage, uCloudEdge, uCloudSpeed,
-            uCloudTurbulence, uCloudOpacity, uStarDensity, uStormDarken, uNightFactor, uDuskFactor
+            uCloudTurbulence, uCloudOpacity, uStormDarken, uNightFactor, uDuskFactor
         }
     };
 }
