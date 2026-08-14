@@ -102,8 +102,11 @@ export function updatePostProcessingPipeline() {
         outputNode = buildGhibliSummerNode(outputNode);
     }
     
-    // Always apply warp node at the very end, it manages its own mix intensity
-    outputNode = buildPortalWarpNode(outputNode);
+    // Only include warp pass when active — evaluating it unconditionally costs
+    // atan/sin/cos/pow per pixel even at zero intensity
+    if (uWarpIntensity.value > 0) {
+        outputNode = buildPortalWarpNode(outputNode);
+    }
 
     postProcessing.outputNode = outputNode;
     postProcessing.needsUpdate = true;

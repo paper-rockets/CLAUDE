@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
     Fn, vec2, vec3, vec4, uniform, positionWorld, cameraPosition, normalize,
-    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs, max
+    dot, clamp, mix, pow, smoothstep, float, sin, fract, abs, max, If
 } from 'three/tsl';
 
 const hash = Fn(([p]) => {
@@ -101,12 +101,15 @@ export function createProceduralSky() {
         const horizonBand = pow(clamp(float(1.0).sub(abs(dir.y)), 0.0, 1.0), 3.0);
         const duskGlow = horizonBand.mul(vec3(1.0, 0.45, 0.25)).mul(uDuskFactor).mul(1.2);
 
-        // Night sky gradient with procedural starfield
+        // Night sky gradient with procedural starfield (only computed at night)
         const nightBase = vec3(0.015, 0.02, 0.06);
-        const starsBase = pow(clamp(noise3D(dir.mul(400.0)), 0.0, 1.0), float(25.0)).mul(500.0);
-        const starsFlicker = mix(float(0.4), float(1.4), noise3D(dir.mul(200.0).add(vec3(uTime, uTime, uTime))));
-        const star = starsBase.mul(starsFlicker);
-        const nightSky = nightBase.add(vec3(star).mul(uNightFactor));
+        const starVal = float(0.0).toVar();
+        If(uNightFactor.greaterThan(0.01), () => {
+            const starsBase = pow(clamp(noise3D(dir.mul(400.0)), 0.0, 1.0), float(25.0)).mul(500.0);
+            const starsFlicker = mix(float(0.4), float(1.4), noise3D(dir.mul(200.0).add(vec3(uTime, uTime, uTime))));
+            starVal.assign(starsBase.mul(starsFlicker));
+        });
+        const nightSky = nightBase.add(vec3(starVal).mul(uNightFactor));
 
         // Blend Day -> Dusk -> Night
         let sky = mix(baseSky.add(sunGlow).add(sunDisc), duskGlow.add(baseSky.mul(0.5)), uDuskFactor);
