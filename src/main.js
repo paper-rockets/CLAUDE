@@ -332,7 +332,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
-        fogIntensity: 0.2,
+        fogIntensity: 0.1,
         terrainSmoothing: 0.0,
         trails: isWindTrailsOn, lockSunToPlayer: true,
         shadows: isShadowsOn,
@@ -352,7 +352,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         modelVisible: true,
         wind: isWindOn,
         rain: isRainOn,
-        fogPlane: true,
+        fogPlane: false,
         godRays: !LOW_GFX,
         godRayIntensity: 0.65,
         treeScale: 1.5,
@@ -381,7 +381,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         cloudCountHorizon: LOW_GFX ? 0 : 45,
         cloudScaleHorizon: 1.0,
         showBirds: true,
-        showFogPlanes: true,
+        showFogPlanes: false,
         showCrystals: false,
         showMap: false,
         showGUI: false,
@@ -505,12 +505,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     
     // Add Navigation folder (Go To Biome)
     const navFolder = gui.addFolder('Navigation');
-    const navParams = {};
+    const navParams = { maxAltitude: 3500 };
     ZONES.forEach(zn => {
         navParams[zn.name] = () => {
             teleportToBiome(zn.name);
         };
         navFolder.add(navParams, zn.name).name(`${zn.name}`);
+    });
+    navFolder.add(navParams, 'maxAltitude', 500, 15000, 100).name('Max Altitude').onChange(v => {
+        if (playerPhysics) playerPhysics.maxAltitude = v;
     });
 
     // Add Presets folder
@@ -844,6 +847,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     }
     debugFolder.add(params, 'showGUI').name('lil-gui Panel').onChange(v => toggleGUI(v));
+    debugFolder.add(params, 'godRays').name('☀️ God Rays').onChange(v => { godRaysPass.enabled = v; });
+    debugFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('☀️ Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
 
     const guiToggleBtn = document.getElementById('gui-toggle-btn');
     if (guiToggleBtn) {
@@ -860,6 +865,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.addEventListener('keydown', (e) => {
         if ((e.key === 'o' || e.key === 'O') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
             if (window.waterModalUI) window.waterModalUI.toggle();
+        }
+        if ((e.key === 'g' || e.key === 'G') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            const godBtn = document.getElementById('god-mode-btn');
+            if (godBtn) godBtn.click();
         }
     });
 
@@ -1008,8 +1017,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (typeof envFolder !== 'undefined') envFolder.open();
             isFlightPaused = true;
             document.getElementById('pause-toggle').innerText = '▶';
-            btn.style.background = '#ff4444';
-            btn.style.color = '#fff';
+            btn.style.color = '#ff4444';
+            btn.style.textShadow = '0 0 10px rgba(255, 68, 68, 0.9), 0 1px 3px rgba(0, 0, 0, 0.5)';
+            btn.style.transform = 'scale(1.15)';
+            btn.title = 'God Mode: ON (Free Camera Active) [G]';
 
             if (!godCamera) {
                 const gm = setupGodMode(scene, cameraBase, renderer, playerGrp);
@@ -1030,8 +1041,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
             if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
 
-            btn.style.background = '#ffaa00';
-            btn.style.color = '#000';
+            btn.style.color = 'rgba(255, 255, 255, 0.95)';
+            btn.style.textShadow = '0 1px 3px rgba(0, 0, 0, 0.35), 0 0 8px rgba(0, 0, 0, 0.2)';
+            btn.style.transform = 'scale(1.0)';
+            btn.title = 'Toggle God Mode (Free Camera) [G]';
 
             toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
                 if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
@@ -1377,6 +1390,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (currentBiome && currentBiome.name) {
                 if (currentBiome.name.includes('Desert')) bType = 1.0;
                 else if (currentBiome.name.includes('North Pole')) bType = 2.0;
+                else if (currentBiome.name.includes('Canyon')) bType = 3.0;
             }
             biomeTypes.setX(i, bType);
 
@@ -1945,22 +1959,24 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         return noiseAlpha.mul(edgeFade).mul(nearFade);
     });
 
-    const fogMat = new MeshStandardNodeMaterial({
+    const fogMat = new MeshBasicNodeMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.8,
-        depthWrite: false
+        opacity: 0.25,
+        depthWrite: false,
+        fog: false
     });
     
-    fogMat.opacityNode = getFogAlphaFn(positionWorld, cameraPosition, fogUniforms.uTime).mul(0.8);
+    fogMat.opacityNode = getFogAlphaFn(positionWorld, cameraPosition, fogUniforms.uTime).mul(0.25);
 
     // Stack 3 planes for cheap 3D parallax volumetric effect
     for(let i = 0; i < 3; i++) {
         const p = new THREE.Mesh(fogGeo, fogMat);
         p.position.y = 12 + i * 15; // 12, 27, 42
-        p.receiveShadow = true;
+        p.receiveShadow = false;
         fogGroup.add(p);
     }
+    fogGroup.visible = false;
     scene.add(fogGroup);
     window.fogGroup = fogGroup;
     window.fogUniforms = fogUniforms;
@@ -3929,7 +3945,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             // Smoothly interpolate fog group Y to prevent snapping, but snap X and Z to player
             window.fogGroup.position.x = playerGrp.position.x;
             window.fogGroup.position.z = playerGrp.position.z;
-            const targetFogY = currentGroundY - 15 + biomeFogOffset;
+            const targetFogY = (currentGroundY <= -4.0 || bName.includes('Ocean')) ? -200.0 : (currentGroundY - 15 + biomeFogOffset);
             window.fogGroup.position.y += (targetFogY - window.fogGroup.position.y) * dt * 2.0;
         }
 
@@ -3970,11 +3986,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         // Procedural Sky — per-biome lerp + night factor
         if (skyUniforms && typeof playerGrp !== 'undefined') {
-            const pYaw = playerPhysics ? playerPhysics.currentYaw : 0;
-            const skyBiomeName = getBiomeAt(
-                playerGrp.position.x + Math.sin(pYaw) * 200,
-                playerGrp.position.z + Math.cos(pYaw) * 200
-            ).name;
+            const skyBiomeName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
             const biomeTarget = BIOME_SKY_CONFIGS[skyBiomeName] || BIOME_SKY_CONFIGS['🌊 Open Ocean'];
             const decaySky = 1.0 - Math.exp(-0.8 * dt);
 
@@ -4263,6 +4275,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (godRaysPass.enabled && typeof staticSun !== 'undefined') {
             const activeCam = isGodMode ? godCamera : camera;
             activeCam.getWorldDirection(tempVec1);
+            const camWorldPos = tempVec3;
+            activeCam.getWorldPosition(camWorldPos);
 
             // Compute exact screen-space horizon Y position to mask god rays away from ocean/ground
             const camHorizX = tempVec1.x;
@@ -4270,9 +4284,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const horizLen = Math.hypot(camHorizX, camHorizZ);
             if (horizLen > 0.001) {
                 tempVecHorizon.set(
-                    activeCam.position.x + (camHorizX / horizLen) * 50000,
+                    camWorldPos.x + (camHorizX / horizLen) * 50000,
                     0.0,
-                    activeCam.position.z + (camHorizZ / horizLen) * 50000
+                    camWorldPos.z + (camHorizZ / horizLen) * 50000
                 );
                 tempVecHorizon.project(activeCam);
                 const horizonScreenY = (tempVecHorizon.y + 1.0) * 0.5;
@@ -4281,7 +4295,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 }
             }
 
-            tempVecSunFwd.copy(staticSun.position).sub(activeCam.position).normalize();
+            tempVecSunFwd.copy(staticSun.position).sub(camWorldPos).normalize();
             const dotFwd = tempVec1.dot(tempVecSunFwd);
 
             // Sun must strictly be in front of the camera to avoid negative-W clip inversion (projecting behind camera onto bottom-left water)
@@ -5094,6 +5108,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                     parsed.shadows = false;
                     parsed.treeShadows = false;
                     parsed.renderHD = true;
+                }
+                
+                // Ensure fog intensity is default 0.1
+                if (parsed.fogIntensity !== undefined && parsed.fogIntensity > 0.1) {
+                    parsed.fogIntensity = 0.1;
                 }
                 
                 gui.load(parsed);

@@ -34,6 +34,32 @@ export class WaterEditorGUI {
         // Quick button to open full floating modal UI
         this.gui.add({ openModal: () => { if (window.waterModalUI) window.waterModalUI.toggle(); } }, 'openModal').name('🌊 Open Sea Modal (O)');
 
+        // Performance & Quality Controls
+        const fPerf = this.gui.addFolder('⚡ Quality & Performance');
+        const perfState = {
+            quality: 'High (Cinematic)',
+            resolution: '512x512 (Ultra)',
+            distanceLod: true
+        };
+
+        fPerf.add(perfState, 'quality', ['High (Cinematic)', 'Performance (High FPS)']).name('Shader Mode').onChange(v => {
+            const mode = v.startsWith('High') ? 'high' : 'performance';
+            waterSystem.setQualityMode(mode);
+            perfState.resolution = mode === 'high' ? '512x512 (Ultra)' : '128x128 (Fast)';
+            if (window.waterModalUI) window.waterModalUI.syncQualityUI();
+        });
+
+        fPerf.add(perfState, 'resolution', ['512x512 (Ultra)', '256x256 (Balanced)', '128x128 (Fast)']).name('Mesh Density').onChange(v => {
+            const res = v.split('x')[0];
+            waterSystem.setMeshResolution(res);
+            if (window.waterModalUI) window.waterModalUI.syncQualityUI();
+        });
+
+        fPerf.add(perfState, 'distanceLod').name('Distance LOD').onChange(v => {
+            waterSystem.setDistanceLod(v);
+            if (window.waterModalUI) window.waterModalUI.syncQualityUI();
+        });
+
         // Color helpers (hex strings for lil-gui)
         const colors = {
             deep: '#' + deepColorUniform.value.getHexString(),

@@ -18,6 +18,9 @@ import {
   sunDirUniform,
   objPosUniform,
   objActiveUniform,
+  qualityModeUniform,
+  distanceLodUniform,
+  lodDistanceThresholdUniform,
   getWaterHeightAt,
   getWaterNormalAt
 } from './OpenSeaOcean.js';
@@ -27,17 +30,56 @@ export class WaterSystem {
         this.scene = scene;
         this.renderer = renderer;
 
-        // Large high-density ocean plane geometry with 512x512 subdivisions
-        const oceanGeometry = new THREE.PlaneGeometry(16000, 16000, 512, 512);
-        oceanGeometry.rotateX(-Math.PI / 2);
+        // Resolution geometries cache
+        this.geometries = {
+            '512': this._createPlaneGeo(512),
+            '256': this._createPlaneGeo(256),
+            '128': this._createPlaneGeo(128)
+        };
+
+        this.meshResolution = '512';
+        this.qualityMode = 'high'; // 'high' | 'performance'
+        this.distanceLod = true;
 
         this.openSeaMaterial = createOpenSeaMaterial();
-        this.openSeaMesh = new THREE.Mesh(oceanGeometry, this.openSeaMaterial);
+        this.openSeaMesh = new THREE.Mesh(this.geometries['512'], this.openSeaMaterial);
         this.openSeaMesh.frustumCulled = false;
         this.openSeaMesh.position.y = 2.4;
         this.scene.add(this.openSeaMesh);
 
         this.visible = true;
+    }
+
+    _createPlaneGeo(segments) {
+        const geo = new THREE.PlaneGeometry(16000, 16000, segments, segments);
+        geo.rotateX(-Math.PI / 2);
+        return geo;
+    }
+
+    setMeshResolution(res) {
+        const key = String(res);
+        if (this.geometries[key] && this.openSeaMesh) {
+            this.openSeaMesh.geometry = this.geometries[key];
+            this.meshResolution = key;
+        }
+    }
+
+    setQualityMode(mode) {
+        this.qualityMode = mode;
+        if (mode === 'performance') {
+            qualityModeUniform.value = 0.0;
+            distanceLodUniform.value = 1.0;
+            this.setMeshResolution(128);
+        } else {
+            qualityModeUniform.value = 1.0;
+            distanceLodUniform.value = 1.0;
+            this.setMeshResolution(512);
+        }
+    }
+
+    setDistanceLod(enabled) {
+        this.distanceLod = !!enabled;
+        distanceLodUniform.value = this.distanceLod ? 1.0 : 0.0;
     }
 
     setVisible(visible) {
@@ -69,8 +111,10 @@ export class WaterSystem {
 
         // Ocean plane follows camera in XZ for infinite horizon
         if (this.openSeaMesh && camera) {
-            this.openSeaMesh.position.x = camera.position.x;
-            this.openSeaMesh.position.z = camera.position.z;
+            if (!this._tempCamPos) this._tempCamPos = new THREE.Vector3();
+            camera.getWorldPosition(this._tempCamPos);
+            this.openSeaMesh.position.x = this._tempCamPos.x;
+            this.openSeaMesh.position.z = this._tempCamPos.z;
         }
 
         // Player tracking

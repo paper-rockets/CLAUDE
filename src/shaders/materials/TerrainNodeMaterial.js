@@ -70,6 +70,7 @@ export const createTerrainMaterial = (uTime, uSunDir, uSandNoiseMap, uShimmerMul
         const ref = reflect(viewDir.negate(), norm);
 
         const isSand = step(0.9, aBiomeType).mul(step(aBiomeType, 1.1));
+        const isCanyon = step(2.9, aBiomeType).mul(step(aBiomeType, 3.1));
         
         const rim = float(1.0).sub(clamp(dot(norm, viewDir), 0.0, 1.0));
         const rimStrength = pow(rim, 4.5).mul(0.5);
@@ -89,8 +90,13 @@ export const createTerrainMaterial = (uTime, uSunDir, uSandNoiseMap, uShimmerMul
         const rimSpec = pow(rim, 2.2).mul(textureGlitter).mul(2.5);
         const specColor = mainSpec.add(rimSpec).mul(vec3(1.0, 0.82, 0.55)).mul(uShimmerMult);
 
-        const finalGlow = rimGlow.mul(0.5).add(specColor); // Scaled rim down slightly for balance in emissive
-        return finalGlow.mul(isSand);
+        const finalSandGlow = rimGlow.mul(0.5).add(specColor); // Scaled rim down slightly for balance in emissive
+        
+        // Canyon warm terracotta-golden rim light on cliff edges
+        const canyonRimStrength = pow(rim, 4.0).mul(0.35);
+        const canyonRimGlow = vec3(1.0, 0.60, 0.32).mul(canyonRimStrength);
+
+        return finalSandGlow.mul(isSand).add(canyonRimGlow.mul(isCanyon));
     })();
 
     return terrainMat;

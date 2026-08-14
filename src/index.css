@@ -71,12 +71,19 @@ canvas { display: block; touch-action: none; }
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
 }
 
-/* Touch Controls */
+/* Touch Controls (Mobile Only) */
 #touch-controls {
+  display: none;
   position: fixed;
   inset: 0;
   z-index: 20;
   pointer-events: none;
+}
+
+@media (pointer: coarse), (hover: none), (max-width: 900px) {
+  #touch-controls {
+    display: block;
+  }
 }
 
 #joystick-base {

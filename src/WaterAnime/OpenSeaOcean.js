@@ -35,6 +35,9 @@ export const waveHeightUniform = uniform(1.0);
 export const oceanScaleUniform = uniform(1.0);
 export const swellWavelengthUniform = uniform(1.0);
 export const foamDecayUniform = uniform(1.0);
+export const qualityModeUniform = uniform(1.0); // 1.0 = High / Cinematic, 0.0 = Performance (High FPS)
+export const distanceLodUniform = uniform(1.0); // 1.0 = Distance LOD active, 0.0 = Off
+export const lodDistanceThresholdUniform = uniform(1800.0);
 
 export const sunDirUniform = uniform(new THREE.Vector3(0, 1, 0));
 export const sunColorUniform = uniform(new THREE.Color(1, 1, 1));
@@ -235,8 +238,8 @@ const skyColor = Fn(([rawDir]) => {
   sky.assign(mix(sky, hazeColor, smoothstep(-0.15, 0.0, dir.y).oneMinus()));
 
   const s = max(dot(dir, sunDirUniform), 0.0);
-  sky.addAssign(sunColorUniform.mul(pow(s, 10.0)).mul(0.18));                 
-  sky.addAssign(sunColorUniform.mul(smoothstep(0.9994, 0.9998, s)).mul(30.0)); 
+  sky.addAssign(sunColorUniform.mul(pow(s, 22.0)).mul(0.2));                 
+  sky.addAssign(sunColorUniform.mul(smoothstep(0.9994, 0.9998, s)).mul(20.0)); 
 
   return sky;
 });
@@ -247,6 +250,7 @@ const skyColor = Fn(([rawDir]) => {
 export const createOpenSeaMaterial = () => {
   const oceanMaterial = new THREE.MeshBasicNodeMaterial();
   oceanMaterial.transparent = true;
+  oceanMaterial.side = THREE.DoubleSide;
 
   const scaledTime = timeUniform.mul(speedUniform);
   const gerstnerP = wavePosition(positionLocal.xz, scaledTime, seaUniform);
@@ -255,6 +259,12 @@ export const createOpenSeaMaterial = () => {
   oceanMaterial.colorNode = Fn(() => {
     const P = positionWorld.toVar();
     const xz = P.xz;
+    const camDist = distance(cameraPosition, P).toVar();
+
+    // Distance LOD factor: 1.0 up close (<250m), smoothly scales down towards distance
+    const distLod = smoothstep(lodDistanceThresholdUniform, float(250.0), camDist);
+    const effectiveLodFactor = mix(float(1.0), distLod, distanceLodUniform);
+    const effectiveQuality = mix(float(0.55), float(1.0), qualityModeUniform);
 
     const n0 = waveNormal(xz, scaledTime, seaUniform);
     const crest = waveCrest(xz, scaledTime, seaUniform).toVar();
@@ -267,13 +277,20 @@ export const createOpenSeaMaterial = () => {
     const nonUniformChop = mix(float(0.35), float(1.65), chopMask.mul(chopPatchinessUniform));
     const crestChopMult = mix(float(0.55), float(1.45), smoothstep(-0.4, 1.1, crest));
 
-    const detail = vec3(h0.sub(hx), 0.0, h0.sub(hz))
-      .mul(float(1.5).mul(seaUniform.mul(0.6).add(0.4)).mul(detailAmountUniform).mul(nonUniformChop).mul(crestChopMult));
+    const effectiveDetail = float(1.5)
+      .mul(seaUniform.mul(0.6).add(0.4))
+      .mul(detailAmountUniform)
+      .mul(effectiveLodFactor)
+      .mul(effectiveQuality)
+      .mul(nonUniformChop)
+      .mul(crestChopMult);
+
+    const detail = vec3(h0.sub(hx), 0.0, h0.sub(hz)).mul(effectiveDetail);
     const N = normalize(n0.add(detail)).toVar();
 
     const V = normalize(cameraPosition.sub(P)).toVar();
 
-    const colorTurbulence = fbm(xz.mul(0.035).add(vec2(scaledTime.mul(0.015), scaledTime.mul(-0.01)))).mul(0.28);
+    const colorTurbulence = fbm(xz.mul(0.035).add(vec2(scaledTime.mul(0.015), scaledTime.mul(-0.01)))).mul(0.28).mul(effectiveLodFactor);
     const body = mix(
       deepColorUniform,
       shallowColorUniform,
@@ -296,7 +313,7 @@ export const createOpenSeaMaterial = () => {
       .mul(0.5).add(0.5);
     const glitter = pow(max(dot(N, H), 0.0), 500.0).mul(mix(0.4, 3.4, glitterNoise));
     const sheen = pow(max(dot(N, H), 0.0), 48.0).mul(0.12);
-    color.addAssign(sunColorUniform.mul(glitter.add(sheen)));
+    color.addAssign(sunColorUniform.mul(glitter.add(sheen)).mul(effectiveLodFactor.mul(0.6).add(0.4)));
 
     const foamNoise = fbm(xz.mul(1.1).add(vec2(scaledTime.mul(0.22), scaledTime.mul(0.14))))
       .mul(0.5).add(0.5);
@@ -304,9 +321,8 @@ export const createOpenSeaMaterial = () => {
 
     color.assign(mix(color, vec3(0.92, 0.96, 1.0), clamp(foam.mul(0.85), 0.0, 1.0)));
 
-    // Atmospheric horizon concealment
-    const camDist = distance(cameraPosition, P);
-    color.assign(mix(color, horizonColorUniform, smoothstep(2500.0, 7500.0, camDist)));
+    // Atmospheric horizon concealment — pushed to far distance to preserve vibrant mid-range ocean
+    color.assign(mix(color, horizonColorUniform, smoothstep(8000.0, 15500.0, camDist)));
 
     return vec4(color, waterOpacityUniform);
   })();

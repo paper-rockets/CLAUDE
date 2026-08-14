@@ -48,9 +48,9 @@ export const BIOME_SKY_CONFIGS = {
         turbulence: 0.0, stormDarken: 0.0
     },
     '⛰️ Badlands Canyon': {
-        coverage: 0.20, edge: 0.09, speed: 0.015,
-        skyZenith: 0xa07848, skyHorizon: 0xd8b880,
-        cloudCol: 0xf0dcc0, cloudShadow: 0xb09070,
+        coverage: 0.12, edge: 0.08, speed: 0.012,
+        skyZenith: 0x3672b8, skyHorizon: 0xf5d4a6,
+        cloudCol: 0xfff2e2, cloudShadow: 0xb8947c,
         turbulence: 0.0, stormDarken: 0.0
     },
     '❄️ North Pole': {

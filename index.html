@@ -78,12 +78,19 @@
       transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
     }
 
-    /* Touch Controls */
+    /* Touch Controls (Mobile Only) */
     #touch-controls {
+      display: none;
       position: fixed;
       inset: 0;
       z-index: 20;
       pointer-events: none;
+    }
+
+    @media (pointer: coarse), (hover: none), (max-width: 900px) {
+      #touch-controls {
+        display: block;
+      }
     }
     
     #joystick-base {
@@ -228,6 +235,7 @@ console.error = function(...args) {
   <div id="top-bar">
     <div id="fps-counter">FPS61</div>
     <button id="pause-toggle" title="Pause / Resume Flight">⏸</button>
+    <button id="god-mode-btn" title="Toggle God Mode (Free Camera) [G]">👁️</button>
     <button id="time-toggle" title="Cycle Time of Day">☼</button>
     <button id="fullscreen-toggle" title="Toggle Fullscreen">⛶</button>
     <button id="gui-toggle-btn" title="Settings & Editor Panel">⚙</button>
@@ -249,7 +257,6 @@ console.error = function(...args) {
   </div>
 
   <div id="hidden-ui" style="display: none;">
-      <button id="god-mode-btn">God Mode</button>
       <button id="ocean-toggle-btn">Ocean</button>
       <div id="time-label"></div>
       <div id="biome-label"></div>

@@ -123,8 +123,12 @@ export class SeabedFloor {
         }
 
         // Follow camera in XZ
-        this.mesh.position.x = camera.position.x;
-        this.mesh.position.z = camera.position.z;
+        if (camera) {
+            if (!this._tempCamPos) this._tempCamPos = new THREE.Vector3();
+            camera.getWorldPosition(this._tempCamPos);
+            this.mesh.position.x = this._tempCamPos.x;
+            this.mesh.position.z = this._tempCamPos.z;
+        }
     }
 
     dispose(scene) {
