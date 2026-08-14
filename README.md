@@ -1,6 +1,6 @@
-# 🧹 Kiki's Flight — Procedural 3D Flying Engine
+Wanderlust — Procedural 3D Flying Engine
 
-Welcome to **Kiki's Flight**, an infinite procedural 3D flying game built with raw Three.js, toon shading, zero external image textures, custom WebGL shaders, and high-performance instanced mesh recycling.
+Welcome to **Wanderlust**, an infinite procedural 3D flying game built with raw Three.js, toon shading, zero external image textures, custom WebGL shaders, and high-performance instanced mesh recycling.
 
 ## ▶️ Play Now
 
