@@ -33,7 +33,7 @@ import { setupGodMode, toggleGodMode, updateGodMode } from './physics/GodMode.js
 import { MeshToonNodeMaterial, MeshStandardNodeMaterial, MeshBasicNodeMaterial, PointsNodeMaterial } from 'three/webgpu';
 import { uniform, texture, Fn, positionLocal, abs, positionGeometry, sin, step, positionWorld, normalWorld, cameraPosition, float, vec2, vec3, vec4, dot, fract, mix, pow, clamp, normalize, smoothstep as tslSmoothstep, attribute } from 'three/tsl';
 import { scene, camera, renderer, clock } from './core/Engine.js';
-import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI } from './core/PostProcessing.js';
+import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI, uRolloffKnee } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -43,7 +43,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-    import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
+    import { LensflareMesh, LensflareElement } from 'three/addons/objects/LensflareMesh.js';
     import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
     import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
     import { ToonShaderManager } from './vfx/ToonShaderManager.js';
@@ -90,7 +90,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Clouds config
     let CLOUD_COUNT = LOW_GFX ? 40 : 150;
     let HIGH_CLOUD_COUNT = LOW_GFX ? 0 : 24;
-    let WISPY_CLOUD_COUNT = LOW_GFX ? 0 : 30;
+    let WISPY_CLOUD_COUNT = 0; // flight-merged ships these off
     let MEGA_CLOUD_COUNT = LOW_GFX ? 0 : 24;
 
 
@@ -333,7 +333,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
-        fogIntensity: 0.1,
+        fogIntensity: 2.0,
         terrainSmoothing: 0.0,
         trails: isWindTrailsOn, lockSunToPlayer: true,
         shadows: isShadowsOn,
@@ -356,6 +356,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         fogPlane: false,
         godRays: !LOW_GFX,
         godRayIntensity: 0.65,
+        highlightKnee: 0.75,
+        horizonGlow: 0.7,
         treeScale: 1.5,
         quality: LOW_GFX ? 'Low' : 'Regular',
         showTerrain: true,
@@ -364,7 +366,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         enableSkydome: false,
         daySkydomeTexture: Math.random() > 0.5 ? '1' : '2',
         nightSkydomeTexture: '2', // Default to 2 because it has the transparency mask
-        showClouds: false,
+        showClouds: true,
         showCloudsRegular: false,
         showCloudsHigh: false,
         showCloudsWispy: false,
@@ -386,7 +388,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         showCrystals: false,
         showMap: false,
         showGUI: false,
-        exposure: 1.8,
+        exposure: 1.9,
         shadeMode: 'original',
     };
 
@@ -490,6 +492,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     });
     perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
     perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
+    perfFolder.add(params, 'highlightKnee', 0.2, 1.0, 0.01).name('Highlight Rolloff').onChange(v => { uRolloffKnee.value = v; });
+    perfFolder.add(params, 'horizonGlow', 0.0, 1.5, 0.05).name('Horizon Glow').onChange(v => { if (typeof skyUniforms !== 'undefined' && skyUniforms.uHorizonGlow) skyUniforms.uHorizonGlow.value = v; });
 
 
     // Actions for GUI
@@ -1256,6 +1260,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     staticSun.position.set(0, 1500, -20000); // Massive distance so Kiki can fly towards it
     scene.add(staticSun);
 
+    const flareTextureLoader = new THREE.TextureLoader();
+    const textureFlare0 = flareTextureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lensflare/lensflare0.png');
+    const textureFlare3 = flareTextureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/lensflare/lensflare3.png');
+    const lensflare = new LensflareMesh();
+    lensflare.addElement(new LensflareElement(textureFlare0, 1600, 0, dirLight.color)); // Massive permanent horizon glare
+    lensflare.addElement(new LensflareElement(textureFlare3, 60, 0.6));
+    lensflare.addElement(new LensflareElement(textureFlare3, 70, 0.7));
+    lensflare.addElement(new LensflareElement(textureFlare3, 120, 0.9));
+    lensflare.addElement(new LensflareElement(textureFlare3, 70, 1.0));
+    staticSun.add(lensflare);
+
     // Physical Sun Sphere
     const sunGeo = new THREE.SphereGeometry(600, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }); // fog: false makes it glow through atmosphere
@@ -1292,8 +1307,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     const matRock = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap, dithering: true });
     const matBush = new THREE.MeshToonMaterial({ color: 0x48a868, gradientMap, dithering: true });
-    const matCloud = new THREE.MeshToonMaterial({ color: 0xfffaec, transparent: true, opacity: 1.0, gradientMap, dithering: true });
-    const matWispyCloud = new THREE.MeshToonMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, gradientMap, dithering: true });
+    const matCloud = new THREE.MeshToonMaterial({ color: 0xfffaec, transparent: true, opacity: 0.65, gradientMap, dithering: true });
+    const matWispyCloud = new THREE.MeshToonMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, gradientMap, dithering: true });
     const matFlower = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap, dithering: true });
     function createSandNoiseTexture(size = 256) {
         const data = new Uint8Array(size * size * 4);
@@ -2076,7 +2091,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     const highCloudGeo = BufferGeometryUtils.mergeGeometries(baseCloudSpheres);
     highCloudGeo.computeVertexNormals();
-    const highCloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
+    const highCloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 });
     
     const MAX_HIGH_CLOUD_COUNT = 100;
     const instHighClouds = new THREE.InstancedMesh(highCloudGeo, highCloudMat, MAX_HIGH_CLOUD_COUNT);
@@ -2092,7 +2107,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     // Far-Distance Mega Painted Clouds (Visible when Kiki climbs high)
     const MAX_MEGA_CLOUD_COUNT = 100;
-    const megaCloudMat = new THREE.MeshToonMaterial({ color: 0xfff6e3, transparent: true, opacity: 1.0 });
+    const megaCloudMat = new THREE.MeshToonMaterial({ color: 0xfff6e3, transparent: true, opacity: 0.88 });
     const instMegaClouds = new THREE.InstancedMesh(highCloudGeo, megaCloudMat, MAX_MEGA_CLOUD_COUNT);
     instMegaClouds.count = MEGA_CLOUD_COUNT;
     instMegaClouds.frustumCulled = false;
@@ -2137,7 +2152,24 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const { mesh: proceduralSkyMesh, material: proceduralSkyMat, uniforms: skyUniforms } = createProceduralSky();
     window._skyDbg = skyUniforms;
     scene.add(proceduralSkyMesh);
-    scene.background = null;
+
+    // SKY MODE. "flat" reproduces flight-merged (WebGL): the procedural dome is hidden and a solid
+    // background colour carries the sky, which the dense fog fades geometry into. The dome is kept
+    // in the scene so it can be toggled back on from the Cloud Editor.
+    // Why flat is the default: with postProcessing.outputColorTransform = false there is no
+    // tonemapping to roll off highlights, so the dome horizon gradient exceeds 1.0 and hard-clips
+    // to a full-width white band across the screen. Solid background has no such gradient.
+    let skyMode = localStorage.getItem("wl_skyMode") || "procedural";
+    function applySkyMode(mode) {
+        skyMode = (mode === "procedural") ? "procedural" : "flat";
+        localStorage.setItem("wl_skyMode", skyMode);
+        const isFlat = skyMode === "flat";
+        proceduralSkyMesh.visible = !isFlat;
+        // Seeded to the Day colour; the per-frame env lerp converges it to the active time phase.
+        scene.background = isFlat ? new THREE.Color(0x8cbce6) : null;
+    }
+    applySkyMode(skyMode);
+    window.applySkyMode = applySkyMode;
     let currentWeather = 'clear';
 
     // --- REMOVED: old toon cloud dome + cubemap skybox ---
@@ -3848,7 +3880,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     starGeometry.setAttribute('pulse', new THREE.BufferAttribute(starPulse, 1));
     const starMaterial = new PointsNodeMaterial({
         color: 0xffffff,
-        size: 1.0,
+        size: 2.5,
+        sizeAttenuation: false,
+        fog: false,
         transparent: true,
         opacity: 0.0
     });
@@ -3973,12 +4007,13 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         if (animeWaterSystem && animeWaterSystem.visible) {
             const activeCam = isGodMode ? godCamera : camera;
-            animeWaterSystem.update(dt, time, activeCam, playerGrp ? playerGrp.position : null, dirLight ? dirLight.position : null);
+            const _wsd = (dirLight && playerGrp) ? new THREE.Vector3().copy(dirLight.position).sub(playerGrp.position).normalize() : null;
+            animeWaterSystem.update(dt, time, activeCam, playerGrp ? playerGrp.position : null, _wsd);
         }
         if (typeof terrainUniforms !== 'undefined') {
             terrainUniforms.uTime.value = time;
             if (typeof dirLight !== 'undefined') {
-                terrainUniforms.uSunDir.value.copy(dirLight.position).normalize();
+                terrainUniforms.uSunDir.value.copy(dirLight.position).sub(playerGrp.position).normalize();
             }
         }
         if (skyUniforms) {
@@ -4062,7 +4097,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             zenithColorUniform.value.copy(skyUniforms.uSkyColorZenith.value);
             horizonColorUniform.value.copy(skyUniforms.uSkyColorHorizon.value);
             sunColorUniform.value.copy(dirLight.color);
-            sunDirUniform.value.copy(dirLight.position).normalize();
+            sunDirUniform.value.copy(dirLight.position).sub(playerGrp.position).normalize();
 
             // Weather override (storm/overcast)
             if (currentWeather !== 'clear') {
@@ -4085,6 +4120,18 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const duskLow = THREE.MathUtils.smoothstep(currentSunY, -500, 0);
             const duskFactor = duskHigh * duskLow;
             skyUniforms.uDuskFactor.value = duskFactor;
+
+            // BLOWOUT FIX. BIOME_SKY_CONFIGS drives skyHorizon per BIOME only, never per time of
+            // day, and every biome value is a pale near-white blue (0xb8d4e8, 0xd0e0f0, ...). So at
+            // sunset the whole sky turned orange while the horizon strip stayed pale and bright --
+            // that strip is the band that burned out and hid the model. Blend the horizon (and, more
+            // gently, the zenith) toward the active time-of-day colour so the horizon belongs to the
+            // sunset instead of glowing through it.
+            const towardEnv = Math.min(1.0, duskFactor + nightFactor);
+            if (towardEnv > 0.001) {
+                skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(target.fog), towardEnv * 1.0);
+                skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(target.bg), towardEnv * 0.35);
+            }
 
         }
 
@@ -4361,7 +4408,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 if (tempVec2.z < 1.0) {
                     const sunScreenX = (tempVec2.x + 1.0) * 0.5;
                     const sunScreenY = (tempVec2.y + 1.0) * 0.5;
-                    godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, sunScreenY);
+                    godRaysPass.uniforms.uSunScreenPos.value.set(sunScreenX, 1.0 - sunScreenY);
 
                     const offScreen = Math.max(Math.abs(sunScreenX - 0.5), Math.abs(sunScreenY - 0.5));
                     const screenFade = 1.0 - Math.min(1.0, Math.max(0.0, (offScreen - 0.5) * 1.6));
@@ -4920,6 +4967,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
 
         const cloudFolder = gui.addFolder('☁️ Cloud Editor');
+
+        cloudFolder.add({ mode: skyMode }, "mode", { "Flat sky + 3D clouds (flight-merged look)": "flat", "Procedural sky dome": "procedural" })
+            .name("🌤️ Sky Mode")
+            .onChange(v => { applySkyMode(v); });
         
         // Show All Clouds Toggle
         cloudFolder.add(params, 'showClouds').name('Show All Clouds').onChange(v => {
@@ -5167,10 +5218,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                     parsed.renderHD = true;
                 }
                 
-                // Ensure fog intensity is default 0.1
-                if (parsed.fogIntensity !== undefined && parsed.fogIntensity > 0.1) {
-                    parsed.fogIntensity = 0.1;
-                }
                 
                 gui.load(parsed);
                 

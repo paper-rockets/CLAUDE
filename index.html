@@ -9,15 +9,76 @@
     html, body {
       margin: 0; padding: 0; width: 100%; height: 100%;
       overflow: hidden; background: #62b1e8;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       touch-action: none; 
       user-select: none;
-      -webkit-user-select: none;
     }
     #app { position: fixed; inset: 0; touch-action: none; }
     canvas { display: block; touch-action: none; }
     
-    /* Top Bar Header */
+    #touch-controls {
+      position: fixed; inset: 0; z-index: 20; pointer-events: none;
+    }
+    
+    #joystick-base {
+      position: absolute; left: 40px; bottom: 40px;
+      width: 100px; height: 100px; border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);
+      pointer-events: auto;
+    }
+    
+    #joystick-knob {
+      position: absolute; left: 50%; top: 50%;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(255, 255, 255, 0.3);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    #boost-btn {
+      position: fixed; right: 20px; bottom: 25px;
+      width: 75px; height: 75px; border-radius: 50%;
+      color: white; font-weight: bold; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none; pointer-events: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      backdrop-filter: blur(4px);
+      background: rgba(59, 130, 246, 0.75); border: 2px solid rgba(96, 165, 250, 0.9);
+      transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 20;
+    }
+
+    @media (max-width: 768px) {
+      #world-map { display: none !important; }
+    }
+
+    #ui-stack {
+      position: fixed; right: 16px; top: 16px;
+      z-index: 10; pointer-events: auto;
+      display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    }
+    #ui-stack button {
+      color: rgba(60, 50, 70, 0.9); background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(8px); padding: 8px 14px;
+      border-radius: 8px; font-size: 13px; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.4); font-weight: bold; width: fit-content;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    #ui-stack button:hover {
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+
+    @media (hover: hover) and (pointer: fine) {
+      #touch-controls { display: none; }
+    }
+    .dg { zoom: 1.2 !important; }
+    .dg.ac { zoom: 1.2 !important; }
+  </style>
+
+  <style>
+    /* modern top bar */
     #top-bar {
       position: fixed;
       top: 18px;
@@ -33,11 +94,7 @@
       padding: 0;
       border: none;
     }
-
-    #top-bar > * {
-      pointer-events: auto;
-    }
-
+    #top-bar > * { pointer-events: auto; }
     #fps-counter {
       color: rgba(255, 255, 255, 0.95);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -49,7 +106,6 @@
       pointer-events: none;
       line-height: 1;
     }
-
     #top-bar button {
       background: none;
       border: none;
@@ -67,176 +123,44 @@
       -webkit-tap-highlight-color: transparent;
       outline: none;
     }
-
-    #top-bar button:active {
-      transform: scale(0.88);
-      opacity: 0.7;
-    }
-
-    #gui-toggle-btn {
-      font-size: 20px;
-      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
-    }
-
-    /* Touch Controls (Mobile Only) */
-    #touch-controls {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 20;
-      pointer-events: none;
-    }
-
-    @media (pointer: coarse), (hover: none), (max-width: 900px) {
-      #touch-controls {
-        display: block;
-      }
-    }
-    
-    #joystick-base {
-      position: absolute;
-      left: 36px;
-      bottom: 36px;
-      width: 96px;
-      height: 96px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1.5px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
-      pointer-events: auto;
-      touch-action: none;
-    }
-    
-    #joystick-knob {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.35);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      backdrop-filter: blur(2px);
-      -webkit-backdrop-filter: blur(2px);
-    }
-
-    #boost-btn {
-      position: fixed;
-      right: 36px;
-      bottom: 72px;
-      color: rgba(255, 255, 255, 0.88);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-weight: 700;
-      font-size: 13px;
-      letter-spacing: 1.6px;
-      text-transform: uppercase;
-      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      pointer-events: auto;
-      cursor: pointer;
-      padding: 12px 16px;
-      border: none;
-      background: transparent;
-      transition: transform 0.15s ease, opacity 0.15s ease, text-shadow 0.15s ease;
-      z-index: 20;
-    }
-
-    #boost-btn:active {
-      transform: scale(0.92);
-      opacity: 0.75;
-      color: #ffffff;
-      text-shadow: 0 0 14px rgba(255, 255, 255, 0.9), 0 1px 4px rgba(0, 0, 0, 0.5);
-    }
-
-    #sparkle-btn {
-      position: fixed;
-      right: 24px;
-      bottom: 20px;
-      background: none;
-      border: none;
-      color: rgba(255, 255, 255, 0.6);
-      font-size: 20px;
-      line-height: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      pointer-events: auto;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-      transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.15s ease, opacity 0.15s ease;
-      z-index: 20;
-      outline: none;
-      padding: 6px;
-    }
-
-    #sparkle-btn:active {
-      transform: scale(1.3) rotate(45deg);
-      color: #ffffff;
-      opacity: 1;
-      text-shadow: 0 0 12px rgba(255, 255, 255, 0.9);
-    }
-
-    /* lil-gui styling on mobile & desktop */
-    .lil-gui.root {
-      position: fixed !important;
-      right: 14px !important;
-      top: 54px !important;
-      max-width: min(340px, 92vw) !important;
-      max-height: calc(100vh - 72px) !important;
-      overflow-y: auto !important;
-      border-radius: 12px !important;
-      background: rgba(18, 22, 32, 0.9) !important;
-      backdrop-filter: blur(16px) !important;
-      -webkit-backdrop-filter: blur(16px) !important;
-      border: 1px solid rgba(255, 255, 255, 0.15) !important;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6) !important;
-      z-index: 1000 !important;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    }
-
-    @media (max-width: 768px) {
-      #world-map { display: none !important; }
-    }
+    #top-bar button:active { transform: scale(0.88); opacity: 0.7; }
   </style>
 </head>
 <body>
-<div id="debug-overlay" style="position: absolute; z-index: 9999; background: red; color: white; font-size: 24px; padding: 20px; display: none;"></div>
+<div id="debug-overlay" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; background: #b91c1c; color: #ffffff; padding: 16px 24px; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 90%; display: none;"></div>
 <script>
 function showError(msg) {
     var overlay = document.getElementById('debug-overlay');
+    if (!overlay) return;
     overlay.style.display = 'block';
-    overlay.innerHTML += msg + '<br><br>';
+    overlay.innerHTML = '<div style="font-family: sans-serif; font-size: 14px; line-height: 1.5;">' +
+        '<div style="font-weight: bold; margin-bottom: 6px;">Runtime Notification</div>' +
+        '<div style="margin-bottom: 12px; word-break: break-word;">' + msg + '</div>' +
+        '<div style="display: flex; gap: 8px;">' +
+            '<a href="?webgl=1" style="display: inline-block; padding: 6px 12px; background: #ffffff; color: #000000; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 12px;">WebGL Fallback Mode</a>' +
+            '<button onclick="window.location.reload()" style="padding: 6px 12px; background: rgba(255,255,255,0.2); color: #ffffff; border: 1px solid #ffffff; border-radius: 4px; font-weight: bold; font-size: 12px; cursor: pointer;">Reload</button>' +
+            '<button onclick="this.closest(\'#debug-overlay\').style.display=\'none\'" style="padding: 6px 12px; background: transparent; color: #ffffff; border: 1px solid rgba(255,255,255,0.5); border-radius: 4px; font-size: 12px; cursor: pointer;">Dismiss</button>' +
+        '</div>' +
+    '</div>';
 }
 window.onerror = function(msg, url, line, col, error) {
+    if (msg && (msg.includes('ResizeObserver') || msg.includes('Script error'))) return;
     showError('Error: ' + msg + ' at line ' + line);
 };
 window.addEventListener("unhandledrejection", function(event) {
-    showError('Unhandled Promise Rejection: ' + (event.reason ? event.reason.message || event.reason : "unknown"));
+    var reason = event.reason ? (event.reason.message || event.reason) : "unknown";
+    if (reason && reason.includes('Device Lost')) return; // Handled specifically by renderer.onDeviceLost
+    showError('Unhandled Rejection: ' + reason);
 });
-const origConsoleError = console.error;
-console.error = function(...args) {
-    showError('Console Error: ' + args.join(' '));
-    origConsoleError.apply(console, args);
-};
 </script>
   <div id="app"></div>
 
-  <!-- Top Bar -->
+  
   <div id="top-bar">
-    <div id="fps-counter">FPS61</div>
+    <div id="fps-counter">FPS 61</div>
     <button id="pause-toggle" title="Pause / Resume Flight">⏸</button>
     <button id="god-mode-btn" title="Toggle God Mode (Free Camera) [G]">▲</button>
-    <button id="time-toggle" title="Cycle Time of Day">☼</button>
+    <button id="time-toggle" title="Cycle Time of Day">☀️</button>
     <button id="fullscreen-toggle" title="Toggle Fullscreen">⛶</button>
     <button id="gui-toggle-btn" title="Settings & Editor Panel">⚙</button>
   </div>
@@ -244,32 +168,41 @@ console.error = function(...args) {
   <!-- World Map Overlay -->
   <div id="world-map" style="display: none; position: fixed; bottom: 20px; left: 20px; z-index: 15; background: rgba(0,0,0,0.88); backdrop-filter: blur(12px); border-radius: 12px; padding: 12px; border: 1px solid rgba(255,255,255,0.3); width: 230px; box-sizing: border-box; box-shadow: 0 8px 32px rgba(0,0,0,0.6); transition: all 0.25s ease-in-out;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <div id="map-title-text" style="color: #ffe066; font-family: monospace; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;">🗺️ RADAR MAP</div>
+      <div id="map-title-text" style="color: #ffe066; font-family: monospace; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;">RADAR MAP</div>
       <div style="display: flex; gap: 4px; align-items: center;">
         <button id="zoom-out-btn" title="Zoom Out" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">-</button>
         <button id="zoom-in-btn" title="Zoom In" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">+</button>
-        <button id="expand-map-btn" title="Expand / Collapse Map (M)" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: #66ccff; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">⤢</button>
-        <button id="close-map-btn" title="Hide Map" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #ff6666; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">✖</button>
+        <button id="expand-map-btn" title="Expand / Collapse Map (M)" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: #66ccff; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">[M]</button>
+        <button id="close-map-btn" title="Hide Map" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #ff6666; font-family: monospace; font-size: 12px; font-weight: bold; cursor: pointer; padding: 1px 6px; border-radius: 4px; line-height: 1.2;">X</button>
       </div>
     </div>
     <canvas id="map-canvas" width="200" height="200" style="display: block; border-radius: 8px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.35); max-width: 100%;"></canvas>
     <div id="map-info-text" style="color: #ffffff; font-family: monospace; font-size: 10px; margin-top: 6px; opacity: 0.95; text-align: center; font-weight: bold;">Z: 0m</div>
   </div>
 
+  
+
   <div id="hidden-ui" style="display: none;">
-      <button id="ocean-toggle-btn">Ocean</button>
       <div id="time-label"></div>
       <div id="biome-label"></div>
+      <button id="char-toggle">MODEL: KIKI</button>
       <button id="editor-toggle">Terrain Editor</button>
       <button id="crystal-edit-toggle">Edit Crystals</button>
-      <button id="char-toggle">Switch to Whale</button>
       <button id="invis-toggle">Model: VISIBLE</button>
       <button id="summer-toggle">Summer Filter: ON</button>
       <button id="music-toggle">Music</button>
       <button id="track-toggle">Track: Valley Wind</button>
       <button id="wind-toggle">Wind: ON</button>
+      <button id="fullscreen-toggle">Fullscreen</button>
   </div>
 
+
+  
+  
+
+
+
+  
   <!-- Crystal Editor UI -->
   <div id="crystal-editor" style="display: none; position: fixed; left: 20px; top: 20px; width: 240px; box-sizing: border-box; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); color: white; padding: 15px; border-radius: 10px; font-family: sans-serif; z-index: 100; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.2);">
     <h3 style="margin-top:0; margin-bottom:10px; font-size:16px;">💎 Crystal & Env Editor</h3>
@@ -310,7 +243,10 @@ console.error = function(...args) {
   <div id="touch-controls">
     <div id="joystick-base"><div id="joystick-knob"></div></div>
     <div id="boost-btn">BOOST</div>
-    <button id="sparkle-btn" title="Switch Character / Effect">✦</button>
+  </div>
+  
+  <div id="pc-controls-hint" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); color: white; padding: 10px 20px; border-radius: 8px; font-family: sans-serif; pointer-events: none; z-index: 100;">
+    Controls: WASD/Arrows to move, Shift to Boost, Space to Brake, Scroll Wheel to Zoom
   </div>
 
   <script type="importmap">
@@ -319,10 +255,15 @@ console.error = function(...args) {
       "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
       "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.webgpu.js",
       "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.tsl.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
     }
   }
   </script>
   <script type="module" src="./src/main.js"></script>
+<div id="folder-info" style="position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 5px; font-family: monospace; font-size: 12px; z-index: 999999; pointer-events: none;">
+  Path: E:\GAME FINAL RUN\WANDERLUST webgpu | Name: WANDERLUST webgpu
+</div>
 </body>
 </html>
+

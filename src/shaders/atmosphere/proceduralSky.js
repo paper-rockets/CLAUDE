@@ -47,6 +47,10 @@ export function createProceduralSky() {
     const uStormDarken = uniform(0.0);
     const uNightFactor = uniform(0.0);
     const uDuskFactor = uniform(0.0);
+    // Scales the full-width dusk horizon band. At the old hardcoded 1.2 this summed with
+    // baseSky*0.5 to about R 1.56 at the horizon, so red clipped while G/B sat near 1.0 and the
+    // whole band burned out to white. 0.7 keeps the gradient but holds the peak under 1.0.
+    const uHorizonGlow = uniform(0.7);
 
     const material = new MeshBasicNodeMaterial({
         side: THREE.BackSide,
@@ -70,7 +74,7 @@ export function createProceduralSky() {
 
         // Dusk / sunset horizon gradient
         const horizonBand = pow(clamp(float(1.0).sub(abs(dir.y)), 0.0, 1.0), 3.0);
-        const duskGlow = horizonBand.mul(vec3(1.0, 0.45, 0.25)).mul(uDuskFactor).mul(1.2);
+        const duskGlow = horizonBand.mul(vec3(1.0, 0.45, 0.25)).mul(uDuskFactor).mul(uHorizonGlow);
 
         // Night sky gradient
         const nightBase = vec3(0.015, 0.02, 0.06);
@@ -139,7 +143,7 @@ export function createProceduralSky() {
         mesh,
         material,
         uniforms: {
-            uTime, uSunPosition, uSkyColorZenith, uSkyColorHorizon, uSunColor,
+            uTime, uSunPosition, uSkyColorZenith, uSkyColorHorizon, uSunColor, uHorizonGlow,
             uCloudColor, uCloudShadowColor, uCloudCoverage, uCloudEdge, uCloudSpeed,
             uCloudTurbulence, uCloudOpacity, uStormDarken, uNightFactor, uDuskFactor
         }
