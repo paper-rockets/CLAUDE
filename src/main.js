@@ -490,9 +490,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     function showVisualToast(msg) {
         if (typeof flightModelManager !== 'undefined' && flightModelManager && flightModelManager.showToast) {
             flightModelManager.showToast(msg);
-        } else {
-            const toast = document.createElement('div');
-            toast.innerText = msg;
+            return;
+        }
+        let toast = document.getElementById('wl-visual-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'wl-visual-toast';
             toast.style.position = 'fixed';
             toast.style.bottom = '24px';
             toast.style.left = '50%';
@@ -505,161 +508,40 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             toast.style.fontSize = '13px';
             toast.style.zIndex = '99999';
             toast.style.pointerEvents = 'none';
+            toast.style.transition = 'opacity 0.3s ease';
             document.body.appendChild(toast);
-            setTimeout(() => { toast.remove(); }, 2200);
         }
+        toast.innerText = msg;
+        toast.style.opacity = '1';
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => {
+            if (toast) toast.style.opacity = '0';
+        }, 2200);
     }
 
-    const settingsManager = {
-        presetName: 'My Dusk Look 1',
-        loadPreset: 'Golden Hour Dusk (Default)',
-        saveSetting: (customName) => {
-            const name = (typeof customName === 'string' && customName.trim())
-                ? customName.trim()
-                : (settingsManager.presetName.trim() || `Look ${new Date().toLocaleTimeString()}`);
-
-            const currentGuiData = gui ? gui.save() : null;
-            const currentEnvConfigs = (typeof envConfigs !== 'undefined') ? JSON.parse(JSON.stringify(envConfigs)) : null;
-            const currentParams = {};
-            for (let k in params) {
-                if (typeof params[k] !== 'function') currentParams[k] = params[k];
-            }
-            const currentCloudParams = (typeof cloudParams !== 'undefined') ? JSON.parse(JSON.stringify(cloudParams)) : null;
-            const currentModelId = (typeof flightModelManager !== 'undefined' && flightModelManager)
-                ? (flightModelManager.getCurrentConfig()?.id || 'mitsubishi_b2m2')
-                : 'kiki';
-
-            const presetData = {
-                name: name,
-                timePhase: timePhase,
-                guiData: currentGuiData,
-                envConfigs: currentEnvConfigs,
-                params: currentParams,
-                cloudParams: currentCloudParams,
-                modelId: currentModelId,
-                timestamp: Date.now()
-            };
-
-            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-            saved[name] = presetData;
-            localStorage.setItem('wl_custom_presets', JSON.stringify(saved));
-            settingsManager.loadPreset = name;
-            updateAllPresetDropdowns(name);
-            showVisualToast(`Saved Preset: ${name}`);
-        },
-        loadSetting: (presetName) => {
-            const target = presetName || settingsManager.loadPreset;
-            if (!target) return;
-
-            if (DEFAULT_PRESETS[target]) {
-                const def = DEFAULT_PRESETS[target];
-                if (typeof window.setTimePhase === 'function') {
-                    window.setTimePhase(def.timePhase);
-                } else {
-                    timePhase = def.timePhase;
-                }
-                if (def.envConfigs && Array.isArray(def.envConfigs) && typeof envConfigs !== 'undefined') {
-                    for (let i = 0; i < def.envConfigs.length; i++) {
-                        if (envConfigs[i]) Object.assign(envConfigs[i], def.envConfigs[i]);
-                    }
-                }
-                if (def.params) {
-                    Object.assign(params, def.params);
-                }
-                if (gui) {
-                    gui.controllersRecursive().forEach(c => c.updateDisplay());
-                }
-                showVisualToast(`Loaded: ${target}`);
-                return;
-            }
-
-            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-            if (saved[target]) {
-                const p = saved[target];
-                if (p.envConfigs && Array.isArray(p.envConfigs) && typeof envConfigs !== 'undefined') {
-                    for (let i = 0; i < p.envConfigs.length; i++) {
-                        if (envConfigs[i]) Object.assign(envConfigs[i], p.envConfigs[i]);
-                    }
-                }
-                if (p.timePhase !== undefined) {
-                    if (typeof window.setTimePhase === 'function') {
-                        window.setTimePhase(p.timePhase);
-                    } else {
-                        timePhase = p.timePhase;
-                    }
-                }
-                if (p.params) {
-                    Object.assign(params, p.params);
-                }
-                if (p.cloudParams && typeof cloudParams !== 'undefined') {
-                    Object.assign(cloudParams, p.cloudParams);
-                }
-                if (p.modelId && typeof flightModelManager !== 'undefined' && flightModelManager) {
-                    flightModelManager.setModelById(p.modelId);
-                }
-                if (p.guiData && gui) {
-                    gui.load(p.guiData);
-                }
-                if (gui) {
-                    gui.controllersRecursive().forEach(c => c.updateDisplay());
-                }
-                showVisualToast(`Loaded Preset: ${target}`);
-            }
-        },
-        deleteSetting: () => {
-            const target = settingsManager.loadPreset;
-            if (DEFAULT_PRESETS[target]) {
-                showVisualToast(`Cannot delete default preset: ${target}`);
-                return;
-            }
-            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-            if (saved[target]) {
-                delete saved[target];
-                localStorage.setItem('wl_custom_presets', JSON.stringify(saved));
-                settingsManager.loadPreset = 'Golden Hour Dusk (Default)';
-                updateAllPresetDropdowns('Golden Hour Dusk (Default)');
-                showVisualToast(`Deleted Preset: ${target}`);
-            }
-        },
-        reset: () => {
-            settingsManager.loadSetting('Golden Hour Dusk (Default)');
-        },
-        exportPresets: () => {
-            const saved = localStorage.getItem('wl_custom_presets') || '{}';
-            navigator.clipboard.writeText(saved).then(() => {
-                showVisualToast('Copied Presets JSON to clipboard');
-            }).catch(() => {
-                prompt('Copy Presets JSON:', saved);
-            });
-        },
-        importPresets: () => {
-            const input = prompt('Paste Presets JSON:');
-            if (!input) return;
-            try {
-                const parsed = JSON.parse(input);
-                const current = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-                Object.assign(current, parsed);
-                localStorage.setItem('wl_custom_presets', JSON.stringify(current));
-                updateAllPresetDropdowns();
-                showVisualToast('Imported Presets successfully');
-            } catch(e) {
-                alert('Invalid JSON: ' + e.message);
-            }
-        }
-    };
-
+    let isUpdatingPresetDropdown = false;
     function updateAllPresetDropdowns(selectedName) {
-        const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-        const defaultKeys = Object.keys(DEFAULT_PRESETS);
-        const customKeys = Object.keys(saved);
-        const options = [...defaultKeys, ...customKeys];
+        if (isUpdatingPresetDropdown) return;
+        isUpdatingPresetDropdown = true;
+        try {
+            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+            const defaultKeys = Object.keys(DEFAULT_PRESETS);
+            const customKeys = Object.keys(saved);
+            const options = [...defaultKeys, ...customKeys];
 
-        presetDropdownControllers.forEach(ctrl => {
-            if (ctrl && typeof ctrl.options === 'function') {
-                ctrl.options(options);
-                if (selectedName) ctrl.setValue(selectedName);
-            }
-        });
+            presetDropdownControllers.forEach(ctrl => {
+                if (ctrl && typeof ctrl.options === 'function') {
+                    ctrl.options(options);
+                    if (selectedName) {
+                        ctrl.setValue(selectedName);
+                    }
+                }
+            });
+        } catch (err) {
+            console.warn('Error updating preset dropdown:', err);
+        } finally {
+            isUpdatingPresetDropdown = false;
+        }
     }
 
     const perfFolder = gui.addFolder('Performance');
@@ -699,8 +581,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         isBloomOn = v;
         bloomPass.enabled = isBloomOn;
     });
-    perfFolder.add(settingsManager, 'saveSetting').name('Save All Settings');
-    perfFolder.add(settingsManager, 'reset').name('Reset to Default');
+    perfFolder.add({
+        saveAll: () => settingsManager.saveSetting()
+    }, 'saveAll').name('Save All Settings');
+    perfFolder.add({
+        resetAll: () => settingsManager.reset()
+    }, 'resetAll').name('Reset to Default');
 
 
     // Actions for GUI
@@ -5768,18 +5654,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         presetsFolder.add({
             importJSON: () => settingsManager.importPresets()
         }, 'importJSON').name('Import Presets (Paste JSON)');
-
-        // Save & Load Presets Subfolder in Environment
-        const customPresetsFolder = envFolder.addFolder('Save & Load Presets');
-        customPresetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
-        customPresetsFolder.add(settingsManager, 'saveSetting').name('Save Current as Preset');
-        const envPresetDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', Object.keys(DEFAULT_PRESETS))
-            .name('Select Preset')
-            .onChange(val => settingsManager.loadSetting(val));
-        presetDropdownControllers.push(envPresetDropdown);
-        customPresetsFolder.add(settingsManager, 'loadSetting').name('Load Selected Preset');
-        customPresetsFolder.add(settingsManager, 'deleteSetting').name('Delete Selected');
-        customPresetsFolder.add(settingsManager, 'reset').name('Reset to Default Golden Dusk');
 
         updateAllPresetDropdowns('Golden Hour Dusk (Default)');
 
