@@ -50,6 +50,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     import { createTerrainMaterial } from './shaders/materials/TerrainNodeMaterial.js';
     import { createTreeMaterial } from './shaders/materials/TreeNodeMaterial.js';
     import { windSwayNode } from './shaders/materials/WindSwayNode.js';
+    import { FLIGHT_MODELS } from './config/FlightModelsConfig.js';
+    import { FlightModelManager } from './entities/FlightModelManager.js';
+    import { BiplaneEngineAudio } from './audio/BiplaneEngineAudio.js';
 
     // Wait for WebGPU Backend to initialize before doing ANY graph or material allocations
     await renderer.init();
@@ -329,6 +332,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     }
 
+    let flightModelDropdownController = null;
+    let soundMuteController = null;
+    let engineSoundController = null;
+    let flightFolder = null;
+    let audioFolder = null;
+
     const gui = new GUI();
     const params = {
         worldMode: 'Islands',
@@ -354,14 +363,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         wind: isWindOn,
         rain: isRainOn,
         fogPlane: false,
-        godRays: !LOW_GFX,
+        godRays: true,
         godRayIntensity: 0.65,
         godRayDensity: 0.50,
         godRayDecay: 0.927,
         lumMin: 0.45,
         lumMax: 0.97,
-        sunAltitude: 10000,
-        sunAzimuth: 15,
+        sunAltitude: 160,
+        sunAzimuth: 0,
         lockSunToPlayer: true,
         sunDistance: 20000,
         sunDiscScale: 1.8,
@@ -372,6 +381,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         showTerrain: true,
         showWater: true,
         showTrees: true,
+        showProceduralSky: true,
+        skyRenderMode: 'Gradient + Clouds',
+        enableProceduralClouds: true,
         enableSkydome: false,
         daySkydomeTexture: Math.random() > 0.5 ? '1' : '2',
         nightSkydomeTexture: '2', // Default to 2 because it has the transparency mask
@@ -399,6 +411,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         showGUI: false,
         exposure: 1.9,
         shadeMode: 'original',
+        rainSize: 2.0,
+        rainIntensity: 1.0,
+        rainWindX: 1.0,
+        rainWindY: 0.5,
+        biomeFogOffset: 0,
+        birdCount: 60,
+        birdScale: 0.8,
+        birdFlockRadius: 35,
+        birdFlockSpread: 12,
+        birdMaxSpeed: 45,
     };
 
     const toonShaderManager = new ToonShaderManager();
@@ -439,26 +461,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     };
 
-    const customPresetsFolder = gui.addFolder('💾 Save & Load Presets');
-    customPresetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
-    customPresetsFolder.add(settingsManager, 'saveSetting').name('Save Setting');
-    let loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', ['Default']).name('Select Preset');
-    customPresetsFolder.add(settingsManager, 'loadSetting').name('Load Selected');
-    customPresetsFolder.add(settingsManager, 'deleteSetting').name('Delete Selected');
-    customPresetsFolder.add(settingsManager, 'reset').name('Reset to Default');
-
-    function updatePresetDropdown() {
-        const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
-        const options = ['Default', ...Object.keys(saved)];
-        if (loadDropdown.options) {
-            loadDropdown = loadDropdown.options(options);
-        } else {
-            loadDropdown.destroy();
-            loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', options).name('Select Preset');
-        }
-    }
-    updatePresetDropdown();
-
     const perfFolder = gui.addFolder('Performance');
     perfFolder.add(params, 'quality', ['Regular', 'Low']).name('Quality').onChange(v => {
         localStorage.setItem('gfxQuality', v === 'Low' ? 'low' : 'regular');
@@ -467,9 +469,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     perfFolder.add(params, 'renderHD').name('Render HD').onChange(v => {
         isHD = v;
         renderer.setPixelRatio(isHD ? Math.min(window.devicePixelRatio, 2) : 0.5);
-    });
-    perfFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
-        renderer.toneMappingExposure = v;
     });
     perfFolder.add(params, 'terrainRes', ['256', '128', '64']).name('Terrain Res').onChange(v => {
         terrainRes = parseInt(v);
@@ -499,10 +498,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         isBloomOn = v;
         bloomPass.enabled = isBloomOn;
     });
-    perfFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
-    perfFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
-    perfFolder.add(params, 'highlightKnee', 0.2, 1.0, 0.01).name('Highlight Rolloff').onChange(v => { uRolloffKnee.value = v; });
-    perfFolder.add(params, 'horizonGlow', 0.0, 1.5, 0.05).name('Horizon Glow').onChange(v => { if (typeof skyUniforms !== 'undefined' && skyUniforms.uHorizonGlow) skyUniforms.uHorizonGlow.value = v; });
+    perfFolder.add(settingsManager, 'saveSetting').name('Save All Settings');
+    perfFolder.add(settingsManager, 'reset').name('Reset to Default');
 
 
     // Actions for GUI
@@ -535,54 +532,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (playerPhysics) playerPhysics.maxAltitude = v;
     });
 
-    // Add Presets folder
-    const presetFolder = gui.addFolder('🌟 Environment Presets');
-    presetFolder.add({ clearDesertDay: () => {
-        // Teleport to Sand Dunes
-        teleportToBiome('Desert Dunes');
-        
-        // No fog at all
-        params.fogPlane = false;
-        if (typeof window.fogGroup !== 'undefined') window.fogGroup.visible = false;
-        
-        // Clear blue sky (day)
-        params.timeOfDay = 'day';
-        if (typeof window.setTimePhase === 'function') window.setTimePhase(0);
-        else timePhase = 0;
-        
-        // Very little cloud
-        if (typeof cloudParams !== 'undefined') {
-            cloudParams.density = 0.1;
-            
-            // Turn off volumetric raymarched sky clouds for clear sky
-            params.showVolumetricClouds = false;
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
-                toonCloudMat.uniforms.uEnableClouds.value = 0.0;
-            }
-            
-            // Apply density to clouds
-            if (typeof instClouds !== 'undefined') {
-                instClouds.count = Math.max(1, Math.floor(params.cloudCountRegular * cloudParams.density));
-                if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
-            }
-            if (typeof instHighClouds !== 'undefined') {
-                instHighClouds.count = Math.max(1, Math.floor(params.cloudCountHigh * cloudParams.density));
-                if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
-            }
-            if (typeof instWispyClouds !== 'undefined') {
-                instWispyClouds.count = Math.max(1, Math.floor(params.cloudCountWispy * cloudParams.density));
-                if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
-            }
-            if (typeof instMegaClouds !== 'undefined') {
-                instMegaClouds.count = Math.max(1, Math.floor(params.cloudCountMega * cloudParams.density));
-                if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
-            }
-        }
-        
-        gui.controllersRecursive().forEach(c => c.updateDisplay());
-    }}, 'clearDesertDay').name('🏜️ Clear Desert Day');
-
-    // Add Editor folder (Terrain Editor & Edit Crystals)
+    // Add Editor folder (Terrain Editor, Edit Crystals, Tree Editor, Custom Models)
     const editorFolder = gui.addFolder('Editor');
     editorFolder.add({ openTerrainEditor: () => {
         if (window.toggleTerrainEditor) {
@@ -601,7 +551,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             window.treeBillboardEditor.togglePanel(true);
         }
     }}, 'openTreeBillboardEditor').name('🌲 Tree & Billboard Editor');
-    editorFolder.add(params, 'lockSunToPlayer').name('Lock Sun To Player'); 
 
     editorFolder.add({ loadCustomModel: () => {
         const input = document.createElement('input');
@@ -675,123 +624,83 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (window.deleteSelectedModel) window.deleteSelectedModel();
     }}, 'deleteModel').name('🗑️ Delete Selected');
 
-    // 🌊 Open Ocean folder in lil-gui
-    editorFolder.add({ openOceanFolder: () => {
-        if (animeWaterGUI && animeWaterGUI.gui) {
-            const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
-            if (guiEl) guiEl.style.display = '';
-            animeWaterGUI.gui.open();
-            animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }}, 'openOceanFolder').name('🌊 Ocean Editor (O)');
-
-    // 🎨 Live Biome Terrain Color & Shimmer Editor - Moved below Water Editor
-    const colorEditorFolder = editorFolder.addFolder('🎨 Terrain Color & Shimmer');
-    const triggerTerrainColorUpdate = () => {
-        lastTerrainGridX = -9999;
-        lastTerrainGridZ = -9999;
+    // Flight Models Folder
+    flightFolder = gui.addFolder('Flight Models');
+    const flightModelOptions = {};
+    FLIGHT_MODELS.forEach(m => {
+        flightModelOptions[m.name] = m.id;
+    });
+    const flightParams = {
+        modelId: 'kiki',
+        animSpeed: 1.0,
+        nextModel: () => { if (typeof flightModelManager !== 'undefined' && flightModelManager) flightModelManager.nextModel(); },
+        prevModel: () => { if (typeof flightModelManager !== 'undefined' && flightModelManager) flightModelManager.prevModel(); }
     };
-    const colorParams = {
-        npSnow: '#' + northPoleColors.snowDune.getHexString(),
-        npShadow: '#' + northPoleColors.snowShadow.getHexString(),
-        npPeak: '#' + northPoleColors.icePeak.getHexString(),
-        desertSlope: '#' + desertColors.duneSlope.getHexString(),
-        desertShadow: '#' + desertColors.valleyShadow.getHexString(),
-        shimmer: 1.0
-    };
-    colorEditorFolder.addColor(colorParams, 'npSnow').name('❄️ Snow Color').onChange(hex => {
-        northPoleColors.snowDune.set(hex);
-        triggerTerrainColorUpdate();
-    });
-    colorEditorFolder.addColor(colorParams, 'npShadow').name('❄️ Snow Shadow').onChange(hex => {
-        northPoleColors.snowShadow.set(hex);
-        triggerTerrainColorUpdate();
-    });
-    colorEditorFolder.addColor(colorParams, 'npPeak').name('❄️ Peak Color').onChange(hex => {
-        northPoleColors.icePeak.set(hex);
-        triggerTerrainColorUpdate();
-    });
-    colorEditorFolder.addColor(colorParams, 'desertSlope').name('🏜️ Sand Color').onChange(hex => {
-        desertColors.duneSlope.set(hex);
-        triggerTerrainColorUpdate();
-    });
-    colorEditorFolder.addColor(colorParams, 'desertShadow').name('🏜️ Sand Shadow').onChange(hex => {
-        desertColors.valleyShadow.set(hex);
-        triggerTerrainColorUpdate();
-    });
-    colorEditorFolder.add(colorParams, 'shimmer', 0, 3, 0.1).name('✨ Shimmer Sparkle').onChange(val => {
-        terrainUniforms.uShimmerMult.value = val;
-    });
-
-    // Add Game folder
-    const gameFolder = gui.addFolder('Game');
-    gameFolder.add(guiActions, 'switchModel').name('Switch Character');
-    gameFolder.add(guiActions, 'toggleMusic').name('Toggle Music');
-    gameFolder.add(guiActions, 'nextTrack').name('Next Track');
-    gameFolder.add(params, 'summerFilter').name('Summer Filter').onChange(v => { document.getElementById('summer-toggle').click(); });
-    gameFolder.add(params, 'modelVisible').name('Model Visible').onChange(v => { document.getElementById('invis-toggle').click(); });
-    // Fullscreen removed from Game folder - now on the top bar!
-
-    const envFolder = gui.addFolder('Environment');
-    envFolder.add(params, 'sceneFog').name('Global Fog').onChange(v => {
-        if (!v && typeof scene !== 'undefined' && scene.fog) {
-            scene.fog.near = 100000;
-            scene.fog.far = 200000;
-        }
-    });
-    envFolder.add(params, 'fogIntensity', 0.1, 5.0, 0.1).name('Fog Intensity');
-    envFolder.add(params, 'wind').name('Wind').onChange(v => { if(isWindOn !== v) document.getElementById('wind-toggle').click(); });
-    const rainFolder = envFolder.addFolder('Rain Settings');
-    params.rainSize = 2.0;
-    params.rainIntensity = 1.0;
-    params.rainWindX = 1.0;
-    params.rainWindY = 0.5;
-    rainFolder.add(params, 'rain').name('Enable Rain').onChange(v => { isRainOn = v; });
-    rainFolder.add(params, 'rainSize', 0.5, 10.0).name('Drop Size');
-    rainFolder.add(params, 'rainIntensity', 0.1, 5.0).name('Intensity');
-    rainFolder.add(params, 'rainWindX', -5.0, 5.0).name('Wind X');
-    rainFolder.add(params, 'rainWindY', -5.0, 5.0).name('Wind Z');
-    window.biomeFogSettings = window.biomeFogSettings || {};
-    const fogFolder = envFolder.addFolder('Ground Fog');
-    fogFolder.add(params, 'fogPlane').name('Enable Fog').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
-    params.biomeFogOffset = 0;
-    const fogOffsetCtrl = fogFolder.add(params, 'biomeFogOffset', -50, 50).name('Biome Fog Offset').onChange(v => {
-        if (typeof playerGrp !== 'undefined' && playerGrp.position) {
-            const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            const bName = b ? b.name : 'Unknown';
-            window.biomeFogSettings[bName] = v;
-        }
-    });
-    // Add an interval to update the slider when biome changes
-    setInterval(() => {
-        if (typeof playerGrp !== 'undefined' && playerGrp.position && !fogOffsetCtrl.__onChangeBlocked) {
-            const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            const bName = b ? b.name : 'Unknown';
-            const currentOffset = window.biomeFogSettings[bName] || 0;
-            if (params.biomeFogOffset !== currentOffset) {
-                params.biomeFogOffset = currentOffset;
-                fogOffsetCtrl.__onChangeBlocked = true; // Prevent triggering onChange and writing back
-                fogOffsetCtrl.updateDisplay();
-                fogOffsetCtrl.__onChangeBlocked = false;
-            }
-            fogFolder.title('Ground Fog (' + bName + ')');
-        }
-    }, 500);
-
-    envFolder.add({ openGroundFogEditor: () => {
-        if (window.groundFogEditor) window.groundFogEditor.toggle();
-    }}, 'openGroundFogEditor').name('🌫️ Ground Fog Editor');
-
-    envFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
-
-    envFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
-        .name('🎨 Shade Mode')
-        .onChange(v => {
-            toonShaderManager.apply(scene, v);
-            gui.controllersRecursive().forEach(c => { if (c.property === 'shadeMode') c.updateDisplay(); });
+    flightModelDropdownController = flightFolder.add(flightParams, 'modelId', flightModelOptions)
+        .name('Active Model')
+        .onChange(id => {
+            if (typeof flightModelManager !== 'undefined' && flightModelManager) flightModelManager.setModelById(id);
         });
+    flightFolder.add(flightParams, 'nextModel').name('Next Model');
+    flightFolder.add(flightParams, 'prevModel').name('Previous Model');
+    flightFolder.add(params, 'modelVisible').name('Model Visible').onChange(v => {
+        isModelVisible = v;
+        updateModelVisibility();
+    });
+    flightFolder.add(flightParams, 'animSpeed', 0.1, 3.0, 0.1).name('Anim Speed').onChange(v => {
+        if (typeof flightModelManager !== 'undefined' && flightModelManager) flightModelManager.setAnimSpeed(v);
+    });
+
+    // Audio & Sound Folder
+    audioFolder = gui.addFolder('Audio & Sound');
+    const audioParams = {
+        soundEnabled: true,
+        engineSound: true,
+        engineVolume: 0.038,
+        music: false,
+        wind: isWindOn,
+        nextTrack: () => document.getElementById('track-toggle')?.click(),
+        toggleMasterSound: () => { if (typeof setSoundMuted === 'function') setSoundMuted(!isSoundMuted); },
+        toggleEngineSound: () => { if (typeof setEngineSoundEnabled === 'function') setEngineSoundEnabled(!isEngineSoundOn); }
+    };
+    soundMuteController = audioFolder.add(audioParams, 'soundEnabled')
+        .name('Sound Enabled')
+        .onChange(v => { if (typeof setSoundMuted === 'function') setSoundMuted(!v); });
+    engineSoundController = audioFolder.add(audioParams, 'engineSound')
+        .name('Biplane Engine Sound')
+        .onChange(v => { if (typeof setEngineSoundEnabled === 'function') setEngineSoundEnabled(v); });
+    audioFolder.add(audioParams, 'engineVolume', 0.0, 0.2, 0.005)
+        .name('Engine Volume')
+        .onChange(v => {
+            if (typeof biplaneAudio !== 'undefined' && biplaneAudio) biplaneAudio.setVolume(v);
+        });
+    audioFolder.add(audioParams, 'music').name('Music').onChange(v => {
+        const btn = document.getElementById('music-toggle');
+        if (btn) btn.click();
+    });
+    audioFolder.add(audioParams, 'nextTrack').name('Next Track');
+    audioFolder.add(params, 'wind').name('Wind Sound').onChange(v => {
+        isWindOn = v;
+    });
+    audioFolder.add(audioParams, 'toggleMasterSound').name('Toggle Master Sound');
+    audioFolder.add(audioParams, 'toggleEngineSound').name('Toggle Engine Sound');
 
     const debugFolder = gui.addFolder('🔧 Debug Render');
+    debugFolder.add(params, 'showProceduralSky').name('Procedural Sky').onChange(v => {
+        if (typeof window.setSkyRenderMode === 'function') {
+            if (!v) {
+                window.setSkyRenderMode('Flat Solid');
+            } else {
+                window.setSkyRenderMode(params.enableProceduralClouds ? 'Gradient + Clouds' : 'Gradient Regular');
+            }
+        }
+    });
+    debugFolder.add(params, 'skyRenderMode', ['Gradient + Clouds', 'Gradient Regular', 'Flat Solid'])
+        .name('Sky Mode')
+        .onChange(v => {
+            if (typeof window.setSkyRenderMode === 'function') window.setSkyRenderMode(v);
+        });
+
     debugFolder.add(params, 'showTerrain').name('Terrain').onChange(v => { terrain.visible = v; });
 
     debugFolder.add(params, 'showWater').name('🌊 Ocean Visible').onChange(v => {
@@ -2178,17 +2087,45 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Why flat is the default: with postProcessing.outputColorTransform = false there is no
     // tonemapping to roll off highlights, so the dome horizon gradient exceeds 1.0 and hard-clips
     // to a full-width white band across the screen. Solid background has no such gradient.
-    let skyMode = localStorage.getItem("wl_skyMode") || "procedural";
-    function applySkyMode(mode) {
-        skyMode = (mode === "procedural") ? "procedural" : "flat";
-        localStorage.setItem("wl_skyMode", skyMode);
-        const isFlat = skyMode === "flat";
-        proceduralSkyMesh.visible = !isFlat;
-        // Seeded to the Day colour; the per-frame env lerp converges it to the active time phase.
-        scene.background = isFlat ? new THREE.Color(0x8cbce6) : null;
+    let skyRenderMode = localStorage.getItem("wl_skyRenderMode") || "Gradient + Clouds";
+    function setSkyRenderMode(mode) {
+        skyRenderMode = mode;
+        localStorage.setItem("wl_skyRenderMode", skyRenderMode);
+        params.skyRenderMode = mode;
+
+        if (mode === "Gradient + Clouds") {
+            proceduralSkyMesh.visible = true;
+            params.showProceduralSky = true;
+            params.enableProceduralClouds = true;
+            if (skyUniforms.uEnableProceduralClouds) skyUniforms.uEnableProceduralClouds.value = 1.0;
+            if (skyUniforms.uGradientSkyEnabled) skyUniforms.uGradientSkyEnabled.value = 1.0;
+            scene.background = null;
+        } else if (mode === "Gradient Regular") {
+            proceduralSkyMesh.visible = true;
+            params.showProceduralSky = true;
+            params.enableProceduralClouds = false;
+            if (skyUniforms.uEnableProceduralClouds) skyUniforms.uEnableProceduralClouds.value = 0.0;
+            if (skyUniforms.uGradientSkyEnabled) skyUniforms.uGradientSkyEnabled.value = 1.0;
+            scene.background = null;
+        } else if (mode === "Flat Solid") {
+            proceduralSkyMesh.visible = false;
+            params.showProceduralSky = false;
+            params.enableProceduralClouds = false;
+            const curTarget = (typeof envConfigs !== 'undefined' && envConfigs[timePhase]) ? envConfigs[timePhase] : { bg: 0x8cbce6 };
+            scene.background = new THREE.Color(curTarget.bg);
+        }
+
+        if (typeof gui !== 'undefined' && gui) {
+            gui.controllersRecursive().forEach(c => {
+                if (c.property === 'skyRenderMode' || c.property === 'showProceduralSky' || c.property === 'enableProceduralClouds') {
+                    c.updateDisplay();
+                }
+            });
+        }
     }
-    applySkyMode(skyMode);
-    window.applySkyMode = applySkyMode;
+    setSkyRenderMode(skyRenderMode);
+    window.setSkyRenderMode = setSkyRenderMode;
+    window.applySkyMode = (m) => setSkyRenderMode(m === "flat" ? "Flat Solid" : "Gradient + Clouds");
     let currentWeather = 'clear';
 
     // --- REMOVED: old toon cloud dome + cubemap skybox ---
@@ -2706,7 +2643,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const billboardMaxDist = 800;
 
             if (params.showTrees) {
-                const playerInJungle = getBiomeAt(focusX, focusZ).name.toLowerCase().includes('jungle');
+                const playerBiome = getBiomeAt(focusX, focusZ);
+                const playerInJungle = playerBiome && playerBiome.name ? playerBiome.name.toLowerCase().includes('jungle') : false;
                 let treeSpawnAttemptsThisFrame = 0;
                 const MAX_TREE_SPAWN_ATTEMPTS = 60;
 
@@ -2735,7 +2673,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                         }
 
                         // Also evict any pine that snuck into a jungle tile (biome border cleanup)
-                        const treeInJungle = dummy.position.y > 0 && getBiomeAt(dummy.position.x, dummy.position.z).name.toLowerCase().includes('jungle');
+                        const treeBiome = getBiomeAt(dummy.position.x, dummy.position.z);
+                        const treeInJungle = dummy.position.y > 0 && treeBiome && treeBiome.name && treeBiome.name.toLowerCase().includes('jungle');
                         if (playerInJungle || treeInJungle || Math.abs(dummy.position.x - focusX) > dense3dRadius || Math.abs(dummy.position.z - focusZ) > dense3dRadius || dummy.position.y < -500) {
                             if (dummy.position.y > 0) {
                                 treeGrid.delete(getTreeCell(dummy.position.x, dummy.position.z));
@@ -2759,7 +2698,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
                                     h = getWorldHeight(nx, nz);
                                     pathVal = getPathStrength(nx, nz);
-                                    bName = getBiomeAt(nx, nz).name;
+                                    const bObj = getBiomeAt(nx, nz);
+                                    bName = bObj && bObj.name ? bObj.name : '';
 
                                     let isForest = true;
                                     let biomeMatch = !bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
@@ -2834,7 +2774,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                                     nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     h = getWorldHeight(nx, nz);
                                     pathVal = getPathStrength(nx, nz);
-                                    bName = getBiomeAt(nx, nz).name;
+                                    const bObj = getBiomeAt(nx, nz);
+                                    bName = bObj && bObj.name ? bObj.name : '';
 
                                     let isForest = true;
                                     let biomeMatch = bName.includes('Jungle');
@@ -2937,7 +2878,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                                     nz = focusZ + (Math.random() - 0.5) * dense3dRadius * 2.0;
                                     h = getWorldHeight(nx, nz);
                                     pathVal = getPathStrength(nx, nz);
-                                    bName = getBiomeAt(nx, nz).name;
+                                    const bObj = getBiomeAt(nx, nz);
+                                    bName = bObj && bObj.name ? bObj.name : '';
 
                                     let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
                                     // Water edge elevation range: strictly near water level (6.1m to 12.0m)
@@ -3037,24 +2979,115 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     kikiRightLight.position.set(35, 15, 10);
     playerVisuals.add(kikiRightLight);
 
-    // Character Models State
-    let currentCharacter = 'kiki';
-    let kikiModel = null;
-    let whaleModel = null;
-    let whaleMixer = null;
-    let isModelVisible = true;
+    // Load GLTF Model Loaders
+    const gltfLoader = new GLTFLoader();
+    
+    // Initialize DRACOLoader for compressed GLB meshes
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    gltfLoader.setDRACOLoader(dracoLoader);
+    
+    // Initialize KTX2Loader for compressed textures
+    const ktx2Loader = new KTX2Loader()
+        .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/libs/basis/')
+        .detectSupport(renderer);
+    gltfLoader.setKTX2Loader(ktx2Loader);
+    
+    // Initialize MeshoptDecoder for compressed geometries
+    gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 
-    const CHAR_CYCLE = [
-        { id: 'kiki', nextLabel: 'Switch to Whale' },
-        { id: 'whale', nextLabel: 'Switch to Kiki' }
-    ];
+    // Flight Model Manager initialization
+    const flightModelManager = new FlightModelManager(playerVisuals, gltfLoader, resolveAssetUrl);
+    window.flightModelManager = flightModelManager;
+
+    let isModelVisible = true;
+    let isSoundMuted = false;
+    let isEngineSoundOn = true;
+
+    // Procedural Biplane Engine Audio
+    const biplaneAudio = new BiplaneEngineAudio(null);
+    window.biplaneAudio = biplaneAudio;
+
+    function onFlightModelChanged(cfg) {
+        if (!cfg) return;
+        const isPlane = !!cfg.isPlane;
+        if (biplaneAudio) {
+            if (isPlane && isEngineSoundOn && !isSoundMuted) {
+                biplaneAudio.setActive(true);
+            } else {
+                biplaneAudio.setActive(false);
+            }
+        }
+        const charBtn = document.getElementById('char-toggle');
+        if (charBtn) {
+            charBtn.innerText = `MODEL: ${cfg.name.toUpperCase()}`;
+        }
+        if (typeof flightModelDropdownController !== 'undefined' && flightModelDropdownController) {
+            flightModelDropdownController.setValue(cfg.id);
+        }
+    }
+
+    window.addEventListener('flight-model-changed', (e) => {
+        if (e.detail && e.detail.config) {
+            onFlightModelChanged(e.detail.config);
+        }
+    });
+
+    // Sound control functions
+    function setSoundMuted(muted) {
+        isSoundMuted = !!muted;
+        if (biplaneAudio) {
+            biplaneAudio.setMuted(isSoundMuted);
+        }
+        if (windGain && audioCtx) {
+            if (isSoundMuted) {
+                windGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+            }
+        }
+        if (musicGain && audioCtx) {
+            musicGain.gain.setTargetAtTime(isSoundMuted ? 0 : 0.5, audioCtx.currentTime, 0.05);
+        }
+        const soundBtn = document.getElementById('sound-toggle-btn');
+        if (soundBtn) {
+            soundBtn.innerText = isSoundMuted ? 'SOUND: OFF' : 'SOUND: ON';
+        }
+        if (typeof soundMuteController !== 'undefined' && soundMuteController) {
+            soundMuteController.setValue(!isSoundMuted);
+        }
+    }
+    window.setSoundMuted = setSoundMuted;
+
+    function setEngineSoundEnabled(enabled) {
+        isEngineSoundOn = !!enabled;
+        if (biplaneAudio) {
+            biplaneAudio.setEnabled(isEngineSoundOn);
+            const curCfg = flightModelManager.getCurrentConfig();
+            if (curCfg && curCfg.isPlane && isEngineSoundOn && !isSoundMuted) {
+                biplaneAudio.setActive(true);
+            } else {
+                biplaneAudio.setActive(false);
+            }
+        }
+        const engineBtn = document.getElementById('engine-sound-btn');
+        if (engineBtn) {
+            engineBtn.innerText = isEngineSoundOn ? 'ENGINE: ON' : 'ENGINE: OFF';
+        }
+        const engineToggleBtn = document.getElementById('engine-sound-toggle');
+        if (engineToggleBtn) {
+            engineToggleBtn.innerText = isEngineSoundOn ? 'Engine Sound: ON' : 'Engine Sound: OFF';
+        }
+        if (typeof engineSoundController !== 'undefined' && engineSoundController) {
+            engineSoundController.setValue(isEngineSoundOn);
+        }
+    }
+    window.setEngineSoundEnabled = setEngineSoundEnabled;
 
     function updateModelVisibility() {
-        if (kikiModel) kikiModel.visible = isModelVisible && (currentCharacter === 'kiki');
-        if (whaleModel) whaleModel.visible = isModelVisible && (currentCharacter === 'whale');
-
+        if (flightModelManager) {
+            flightModelManager.setVisible(isModelVisible);
+        }
         const btn = document.getElementById('invis-toggle');
-        if (btn) btn.innerText = isModelVisible ? '👁 Model: VISIBLE' : '👁 Model: INVISIBLE';
+        if (btn) btn.innerText = isModelVisible ? 'Model: VISIBLE' : 'Model: INVISIBLE';
     }
 
     document.getElementById('invis-toggle')?.addEventListener('click', () => {
@@ -3063,31 +3096,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (typeof params !== 'undefined') params.modelVisible = isModelVisible;
     });
 
-    document.getElementById('char-toggle').addEventListener('click', () => {
-        const idx = CHAR_CYCLE.findIndex(c => c.id === currentCharacter);
-        const nextIdx = (idx + 1) % CHAR_CYCLE.length;
-        currentCharacter = CHAR_CYCLE[nextIdx].id;
-        document.getElementById('char-toggle').innerText = CHAR_CYCLE[nextIdx].nextLabel;
-        updateModelVisibility();
+    document.getElementById('char-toggle')?.addEventListener('click', () => {
+        if (flightModelManager) {
+            flightModelManager.nextModel();
+        }
     });
 
+    document.getElementById('sound-toggle-btn')?.addEventListener('click', () => {
+        setSoundMuted(!isSoundMuted);
+    });
 
-    // Load Kiki GLTF Model
-    const gltfLoader = new GLTFLoader();
-    
-    // Initialize DRACOLoader for compressed GLB meshes
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-    gltfLoader.setDRACOLoader(dracoLoader);
-    
-    // Initialize KTX2Loader for compressed textures (like the Whale model)
-    const ktx2Loader = new KTX2Loader()
-        .setTranscoderPath('https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/libs/basis/')
-        .detectSupport(renderer);
-    gltfLoader.setKTX2Loader(ktx2Loader);
-    
-    // Initialize MeshoptDecoder for compressed geometries (like the Whale model)
-    gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+    document.getElementById('engine-sound-btn')?.addEventListener('click', () => {
+        setEngineSoundEnabled(!isEngineSoundOn);
+    });
+
+    document.getElementById('engine-sound-toggle')?.addEventListener('click', () => {
+        setEngineSoundEnabled(!isEngineSoundOn);
+    });
 
     window.updateCustomModelTransform = function(model) {
         if (!model) return;
@@ -3617,74 +3642,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
 
 
-    gltfLoader.load(
-        resolveAssetUrl('kiki-lowpoly.glb'),
-        (gltf) => {
-            kikiModel = gltf.scene;
-            const box = new THREE.Box3().setFromObject(kikiModel);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const targetScale = maxDim > 0 ? (2.0 / maxDim) : 1.0;
-            kikiModel.scale.set(targetScale, targetScale, targetScale);
-            
-            kikiModel.position.x = -center.x * targetScale;
-            kikiModel.position.y = -center.y * targetScale;
-            kikiModel.position.z = -center.z * targetScale;
-            
-            kikiModel.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            kikiModel.rotation.y = Math.PI;
+    // Load Initial Flight Model
+    flightModelManager.loadModelByIndex(0, true).then(() => {
+        if (typeof proxyMesh !== 'undefined' && proxyMesh) {
             proxyMesh.visible = false;
-            kikiModel.visible = (currentCharacter === 'kiki');
-            playerVisuals.add(kikiModel);
         }
-    );
-
-    // Load Princess on a Whale GLTF Model
-    gltfLoader.load(
-        resolveAssetUrl('Princess.glb'),
-        (gltf) => {
-            whaleModel = gltf.scene;
-            const box = new THREE.Box3().setFromObject(whaleModel);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const targetScale = maxDim > 0 ? (6.0 / maxDim) : 1.0;
-            whaleModel.scale.set(targetScale, targetScale, targetScale);
-            
-            whaleModel.position.x = -center.x * targetScale;
-            whaleModel.position.y = -center.y * targetScale;
-            whaleModel.position.z = -center.z * targetScale;
-            
-            whaleModel.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            whaleModel.rotation.y = Math.PI;
-            whaleModel.visible = (currentCharacter === 'whale');
-            playerVisuals.add(whaleModel);
-            
-            if (gltf.animations && gltf.animations.length > 0) {
-                whaleMixer = new THREE.AnimationMixer(whaleModel);
-                whaleMixer.clipAction(gltf.animations[0]).play();
-            }
-        },
-        undefined,
-        (err) => console.warn("Could not load Princess.glb:", err)
-    );
+    }).catch(err => {
+        console.warn("Failed to load initial flight model:", err);
+    });
 
     
 
@@ -3726,6 +3691,24 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if(e.key.toLowerCase() === 'v') {
             isModelVisible = !isModelVisible;
             updateModelVisibility();
+        }
+        if(e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            if(e.key.toLowerCase() === 'c') {
+                if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+                    if (e.shiftKey) flightModelManager.prevModel();
+                    else flightModelManager.nextModel();
+                }
+            }
+            if(e.key.toLowerCase() === 'n') {
+                if (typeof setEngineSoundEnabled === 'function') {
+                    setEngineSoundEnabled(!isEngineSoundOn);
+                }
+            }
+            if(e.key.toLowerCase() === 'm') {
+                if (typeof setSoundMuted === 'function') {
+                    setSoundMuted(!isSoundMuted);
+                }
+            }
         }
     });
     window.addEventListener('keyup', e => {
@@ -3978,15 +3961,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const tempVecMoonOff = new THREE.Vector3();
     const tempVecToLight = new THREE.Vector3();
     const tempColorTarget = new THREE.Color();
-    let timePhase = parseInt(localStorage.getItem('wl_timePhase')) || 0; // 0: Day, 1: Dusk, 2: Deep Twilight
+    let timePhase = (localStorage.getItem('wl_timePhase') !== null) ? parseInt(localStorage.getItem('wl_timePhase')) : 1; // Default to 1: Dusk
 
     let envConfigs = [
-        {name: 'Day', bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.2, dirI: 2.4, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
-        {name: 'Dusk', bg: 0x2a5090, fog: 0xff8c66, amb: 0xffdab9, dir: 0xff9933, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 400, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk — deep blue zenith, warm orange horizon+fog
-        {name: 'Twilight', bg: 0x0f1d3a, fog: 0x16284d, amb: 0x556688, dir: 0x88bbff, ambI: 0.8, dirI: 1.8, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x66aaff, cloudCol: 0x223355}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
+        {name: 'Day', bg: 0x4a90d9, mid: 0x7ab4e6, fog: 0xc8dce8, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.2, dirI: 2.4, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
+        {name: 'Dusk', bg: 0x2a5090, mid: 0xc85078, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xfffaec}, // Dusk — deep blue zenith, magenta/peach mid, warm orange horizon+fog
+        {name: 'Twilight', bg: 0x040816, mid: 0x0f1d3a, fog: 0x16284d, amb: 0x556688, dir: 0x88bbff, ambI: 0.8, dirI: 1.8, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x66aaff, cloudCol: 0x223355}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
     ];
-    let currentSunY = envConfigs[timePhase] ? envConfigs[timePhase].sunY : 10000;
-    let currentMoonY = envConfigs[timePhase] ? envConfigs[timePhase].moonY : -8000;
+    let currentSunY = envConfigs[timePhase] ? envConfigs[timePhase].sunY : 160;
+    let currentMoonY = envConfigs[timePhase] ? envConfigs[timePhase].moonY : 200;
     let currentFps = 60;
 
     let lastFpsTime = performance.now();
@@ -4094,6 +4077,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         ambientLight.color.lerp(tempColorTarget.setHex(target.amb), decayEnv);
         ambientLight.intensity += (target.ambI - ambientLight.intensity) * decayEnv;
         dirLight.color.lerp(tempColorTarget.setHex(target.dir), decayEnv);
+        dirLight.intensity += (target.dirI - dirLight.intensity) * decayEnv;
         // Hide old star field — procedural sky handles stars now
         starMaterial.opacity = 0;
         starField.visible = false;
@@ -4107,19 +4091,42 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         // Procedural Sky — per-biome lerp + time of day factors
         if (skyUniforms && typeof playerGrp !== 'undefined') {
-            const skyBiomeName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+            const currentB = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            const skyBiomeName = currentB ? currentB.name : '🌲 Ghibli Land';
             const biomeTarget = BIOME_SKY_CONFIGS[skyBiomeName] || BIOME_SKY_CONFIGS['🌊 Open Ocean'];
-            const decaySky = 1.0 - Math.exp(-0.8 * dt);
+            const decaySky = 1.0 - Math.exp(-1.5 * dt);
+
+            skyUniforms.uTime.value = time;
+            if (typeof staticSun !== 'undefined') {
+                skyUniforms.uSunPosition.value.copy(staticSun.position).sub(playerGrp.position).normalize();
+            }
 
             skyUniforms.uCloudCoverage.value += (biomeTarget.coverage - skyUniforms.uCloudCoverage.value) * decaySky;
             skyUniforms.uCloudEdge.value += (biomeTarget.edge - skyUniforms.uCloudEdge.value) * decaySky;
             skyUniforms.uCloudSpeed.value += (biomeTarget.speed - skyUniforms.uCloudSpeed.value) * decaySky;
             skyUniforms.uCloudTurbulence.value += (biomeTarget.turbulence - skyUniforms.uCloudTurbulence.value) * decaySky;
             skyUniforms.uStormDarken.value += (biomeTarget.stormDarken - skyUniforms.uStormDarken.value) * decaySky;
-            skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(biomeTarget.skyZenith), decaySky);
-            skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(biomeTarget.skyHorizon), decaySky);
-            skyUniforms.uCloudColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudCol), decaySky);
-            skyUniforms.uCloudShadowColor.value.lerp(tempColorTarget.setHex(biomeTarget.cloudShadow), decaySky);
+
+            // Target factors strictly tied to active timePhase
+            const targetNightFactor = (timePhase === 2) ? 1.0 : 0.0;
+            const targetDuskFactor = (timePhase === 1) ? 1.0 : 0.0;
+            skyUniforms.uNightFactor.value += (targetNightFactor - skyUniforms.uNightFactor.value) * decayEnv;
+            skyUniforms.uDuskFactor.value += (targetDuskFactor - skyUniforms.uDuskFactor.value) * decayEnv;
+
+            // Compute distinct zenith, mid, and horizon colors based on time of day
+            let targetZenithHex = (timePhase === 1) ? target.bg : ((timePhase === 2) ? target.bg : biomeTarget.skyZenith);
+            let targetMidHex = target.mid || 0x7ab4e6;
+            let targetHorizonHex = (timePhase === 1) ? target.fog : ((timePhase === 2) ? target.fog : biomeTarget.skyHorizon);
+            let targetCloudHex = (timePhase === 1) ? target.cloudCol : ((timePhase === 2) ? target.cloudCol : biomeTarget.cloudCol);
+            let targetCloudShadowHex = biomeTarget.cloudShadow;
+
+            skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(targetZenithHex), decaySky);
+            if (skyUniforms.uSkyColorMid) {
+                skyUniforms.uSkyColorMid.value.lerp(tempColorTarget.setHex(targetMidHex), decaySky);
+            }
+            skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(targetHorizonHex), decaySky);
+            skyUniforms.uCloudColor.value.lerp(tempColorTarget.setHex(targetCloudHex), decaySky);
+            skyUniforms.uCloudShadowColor.value.lerp(tempColorTarget.setHex(targetCloudShadowHex), decaySky);
             skyUniforms.uSunColor.value.lerp(tempColorTarget.setHex(target.dir), decaySky);
             
             // Sync Open Sea Time Of Day
@@ -4139,23 +4146,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                     skyUniforms.uStormDarken.value += (wp.stormDarken - skyUniforms.uStormDarken.value) * decaySky;
                 }
             }
-
-            // Target factors based on currentSunY altitude and active phase
-            const targetNightFactor = (timePhase === 2) ? 1.0 : (THREE.MathUtils.smoothstep(-currentSunY, -500, 3000));
-            const duskHigh = 1.0 - THREE.MathUtils.smoothstep(currentSunY, 800, 3500);
-            const duskLow = THREE.MathUtils.smoothstep(currentSunY, -2000, -100);
-            const targetDuskFactor = (timePhase === 1) ? 1.0 : ((timePhase === 0 || timePhase === 2) ? 0.0 : (duskHigh * duskLow));
-
-            skyUniforms.uNightFactor.value += (targetNightFactor - skyUniforms.uNightFactor.value) * decayEnv;
-            skyUniforms.uDuskFactor.value += (targetDuskFactor - skyUniforms.uDuskFactor.value) * decayEnv;
-
-            // Blend horizon and zenith toward active time-of-day colour during dusk/twilight
-            const towardEnv = Math.min(1.0, skyUniforms.uDuskFactor.value + skyUniforms.uNightFactor.value);
-            if (towardEnv > 0.001) {
-                skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(target.fog), towardEnv * 1.0);
-                skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(target.bg), towardEnv * 0.65);
-            }
-
         }
 
         // Instanced mesh clouds remain visible (scene-level 3D clouds)
@@ -4395,16 +4385,25 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
 
         if (audioCtx && audioCtx.state === 'running' && windGain && windFilter) {
-            if (!isWindOn || !isBoosting) {
+            if (!isWindOn || !isBoosting || isSoundMuted) {
                 windGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.15);
             } else {
-                const speedFactor = Math.max(0, Math.min(1, (playerPhysics ? playerPhysics.velocity : 18.0 - 15) / 30)); 
+                const speedFactor = Math.max(0, Math.min(1, ((playerPhysics ? playerPhysics.velocity : 18.0) - 15) / 30)); 
                 const targetVolume = 0.25 + speedFactor * 0.35;
                 windGain.gain.setTargetAtTime(targetVolume, audioCtx.currentTime, 0.1);
                 
                 const targetFreq = 400 + Math.sin(time) * 100 + speedFactor * 800; 
                 windFilter.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.1);
             }
+        }
+
+        if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+            flightModelManager.update(dt);
+        }
+
+        if (typeof biplaneAudio !== 'undefined' && biplaneAudio) {
+            const currentSpeed = playerPhysics ? playerPhysics.velocity : 18.0;
+            biplaneAudio.update(dt, isBoosting, isBraking, isFlightPaused, currentSpeed);
         }
 
         // Deep clouds track player (Removed)
@@ -4546,6 +4545,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         windGain.connect(audioCtx.destination);
         
         noiseSource.start();
+
+        if (typeof biplaneAudio !== 'undefined' && biplaneAudio) {
+            biplaneAudio.setAudioContext(audioCtx);
+            const curCfg = (typeof flightModelManager !== 'undefined' && flightModelManager) ? flightModelManager.getCurrentConfig() : null;
+            if (curCfg && curCfg.isPlane && isEngineSoundOn && !isSoundMuted) {
+                biplaneAudio.setActive(true);
+            }
+        }
     }
 
 
@@ -4828,7 +4835,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     currentFrame = 0;
     logicTimer = 0;
 
-    // Atmosphere Editor (Appended to lil-gui)
+    // Atmosphere & Environment Master Editor (Appended to lil-gui)
     if (typeof gui !== 'undefined') {
         const atmoParams = {
             skyColor: '#' + envConfigs[0].bg.toString(16).padStart(6, '0'),
@@ -4849,7 +4856,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             atmoParams.ambI = cur.ambI;
             atmoParams.dirI = cur.dirI;
             atmoParams.glintCol = '#' + cur.glintCol.toString(16).padStart(6, '0');
-            // Refresh GUI display without triggering onChange
             if (atmoFolder) {
                 atmoFolder.controllers.forEach(c => c.updateDisplay());
             }
@@ -4861,9 +4867,127 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             setTimeout(updateAtmoParamsFromPhase, 50);
         });
 
-        const atmoFolder = gui.addFolder('Atmosphere');
+        // Master Environment Folder
+        const envFolder = gui.addFolder('Environment');
 
-        // Per-biome procedural sky editor
+        // 1. Atmosphere & Lighting Subfolder
+        const atmoFolder = envFolder.addFolder('Atmosphere & Lighting');
+        atmoFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('Global Brightness').onChange(v => {
+            renderer.toneMappingExposure = v;
+        });
+        atmoFolder.add(params, 'summerFilter').name('Summer Filter').onChange(v => {
+            const btn = document.getElementById('summer-toggle');
+            if (btn) btn.click();
+        });
+        atmoFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
+            .name('Shade Mode')
+            .onChange(v => {
+                toonShaderManager.apply(scene, v);
+                gui.controllersRecursive().forEach(c => { if (c.property === 'shadeMode') c.updateDisplay(); });
+            });
+        atmoFolder.addColor(atmoParams, 'skyColor').name('Sky Color').onChange(v => envConfigs[timePhase].bg = parseInt(v.replace('#',''), 16));
+        atmoFolder.addColor(atmoParams, 'fogColor').name('Fog Color').onChange(v => envConfigs[timePhase].fog = parseInt(v.replace('#',''), 16));
+        atmoFolder.addColor(atmoParams, 'ambColor').name('Ambient Light').onChange(v => envConfigs[timePhase].amb = parseInt(v.replace('#',''), 16));
+        atmoFolder.addColor(atmoParams, 'dirColor').name('Sun Light').onChange(v => envConfigs[timePhase].dir = parseInt(v.replace('#',''), 16));
+        atmoFolder.add(atmoParams, 'ambI', 0, 3).name('Amb Intensity').onChange(v => envConfigs[timePhase].ambI = v);
+        atmoFolder.add(atmoParams, 'dirI', 0, 5).name('Sun Intensity').onChange(v => envConfigs[timePhase].dirI = v);
+        atmoFolder.addColor(atmoParams, 'glintCol').name('Water Glint').onChange(v => envConfigs[timePhase].glintCol = parseInt(v.replace('#',''), 16));
+
+        // 2. Sky & Gradients Subfolder
+        const gradientSkyFolder = envFolder.addFolder('Sky & Gradients');
+        const gradParams = {
+            enabled: true,
+            zenith: '#' + (skyUniforms.uSkyColorZenith ? skyUniforms.uSkyColorZenith.value.getHexString() : '2a5090'),
+            mid: '#' + (skyUniforms.uSkyColorMid ? skyUniforms.uSkyColorMid.value.getHexString() : 'c85078'),
+            horizon: '#' + (skyUniforms.uSkyColorHorizon ? skyUniforms.uSkyColorHorizon.value.getHexString() : 'ffa07a'),
+            power: 1.2,
+            midOffset: 0.22,
+            sunCorona: 0.7,
+            horizonGlow: 0.45,
+            applySunsetGradient: () => {
+                gradParams.zenith = '#2a5090';
+                gradParams.mid = '#c85078';
+                gradParams.horizon = '#ffa07a';
+                gradParams.power = 1.2;
+                gradParams.midOffset = 0.22;
+                if (skyUniforms.uSkyColorZenith) skyUniforms.uSkyColorZenith.value.setHex(0x2a5090);
+                if (skyUniforms.uSkyColorMid) skyUniforms.uSkyColorMid.value.setHex(0xc85078);
+                if (skyUniforms.uSkyColorHorizon) skyUniforms.uSkyColorHorizon.value.setHex(0xffa07a);
+                if (skyUniforms.uGradientPower) skyUniforms.uGradientPower.value = 1.2;
+                if (skyUniforms.uGradientMidOffset) skyUniforms.uGradientMidOffset.value = 0.22;
+                envConfigs[1].bg = 0x2a5090;
+                envConfigs[1].mid = 0xc85078;
+                envConfigs[1].fog = 0xffa07a;
+                gradientSkyFolder.controllersRecursive().forEach(c => c.updateDisplay());
+            },
+            applyDayGradient: () => {
+                gradParams.zenith = '#4a90d9';
+                gradParams.mid = '#7ab4e6';
+                gradParams.horizon = '#c8dce8';
+                gradParams.power = 1.0;
+                gradParams.midOffset = 0.25;
+                if (skyUniforms.uSkyColorZenith) skyUniforms.uSkyColorZenith.value.setHex(0x4a90d9);
+                if (skyUniforms.uSkyColorMid) skyUniforms.uSkyColorMid.value.setHex(0x7ab4e6);
+                if (skyUniforms.uSkyColorHorizon) skyUniforms.uSkyColorHorizon.value.setHex(0xc8dce8);
+                if (skyUniforms.uGradientPower) skyUniforms.uGradientPower.value = 1.0;
+                if (skyUniforms.uGradientMidOffset) skyUniforms.uGradientMidOffset.value = 0.25;
+                envConfigs[0].bg = 0x4a90d9;
+                envConfigs[0].mid = 0x7ab4e6;
+                envConfigs[0].fog = 0xc8dce8;
+                gradientSkyFolder.controllersRecursive().forEach(c => c.updateDisplay());
+            }
+        };
+
+        gradientSkyFolder.add(params, 'skyRenderMode', ['Gradient + Clouds', 'Gradient Regular', 'Flat Solid'])
+            .name('Sky Mode')
+            .onChange(v => {
+                if (typeof window.setSkyRenderMode === 'function') window.setSkyRenderMode(v);
+            });
+        gradientSkyFolder.add(params, 'showProceduralSky').name('Procedural Sky Dome').onChange(v => {
+            if (typeof window.setSkyRenderMode === 'function') {
+                if (!v) window.setSkyRenderMode('Flat Solid');
+                else window.setSkyRenderMode(params.enableProceduralClouds ? 'Gradient + Clouds' : 'Gradient Regular');
+            }
+        });
+        gradientSkyFolder.add(params, 'enableProceduralClouds').name('Enable Procedural Clouds').onChange(v => {
+            if (typeof window.setSkyRenderMode === 'function') {
+                window.setSkyRenderMode(v ? 'Gradient + Clouds' : 'Gradient Regular');
+            }
+        });
+        gradientSkyFolder.add(gradParams, 'enabled').name('Enable Gradient Curve').onChange(v => {
+            if (skyUniforms.uGradientSkyEnabled) skyUniforms.uGradientSkyEnabled.value = v ? 1.0 : 0.0;
+        });
+        gradientSkyFolder.addColor(gradParams, 'zenith').name('Zenith Color').onChange(v => {
+            const hex = parseInt(v.replace('#', ''), 16);
+            if (skyUniforms.uSkyColorZenith) skyUniforms.uSkyColorZenith.value.setHex(hex);
+            envConfigs[timePhase].bg = hex;
+        });
+        gradientSkyFolder.addColor(gradParams, 'mid').name('Mid-Sky Color').onChange(v => {
+            const hex = parseInt(v.replace('#', ''), 16);
+            if (skyUniforms.uSkyColorMid) skyUniforms.uSkyColorMid.value.setHex(hex);
+            envConfigs[timePhase].mid = hex;
+        });
+        gradientSkyFolder.addColor(gradParams, 'horizon').name('Horizon Color').onChange(v => {
+            const hex = parseInt(v.replace('#', ''), 16);
+            if (skyUniforms.uSkyColorHorizon) skyUniforms.uSkyColorHorizon.value.setHex(hex);
+            envConfigs[timePhase].fog = hex;
+        });
+        gradientSkyFolder.add(gradParams, 'power', 0.2, 3.0, 0.05).name('Gradient Curve (Power)').onChange(v => {
+            if (skyUniforms.uGradientPower) skyUniforms.uGradientPower.value = v;
+        });
+        gradientSkyFolder.add(gradParams, 'midOffset', 0.05, 0.8, 0.01).name('Mid-Height Offset').onChange(v => {
+            if (skyUniforms.uGradientMidOffset) skyUniforms.uGradientMidOffset.value = v;
+        });
+        gradientSkyFolder.add(gradParams, 'sunCorona', 0.0, 2.0, 0.05).name('Sun Flare Glow').onChange(v => {
+            if (skyUniforms.uSunCoronaIntensity) skyUniforms.uSunCoronaIntensity.value = v;
+        });
+        gradientSkyFolder.add(gradParams, 'horizonGlow', 0.0, 1.5, 0.05).name('Horizon Band Glow').onChange(v => {
+            if (skyUniforms.uHorizonGlow) skyUniforms.uHorizonGlow.value = v;
+        });
+        gradientSkyFolder.add(gradParams, 'applySunsetGradient').name('Preset: Sunset Look');
+        gradientSkyFolder.add(gradParams, 'applyDayGradient').name('Preset: Day Sky Look');
+
+        // Subfolder: Procedural Sky (Per Biome)
         const skyEditorParams = {
             coverage: 0.45, edge: 0.07, speed: 0.02,
             skyZenith: '#4a90d9', skyHorizon: '#b8d4e8',
@@ -4871,12 +4995,13 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             turbulence: 0.0, stormDarken: 0.0,
             weather: 'clear'
         };
-        const skyFolder = atmoFolder.addFolder('☁️ Procedural Sky (Per Biome)');
+        const skyFolder = gradientSkyFolder.addFolder('Procedural Sky (Per Biome)');
 
         function writeSkyToConfig(key, val) {
-            if (typeof playerGrp !== 'undefined') {
-                const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
-                if (BIOME_SKY_CONFIGS[bName]) BIOME_SKY_CONFIGS[bName][key] = val;
+            if (typeof playerGrp !== 'undefined' && playerGrp.position) {
+                const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+                const bName = b ? b.name : null;
+                if (bName && BIOME_SKY_CONFIGS[bName]) BIOME_SKY_CONFIGS[bName][key] = val;
             }
         }
         const skyCtrlCoverage = skyFolder.add(skyEditorParams, 'coverage', 0, 1, 0.01).name('Cloud Coverage').onChange(v => writeSkyToConfig('coverage', v));
@@ -4891,7 +5016,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         skyFolder.add({ opacity: 1.0 }, 'opacity', 0, 1, 0.01).name('Cloud Opacity').onChange(v => { skyUniforms.uCloudOpacity.value = v; });
         skyFolder.add(skyEditorParams, 'weather', ['clear', 'storm', 'overcast']).name('Weather').onChange(v => { currentWeather = v; });
 
-        // Update sliders when biome changes (same pattern as Ground Fog)
         setInterval(() => {
             if (typeof playerGrp !== 'undefined' && playerGrp.position) {
                 const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
@@ -4915,23 +5039,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             }
         }, 500);
 
-        atmoFolder.addColor(atmoParams, 'skyColor').name('Sky Color').onChange(v => envConfigs[timePhase].bg = parseInt(v.replace('#',''), 16));
-        atmoFolder.addColor(atmoParams, 'fogColor').name('Fog Color').onChange(v => envConfigs[timePhase].fog = parseInt(v.replace('#',''), 16));
-        atmoFolder.addColor(atmoParams, 'ambColor').name('Ambient Light').onChange(v => envConfigs[timePhase].amb = parseInt(v.replace('#',''), 16));
-        atmoFolder.addColor(atmoParams, 'dirColor').name('Sun Light').onChange(v => envConfigs[timePhase].dir = parseInt(v.replace('#',''), 16));
-        atmoFolder.add(atmoParams, 'ambI', 0, 3).name('Amb Intensity').onChange(v => envConfigs[timePhase].ambI = v);
-        atmoFolder.add(atmoParams, 'dirI', 0, 5).name('Sun Intensity').onChange(v => envConfigs[timePhase].dirI = v);
-        atmoFolder.addColor(atmoParams, 'glintCol').name('Water Glint').onChange(v => envConfigs[timePhase].glintCol = parseInt(v.replace('#',''), 16));
-        
-        // Dedicated Sun & God Rays Controls
-        const sunGodRaysFolder = atmoFolder.addFolder('Sun & God Rays Controls');
+        // 3. Sun & God Rays Controls Subfolder
+        const sunGodRaysFolder = envFolder.addFolder('Sun & God Rays Controls');
         sunGodRaysFolder.add(params, 'sunAltitude', -8000, 15000, 50).name('Sun Height (Altitude)').onChange(v => {
             currentSunY = v;
         });
         sunGodRaysFolder.add(params, 'sunAzimuth', -180, 180, 1).name('Sun Azimuth (Angle °)');
         sunGodRaysFolder.add(params, 'lockSunToPlayer').name('Lock Sun to Player');
         sunGodRaysFolder.add(params, 'sunDiscScale', 0.5, 5.0, 0.1).name('Sun Disc Size');
-        
         sunGodRaysFolder.add(params, 'godRays').name('God Rays Enable').onChange(v => {
             godRaysPass.enabled = v;
         });
@@ -4950,6 +5065,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         sunGodRaysFolder.add(params, 'lumMax', 0.0, 1.0, 0.01).name('Lum Gate Max').onChange(v => {
             godRaysPass.uniforms.uLumMax.value = v;
         });
+        sunGodRaysFolder.add(params, 'highlightKnee', 0.2, 1.0, 0.01).name('Highlight Rolloff').onChange(v => {
+            uRolloffKnee.value = v;
+        });
+        sunGodRaysFolder.add(params, 'horizonGlow', 0.0, 1.5, 0.05).name('Horizon Glow').onChange(v => {
+            if (skyUniforms && skyUniforms.uHorizonGlow) skyUniforms.uHorizonGlow.value = v;
+        });
 
         const rayColors = {
             inner: '#' + godRaysPass.uniforms.uRayColorInner.value.getHexString(),
@@ -4957,28 +5078,41 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             applyPreset: () => {
                 timePhase = 1;
                 localStorage.setItem('wl_timePhase', 1);
-                params.sunAltitude = 180;
-                params.sunAzimuth = 15;
+                params.sunAltitude = 160;
+                params.sunAzimuth = 0;
                 params.lockSunToPlayer = true;
                 params.sunDiscScale = 1.8;
                 params.godRays = true;
                 godRaysPass.enabled = true;
-                params.godRayIntensity = 0.75;
-                godRaysPass.uniforms.uIntensity.value = 0.75;
-                params.godRayDensity = 0.55;
-                godRaysPass.uniforms.uDensity.value = 0.55;
-                params.godRayDecay = 0.93;
-                godRaysPass.uniforms.uDecay.value = 0.93;
+                params.godRayIntensity = 0.65;
+                godRaysPass.uniforms.uIntensity.value = 0.65;
+                params.godRayDensity = 0.50;
+                godRaysPass.uniforms.uDensity.value = 0.50;
+                params.godRayDecay = 0.927;
+                godRaysPass.uniforms.uDecay.value = 0.927;
+                params.lumMin = 0.45;
+                godRaysPass.uniforms.uLumMin.value = 0.45;
+                params.lumMax = 0.97;
+                godRaysPass.uniforms.uLumMax.value = 0.97;
+                params.highlightKnee = 0.75;
+                params.horizonGlow = 0.45;
                 
                 envConfigs[1].bg = 0x2a5090;
+                envConfigs[1].mid = 0xc85078;
                 envConfigs[1].fog = 0xffa07a;
                 envConfigs[1].amb = 0xffdab9;
                 envConfigs[1].dir = 0xffaa00;
+                envConfigs[1].ambI = 1.1;
+                envConfigs[1].dirI = 3.2;
                 envConfigs[1].glintCol = 0xffaa00;
+                envConfigs[1].sunY = 160;
+                envConfigs[1].moonY = 200;
+                envConfigs[1].cloudCol = 0xfffaec;
 
                 if (skyUniforms) {
-                    skyUniforms.uHorizonGlow.value = 0.7;
+                    skyUniforms.uHorizonGlow.value = 0.45;
                     skyUniforms.uSkyColorZenith.value.setHex(0x2a5090);
+                    if (skyUniforms.uSkyColorMid) skyUniforms.uSkyColorMid.value.setHex(0xc85078);
                     skyUniforms.uSkyColorHorizon.value.setHex(0xffa07a);
                 }
                 if (typeof zenithColorUniform !== 'undefined') zenithColorUniform.value.setHex(0x2a5090);
@@ -4997,9 +5131,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         sunGodRaysFolder.addColor(rayColors, 'outer').name('Ray Color (Outer)').onChange(v => {
             godRaysPass.uniforms.uRayColorOuter.value.set(v);
         });
-        sunGodRaysFolder.add(rayColors, 'applyPreset').name('✨ Apply Sunset Photo Look');
-        
-        // 🌙 Dedicated Moonlight & Night Editor
+        sunGodRaysFolder.add(rayColors, 'applyPreset').name('Apply Sunset Photo Look');
+
+        // 4. Moonlight & Night Subfolder
         const moonParams = {
             moonlightColor: '#' + envConfigs[2].dir.toString(16).padStart(6, '0'),
             moonlightIntensity: envConfigs[2].dirI,
@@ -5010,8 +5144,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             moonAltitude: envConfigs[2].moonY
         };
 
-        const moonFolder = atmoFolder.addFolder('🌙 Moonlight & Night');
-        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('☀️ Global Brightness').onChange(v => {
+        const moonFolder = envFolder.addFolder('Moonlight & Night');
+        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('Global Brightness').onChange(v => {
             renderer.toneMappingExposure = v;
         });
         moonFolder.addColor(moonParams, 'moonlightColor').name('Moonlight Color').onChange(v => envConfigs[2].dir = parseInt(v.replace('#',''), 16));
@@ -5022,39 +5156,100 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         moonFolder.addColor(moonParams, 'nightFogColor').name('Night Fog Color').onChange(v => envConfigs[2].fog = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonAltitude', 200, 4000, 50).name('Moon Altitude').onChange(v => envConfigs[2].moonY = v);
 
-        // ✨ Kiki Warm Side Glow Editor
-        const kikiGlowParams = {
-            intensity: 2.5,
-            distance: 300,
-            spread: 35,
-            color: '#ffaa44'
+        // 5. Weather & Fog Subfolder
+        const weatherFolder = envFolder.addFolder('Weather & Fog');
+        weatherFolder.add(params, 'sceneFog').name('Global Fog').onChange(v => {
+            if (!v && typeof scene !== 'undefined' && scene.fog) {
+                scene.fog.near = 100000;
+                scene.fog.far = 200000;
+            }
+        });
+        weatherFolder.add(params, 'fogIntensity', 0.1, 5.0, 0.1).name('Fog Intensity');
+        weatherFolder.add(params, 'wind').name('Wind').onChange(v => { if (isWindOn !== v) document.getElementById('wind-toggle').click(); });
+        weatherFolder.add(params, 'trails').name('Wind Trails').onChange(v => isWindTrailsOn = v);
+
+        const rainFolder = weatherFolder.addFolder('Rain Settings');
+        rainFolder.add(params, 'rain').name('Enable Rain').onChange(v => { isRainOn = v; });
+        rainFolder.add(params, 'rainSize', 0.5, 10.0).name('Drop Size');
+        rainFolder.add(params, 'rainIntensity', 0.1, 5.0).name('Intensity');
+        rainFolder.add(params, 'rainWindX', -5.0, 5.0).name('Wind X');
+        rainFolder.add(params, 'rainWindY', -5.0, 5.0).name('Wind Z');
+
+        window.biomeFogSettings = window.biomeFogSettings || {};
+        const fogFolder = weatherFolder.addFolder('Ground Fog (Per Biome)');
+        fogFolder.add(params, 'fogPlane').name('Enable Fog').onChange(v => { if (typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
+        const fogOffsetCtrl = fogFolder.add(params, 'biomeFogOffset', -50, 50).name('Biome Fog Offset').onChange(v => {
+            if (typeof playerGrp !== 'undefined' && playerGrp.position) {
+                const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+                const bName = b ? b.name : 'Unknown';
+                window.biomeFogSettings = window.biomeFogSettings || {};
+                window.biomeFogSettings[bName] = v;
+            }
+        });
+        setInterval(() => {
+            if (typeof playerGrp !== 'undefined' && playerGrp.position && !fogOffsetCtrl.__onChangeBlocked) {
+                const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+                const bName = b ? b.name : 'Unknown';
+                window.biomeFogSettings = window.biomeFogSettings || {};
+                const currentOffset = window.biomeFogSettings[bName] || 0;
+                if (params.biomeFogOffset !== currentOffset) {
+                    params.biomeFogOffset = currentOffset;
+                    fogOffsetCtrl.__onChangeBlocked = true;
+                    fogOffsetCtrl.updateDisplay();
+                    fogOffsetCtrl.__onChangeBlocked = false;
+                }
+                fogFolder.title('Ground Fog (' + bName + ')');
+            }
+        }, 500);
+        weatherFolder.add({ openGroundFogEditor: () => {
+            if (window.groundFogEditor) window.groundFogEditor.toggle();
+        }}, 'openGroundFogEditor').name('Ground Fog Editor');
+
+        // 6. Terrain Colors & Sand Shimmer Subfolder
+        const colorEditorFolder = envFolder.addFolder('Terrain Colors & Sand Shimmer');
+        const triggerTerrainColorUpdate = () => {
+            lastTerrainGridX = -9999;
+            lastTerrainGridZ = -9999;
         };
-        const glowFolder = envFolder.addFolder('💡 Kiki Warm Side Glow');
-        glowFolder.add(kikiGlowParams, 'intensity', 0, 8, 0.1).name('Glow Power').onChange(v => {
-            kikiLeftLight.intensity = v;
-            kikiRightLight.intensity = v;
+        const colorParams = {
+            npSnow: '#' + northPoleColors.snowDune.getHexString(),
+            npShadow: '#' + northPoleColors.snowShadow.getHexString(),
+            npPeak: '#' + northPoleColors.icePeak.getHexString(),
+            desertSlope: '#' + desertColors.duneSlope.getHexString(),
+            desertShadow: '#' + desertColors.valleyShadow.getHexString(),
+            shimmer: 1.0
+        };
+        colorEditorFolder.addColor(colorParams, 'npSnow').name('Snow Color').onChange(hex => {
+            northPoleColors.snowDune.set(hex);
+            triggerTerrainColorUpdate();
         });
-        glowFolder.add(kikiGlowParams, 'distance', 50, 800, 10).name('Glow Range').onChange(v => {
-            kikiLeftLight.distance = v;
-            kikiRightLight.distance = v;
+        colorEditorFolder.addColor(colorParams, 'npShadow').name('Snow Shadow').onChange(hex => {
+            northPoleColors.snowShadow.set(hex);
+            triggerTerrainColorUpdate();
         });
-        glowFolder.add(kikiGlowParams, 'spread', 5, 100, 1).name('Side Spread').onChange(v => {
-            kikiLeftLight.position.x = -v;
-            kikiRightLight.position.x = v;
+        colorEditorFolder.addColor(colorParams, 'npPeak').name('Peak Color').onChange(hex => {
+            northPoleColors.icePeak.set(hex);
+            triggerTerrainColorUpdate();
         });
-        glowFolder.addColor(kikiGlowParams, 'color').name('Glow Color').onChange(v => {
-            const col = new THREE.Color(v);
-            kikiLeftLight.color.copy(col);
-            kikiRightLight.color.copy(col);
+        colorEditorFolder.addColor(colorParams, 'desertSlope').name('Sand Color').onChange(hex => {
+            desertColors.duneSlope.set(hex);
+            triggerTerrainColorUpdate();
         });
-        
-        // Cloud Editor
+        colorEditorFolder.addColor(colorParams, 'desertShadow').name('Sand Shadow').onChange(hex => {
+            desertColors.valleyShadow.set(hex);
+            triggerTerrainColorUpdate();
+        });
+        colorEditorFolder.add(colorParams, 'shimmer', 0, 3, 0.1).name('Shimmer Sparkle').onChange(val => {
+            terrainUniforms.uShimmerMult.value = val;
+        });
+
+        // Cloud Parameters & Palette Function
         const cloudParams = {
-            c0: '#' + pastelColors[0].toString(16).padStart(6, '0'),
-            c1: '#' + pastelColors[1].toString(16).padStart(6, '0'),
-            c2: '#' + pastelColors[2].toString(16).padStart(6, '0'),
-            c3: '#' + pastelColors[3].toString(16).padStart(6, '0'),
-            c4: '#' + pastelColors[4].toString(16).padStart(6, '0'),
+            c0: '#' + (typeof pastelColors !== 'undefined' && pastelColors[0] ? pastelColors[0].toString(16).padStart(6, '0') : 'ffffff'),
+            c1: '#' + (typeof pastelColors !== 'undefined' && pastelColors[1] ? pastelColors[1].toString(16).padStart(6, '0') : 'ffffff'),
+            c2: '#' + (typeof pastelColors !== 'undefined' && pastelColors[2] ? pastelColors[2].toString(16).padStart(6, '0') : 'ffffff'),
+            c3: '#' + (typeof pastelColors !== 'undefined' && pastelColors[3] ? pastelColors[3].toString(16).padStart(6, '0') : 'ffffff'),
+            c4: '#' + (typeof pastelColors !== 'undefined' && pastelColors[4] ? pastelColors[4].toString(16).padStart(6, '0') : 'ffffff'),
             opBase: 1.0,
             opHigh: 1.0,
             opWispy: 1.0,
@@ -5064,9 +5259,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             density: 1.0,
             cloudScale: 1.0
         };
-        
-        let oldCloudColors = [...pastelColors];
+
+        let oldCloudColors = typeof pastelColors !== 'undefined' ? [...pastelColors] : [];
         function updateCloudColorForIndex(idx, newHex) {
+            if (typeof pastelColors === 'undefined') return;
             const oldHex = oldCloudColors[idx];
             const newHexVal = parseInt(newHex.replace('#',''), 16);
             if (oldHex === newHexVal) return;
@@ -5075,25 +5271,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const newColor = new THREE.Color(newHexVal);
             const temp = new THREE.Color();
             
-            [instClouds, instHighClouds].forEach(mesh => {
-                for (let i = 0; i < mesh.count; i++) {
-                    mesh.getColorAt(i, temp);
-                    if (Math.abs(temp.r - oldColor.r) < 0.01 && Math.abs(temp.g - oldColor.g) < 0.01 && Math.abs(temp.b - oldColor.b) < 0.01) {
-                        mesh.setColorAt(i, newColor);
+            if (typeof instClouds !== 'undefined' && typeof instHighClouds !== 'undefined') {
+                [instClouds, instHighClouds].forEach(mesh => {
+                    if (!mesh) return;
+                    for (let i = 0; i < mesh.count; i++) {
+                        mesh.getColorAt(i, temp);
+                        if (Math.abs(temp.r - oldColor.r) < 0.01 && Math.abs(temp.g - oldColor.g) < 0.01 && Math.abs(temp.b - oldColor.b) < 0.01) {
+                            mesh.setColorAt(i, newColor);
+                        }
                     }
-                }
-                if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-            });
+                    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+                });
+            }
             oldCloudColors[idx] = newHexVal;
         }
 
-        const cloudFolder = gui.addFolder('☁️ Cloud Editor');
-
-        cloudFolder.add({ mode: skyMode }, "mode", { "Flat sky + 3D clouds (flight-merged look)": "flat", "Procedural sky dome": "procedural" })
-            .name("🌤️ Sky Mode")
-            .onChange(v => { applySkyMode(v); });
-        
-        // Show All Clouds Toggle
+        // 7. 3D Clouds & Pastel Editor Subfolder
+        const cloudFolder = envFolder.addFolder('3D Clouds & Pastel Editor');
         cloudFolder.add(params, 'showClouds').name('Show All Clouds').onChange(v => {
             params.showCloudsRegular = v;
             params.showCloudsHigh = v;
@@ -5117,26 +5311,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 if (c.property && c.property.startsWith('showClouds') || c.property === 'showVolumetricClouds') c.updateDisplay();
             });
         });
-
-        const toggleFolder = cloudFolder.addFolder('👁️ Visibility Toggles');
-        toggleFolder.add(params, 'showVolumetricClouds').name('☁️ Volumetric Sky Clouds').onChange(v => {
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
-                toonCloudMat.uniforms.uEnableClouds.value = v ? 1.0 : 0.0;
-            }
-        });
-        toggleFolder.add(params, 'showCloudsRegular').name('🌥️ Regular (Cumulus)').onChange(v => { if (typeof instClouds !== 'undefined') instClouds.visible = v; });
-        toggleFolder.add(params, 'showCloudsHigh').name('🌩️ Cumulonimbus').onChange(v => { if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v; });
-        toggleFolder.add(params, 'showCloudsWispy').name('🌫️ Wispy Clouds').onChange(v => { if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; });
-        toggleFolder.add(params, 'showCloudsMega').name('🌌 Mega Clouds').onChange(v => { if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
-        toggleFolder.add(params, 'showCloudsHorizon').name('🌅 Horizon Clouds (Massive)').onChange(v => { 
-            if (typeof instHorizonClouds1 !== 'undefined') {
-                instHorizonClouds1.visible = v;
-                instHorizonClouds2.visible = v;
-                instHorizonClouds3.visible = v;
-            }
-        });
-
-        // Global density multiplier
         cloudFolder.add(cloudParams, 'density', 0.1, 2.5, 0.05).name('Overall Density').onChange(v => {
             if (typeof instClouds !== 'undefined') {
                 instClouds.count = Math.max(1, Math.min(MAX_CLOUD_COUNT, Math.floor(params.cloudCountRegular * v)));
@@ -5164,16 +5338,31 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 if (instHorizonClouds3.instanceMatrix) instHorizonClouds3.instanceMatrix.needsUpdate = true;
             }
         });
-
-        // Global scale multiplier
         cloudFolder.add(cloudParams, 'cloudScale', 0.5, 3.0, 0.1).name('Overall Size').onChange(v => {
             [instClouds, instHighClouds, instWispyClouds, instMegaClouds].forEach(mesh => {
                 if (mesh) mesh.scale.set(v, v, v);
             });
         });
 
-        // Pastel color palette subfolder
-        const paletteFolder = cloudFolder.addFolder('🎨 Pastel Colors');
+        const toggleFolder = cloudFolder.addFolder('Visibility Toggles');
+        toggleFolder.add(params, 'showVolumetricClouds').name('Volumetric Sky Clouds').onChange(v => {
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
+                toonCloudMat.uniforms.uEnableClouds.value = v ? 1.0 : 0.0;
+            }
+        });
+        toggleFolder.add(params, 'showCloudsRegular').name('Regular (Cumulus)').onChange(v => { if (typeof instClouds !== 'undefined') instClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsHigh').name('Cumulonimbus').onChange(v => { if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsWispy').name('Wispy Clouds').onChange(v => { if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsMega').name('Mega Clouds').onChange(v => { if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
+        toggleFolder.add(params, 'showCloudsHorizon').name('Horizon Clouds (Massive)').onChange(v => { 
+            if (typeof instHorizonClouds1 !== 'undefined') {
+                instHorizonClouds1.visible = v;
+                instHorizonClouds2.visible = v;
+                instHorizonClouds3.visible = v;
+            }
+        });
+
+        const paletteFolder = cloudFolder.addFolder('Pastel Colors');
         paletteFolder.addColor(cloudParams, 'c0').name('Color 1').onChange(v => updateCloudColorForIndex(0, v));
         paletteFolder.addColor(cloudParams, 'c1').name('Color 2').onChange(v => updateCloudColorForIndex(1, v));
         paletteFolder.addColor(cloudParams, 'c2').name('Color 3').onChange(v => updateCloudColorForIndex(2, v));
@@ -5181,8 +5370,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         paletteFolder.addColor(cloudParams, 'c4').name('Color 5').onChange(v => updateCloudColorForIndex(4, v));
         paletteFolder.close();
 
-        // 1. Regular Clouds Subfolder
-        const regFolder = cloudFolder.addFolder('🌥️ Regular (Cumulus)');
+        const regFolder = cloudFolder.addFolder('Regular (Cumulus)');
         regFolder.add(params, 'showCloudsRegular').name('Show').onChange(v => { if (typeof instClouds !== 'undefined') instClouds.visible = v; });
         regFolder.add(params, 'cloudCountRegular', 0, 300, 1).name('Count').onChange(v => {
             CLOUD_COUNT = v;
@@ -5199,8 +5387,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         regFolder.add(cloudParams, 'opBase', 0, 1, 0.01).name('Opacity').onChange(v => matCloud.opacity = v);
         regFolder.close();
 
-        // 2. Cumulonimbus Clouds Subfolder
-        const highFolder = cloudFolder.addFolder('🌩️ Cumulonimbus');
+        const highFolder = cloudFolder.addFolder('Cumulonimbus');
         highFolder.add(params, 'showCloudsHigh').name('Show').onChange(v => { if (typeof instHighClouds !== 'undefined') instHighClouds.visible = v; });
         highFolder.add(params, 'cloudCountHigh', 0, 100, 1).name('Count').onChange(v => {
             HIGH_CLOUD_COUNT = v;
@@ -5217,8 +5404,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         highFolder.add(cloudParams, 'opHigh', 0, 1, 0.01).name('Opacity').onChange(v => highCloudMat.opacity = v);
         highFolder.close();
 
-        // 3. Wispy Clouds Subfolder
-        const wispyFolder = cloudFolder.addFolder('🌫️ Wispy Clouds');
+        const wispyFolder = cloudFolder.addFolder('Wispy Clouds');
         wispyFolder.add(params, 'showCloudsWispy').name('Show').onChange(v => { if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = v; });
         wispyFolder.add(params, 'cloudCountWispy', 0, 100, 1).name('Count').onChange(v => {
             WISPY_CLOUD_COUNT = v;
@@ -5235,8 +5421,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         wispyFolder.add(cloudParams, 'opWispy', 0, 1, 0.01).name('Opacity').onChange(v => matWispyCloud.opacity = v);
         wispyFolder.close();
 
-        // 4. Mega Clouds Subfolder
-        const megaFolder = cloudFolder.addFolder('🌌 Mega Clouds');
+        const megaFolder = cloudFolder.addFolder('Mega Clouds');
         megaFolder.add(params, 'showCloudsMega').name('Show').onChange(v => { if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = v; });
         megaFolder.add(params, 'cloudCountMega', 0, 100, 1).name('Count').onChange(v => {
             MEGA_CLOUD_COUNT = v;
@@ -5253,8 +5438,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         megaFolder.add(cloudParams, 'opMega', 0, 1, 0.01).name('Opacity').onChange(v => megaCloudMat.opacity = v);
         megaFolder.close();
 
-        // 5. Horizon Clouds Subfolder
-        const horizonFolder = cloudFolder.addFolder('🌅 Horizon Clouds');
+        const horizonFolder = cloudFolder.addFolder('Horizon Clouds');
         horizonFolder.add(params, 'showCloudsHorizon').name('Show').onChange(v => { 
             if (typeof instHorizonClouds1 !== 'undefined') {
                 instHorizonClouds1.visible = v;
@@ -5274,118 +5458,124 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         });
         horizonFolder.close();
 
-        // Tree Editor
-        const treeGreenVariations = [0x52c439, 0x38b000, 0x2d8028, 0x76e054, 0x6e4a32];
-        let oldTreeColors = [...treeGreenVariations];
-        function updateTreeColorForIndex(idx, newHex) {
-            const oldHex = oldTreeColors[idx];
-            const newHexVal = parseInt(newHex.replace('#',''), 16);
-            if (oldHex === newHexVal) return;
-            treeGreenVariations[idx] = newHexVal;
-            const oldColor = new THREE.Color(oldHex);
-            const newColor = new THREE.Color(newHexVal);
-            const temp = new THREE.Color();
-            
-            treeMeshes.forEach(mesh => {
-                const count = mesh.maxCount || mesh.count;
-                for (let i = 0; i < count; i++) {
-                    mesh.getColorAt(i, temp);
-                    if (Math.abs(temp.r - oldColor.r) < 0.01 && Math.abs(temp.g - oldColor.g) < 0.01 && Math.abs(temp.b - oldColor.b) < 0.01) {
-                        mesh.setColorAt(i, newColor);
-                    }
-                }
-                if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-            });
-            oldTreeColors[idx] = newHexVal;
-        }
+        // 8. Character Glow & Trees Subfolder
+        const charFloraFolder = envFolder.addFolder('Character Glow & Trees');
+        const glowFolder = charFloraFolder.addFolder('Kiki Warm Side Glow');
+        const kikiGlowParams = {
+            intensity: 2.5,
+            distance: 300,
+            spread: 35,
+            color: '#ffaa44'
+        };
+        glowFolder.add(kikiGlowParams, 'intensity', 0, 8, 0.1).name('Glow Power').onChange(v => {
+            kikiLeftLight.intensity = v;
+            kikiRightLight.intensity = v;
+        });
+        glowFolder.add(kikiGlowParams, 'distance', 50, 800, 10).name('Glow Range').onChange(v => {
+            kikiLeftLight.distance = v;
+            kikiRightLight.distance = v;
+        });
+        glowFolder.add(kikiGlowParams, 'spread', 5, 100, 1).name('Side Spread').onChange(v => {
+            kikiLeftLight.position.x = -v;
+            kikiRightLight.position.x = v;
+        });
+        glowFolder.addColor(kikiGlowParams, 'color').name('Glow Color').onChange(v => {
+            const col = new THREE.Color(v);
+            kikiLeftLight.color.copy(col);
+            kikiRightLight.color.copy(col);
+        });
 
-        const treeFolder = envFolder.addFolder('Global Tree Settings');
+        const treeFolder = charFloraFolder.addFolder('Global Tree Settings');
         treeFolder.add(params, 'treeScale', 0.5, 4.0).name('Tree Scale').onChange(v => treeUniforms.uTreeScale.value = v);
 
-        // ==========================================
-        // SYSTEM SETTINGS (SAVE/LOAD)
-        // ==========================================
-        perfFolder.add({
-            saveSettings: () => {
-                const data = gui.save();
-                localStorage.setItem('flightSettings', JSON.stringify(data));
-                const prevTitle = perfFolder.title || 'Performance';
-                perfFolder.title('Saved!');
-                setTimeout(() => perfFolder.title(prevTitle), 1500);
+        // 9. Ocean & Water Subfolder
+        const oceanFolder = envFolder.addFolder('Ocean & Water');
+        oceanFolder.add({ openOceanFolder: () => {
+            if (animeWaterGUI && animeWaterGUI.gui) {
+                const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
+                if (guiEl) guiEl.style.display = '';
+                animeWaterGUI.gui.open();
+                animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
-        }, 'saveSettings').name('Save All Settings');
-        
-        perfFolder.add({
-            resetSettings: () => {
-                localStorage.removeItem('flightSettings');
-                localStorage.removeItem('gfxQuality');
-                location.reload();
-            }
-        }, 'resetSettings').name('Reset to Default');
+        }}, 'openOceanFolder').name('Ocean Editor (O)');
 
-        // Load settings if they exist
-        try {
-            const savedData = localStorage.getItem('flightSettings');
-            if (savedData) {
-                const parsed = JSON.parse(savedData);
-                
-                // FORCE Quality dropdown to match actual rendering quality
-                parsed.quality = LOW_GFX ? 'Low' : 'Regular';
-                
-                // If we are in Low Quality, force shadows off and HD on (user request)
-                if (LOW_GFX) {
-                    parsed.shadows = false;
-                    parsed.treeShadows = false;
-                    parsed.renderHD = true;
+        // 10. Environment Presets Subfolder
+        const presetFolder = envFolder.addFolder('Environment Presets');
+        presetFolder.add({ clearDesertDay: () => {
+            teleportToBiome('Desert Dunes');
+            params.fogPlane = false;
+            if (typeof window.fogGroup !== 'undefined') window.fogGroup.visible = false;
+            params.timeOfDay = 'day';
+            if (typeof window.setTimePhase === 'function') window.setTimePhase(0);
+            else timePhase = 0;
+            if (typeof cloudParams !== 'undefined') {
+                cloudParams.density = 0.1;
+                params.showVolumetricClouds = false;
+                if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
+                    toonCloudMat.uniforms.uEnableClouds.value = 0.0;
                 }
-                
-                
-                gui.load(parsed);
-                
-                // Immediately save back to flightSettings so that next reload reads correct values
-                localStorage.setItem('flightSettings', JSON.stringify(gui.save()));
+                if (typeof instClouds !== 'undefined') {
+                    instClouds.count = Math.max(1, Math.floor(params.cloudCountRegular * cloudParams.density));
+                    if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
+                }
+                if (typeof instHighClouds !== 'undefined') {
+                    instHighClouds.count = Math.max(1, Math.floor(params.cloudCountHigh * cloudParams.density));
+                    if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
+                }
+                if (typeof instWispyClouds !== 'undefined') {
+                    instWispyClouds.count = Math.max(1, Math.floor(params.cloudCountWispy * cloudParams.density));
+                    if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
+                }
+                if (typeof instMegaClouds !== 'undefined') {
+                    instMegaClouds.count = Math.max(1, Math.floor(params.cloudCountMega * cloudParams.density));
+                    if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
+                }
             }
-        } catch(e) {
-            console.error('Failed to load settings', e);
-        }
+            gui.controllersRecursive().forEach(c => c.updateDisplay());
+        }}, 'clearDesertDay').name('Clear Desert Day');
 
-        // --- Dock GUI Panel Flush to Top-Right Edge (Hidden by default, toggled via cog wheel) ---
-        const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
-        if (guiEl) {
-            guiEl.style.position = 'fixed';
-            guiEl.style.right = '14px';
-            guiEl.style.top = '54px';
-            guiEl.style.left = 'auto';
-            guiEl.style.margin = '0';
-            guiEl.style.zIndex = '1000';
-            guiEl.style.maxHeight = 'calc(100vh - 72px)';
-            guiEl.style.overflowY = 'auto';
-            guiEl.style.display = 'none';
-        }
-            
-            // Reorder folders: most-used first
-            const folderOrder = [
-                debugFolder, navFolder, perfFolder, envFolder,
-                atmoFolder, cloudFolder,
-                animeWaterGUI && animeWaterGUI.gui,
-                editorFolder, gameFolder, presetFolder, customPresetsFolder
-            ].filter(Boolean);
-            const guiContainer = gui.domElement.querySelector('.children') || gui.domElement;
-            folderOrder.forEach(f => {
-                const dom = f.domElement || f;
-                if (dom && dom.parentElement) guiContainer.appendChild(dom);
-            });
+        // 11. Save & Load Presets Subfolder
+        const customPresetsFolder = envFolder.addFolder('Save & Load Presets');
+        customPresetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
+        customPresetsFolder.add(settingsManager, 'saveSetting').name('Save Setting');
+        let loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', ['Default']).name('Select Preset');
+        customPresetsFolder.add(settingsManager, 'loadSetting').name('Load Selected');
+        customPresetsFolder.add(settingsManager, 'deleteSetting').name('Delete Selected');
+        customPresetsFolder.add(settingsManager, 'reset').name('Reset to Default');
 
-            // Close all folders by default
-            if (gui.folders) {
-                gui.folders.forEach(f => {
-                    f.close();
-                });
+        function updatePresetDropdown() {
+            const saved = JSON.parse(localStorage.getItem('wl_custom_presets') || '{}');
+            const options = ['Default', ...Object.keys(saved)];
+            if (loadDropdown.options) {
+                loadDropdown = loadDropdown.options(options);
             } else {
-                for (let i in gui.__folders) {
-                    gui.__folders[i].close();
-                }
+                loadDropdown.destroy();
+                loadDropdown = customPresetsFolder.add(settingsManager, 'loadPreset', options).name('Select Preset');
             }
+        }
+        updatePresetDropdown();
+
+        // Reorder folders: most-used first
+        const folderOrder = [
+            flightFolder, audioFolder, debugFolder, navFolder, perfFolder, envFolder,
+            editorFolder
+        ].filter(Boolean);
+        const guiContainer = gui.domElement.querySelector('.children') || gui.domElement;
+        folderOrder.forEach(f => {
+            const dom = f.domElement || f;
+            if (dom && dom.parentElement) guiContainer.appendChild(dom);
+        });
+
+        // Close all folders by default
+        if (gui.folders) {
+            gui.folders.forEach(f => {
+                f.close();
+            });
+        } else {
+            for (let i in gui.__folders) {
+                gui.__folders[i].close();
+            }
+        }
         // ---------------------------
 
         isInitializingGui = false;

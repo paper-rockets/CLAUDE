@@ -34,23 +34,26 @@ const fbm = Fn(([p]) => {
 export function createProceduralSky() {
     const uTime = uniform(0.0);
     const uSunPosition = uniform(new THREE.Vector3(0.0, 0.5, -0.866).normalize());
-    const uSkyColorZenith = uniform(new THREE.Color(0x4a90d9));
-    const uSkyColorHorizon = uniform(new THREE.Color(0xb8d4e8));
-    const uSunColor = uniform(new THREE.Color(0xfffaeb));
-    const uCloudColor = uniform(new THREE.Color(0xfff8f0));
-    const uCloudShadowColor = uniform(new THREE.Color(0x8898a8));
+    const uSkyColorZenith = uniform(new THREE.Color(0x2a5090));
+    const uSkyColorMid = uniform(new THREE.Color(0xc85078));
+    const uSkyColorHorizon = uniform(new THREE.Color(0xffa07a));
+    const uSunColor = uniform(new THREE.Color(0xffaa00));
+    const uGradientPower = uniform(1.2);
+    const uGradientMidOffset = uniform(0.22);
+    const uGradientSkyEnabled = uniform(1.0);
+    const uSunCoronaIntensity = uniform(0.7);
+    const uCloudColor = uniform(new THREE.Color(0xfffaec));
+    const uCloudShadowColor = uniform(new THREE.Color(0xa89888));
     const uCloudCoverage = uniform(0.45);
-    const uCloudEdge = uniform(0.07);
-    const uCloudSpeed = uniform(0.02);
+    const uCloudEdge = uniform(0.06);
+    const uCloudSpeed = uniform(0.018);
     const uCloudTurbulence = uniform(0.0);
     const uCloudOpacity = uniform(1.0);
     const uStormDarken = uniform(0.0);
     const uNightFactor = uniform(0.0);
-    const uDuskFactor = uniform(0.0);
-    // Scales the full-width dusk horizon band. At the old hardcoded 1.2 this summed with
-    // baseSky*0.5 to about R 1.56 at the horizon, so red clipped while G/B sat near 1.0 and the
-    // whole band burned out to white. 0.7 keeps the gradient but holds the peak under 1.0.
+    const uDuskFactor = uniform(1.0);
     const uHorizonGlow = uniform(0.45);
+    const uEnableProceduralClouds = uniform(1.0);
 
     const material = new MeshBasicNodeMaterial({
         side: THREE.BackSide,
@@ -64,26 +67,39 @@ export function createProceduralSky() {
         const sunDir = normalize(uSunPosition);
         const sunDot = dot(dir, sunDir);
 
-        // Height-based atmospheric horizon to zenith blend
+        // Vertical altitude angle: 0.0 at horizon, 1.0 directly overhead
+        const alt = clamp(dir.y, 0.0, 1.0);
+
+        // 3-stop vertical atmospheric gradient (Horizon -> Mid-Sky -> Zenith)
+        const tLower = clamp(alt.div(max(uGradientMidOffset, float(0.01))), 0.0, 1.0);
+        const tUpper = clamp(alt.sub(uGradientMidOffset).div(max(float(1.0).sub(uGradientMidOffset), float(0.01))), 0.0, 1.0);
+
+        const curveLower = pow(tLower, uGradientPower);
+        const curveUpper = pow(tUpper, uGradientPower);
+
+        const lowerSky = mix(uSkyColorHorizon, uSkyColorMid, curveLower);
+        const gradientSky = mix(lowerSky, uSkyColorZenith, curveUpper);
+
+        // Backward-compatible 2-stop simple curve for baseSky
         const h = clamp(dir.y.mul(1.5), 0.0, 1.0);
-        const baseSky = mix(uSkyColorHorizon, uSkyColorZenith, pow(h, 0.6));
+        const twoStopSky = mix(uSkyColorHorizon, uSkyColorZenith, pow(h, 0.6));
+        const baseAtmosphere = mix(twoStopSky, gradientSky, uGradientSkyEnabled);
 
-        // Sun disc and golden corona glow
-        const sunDisc = smoothstep(0.998, 0.9995, sunDot).mul(uSunColor).mul(3.0);
-        const sunGlow = pow(clamp(sunDot, 0.0, 1.0), 12.0).mul(uSunColor).mul(0.5);
+        // Sun disc and forward atmospheric corona glow
+        const sunDisc = smoothstep(0.9985, 0.9997, sunDot).mul(uSunColor).mul(3.0);
+        const sunCorona = pow(clamp(sunDot, 0.0, 1.0), 16.0).mul(uSunColor).mul(uSunCoronaIntensity);
+        const sunHaze = pow(clamp(sunDot, 0.0, 1.0), 4.0).mul(uSkyColorHorizon).mul(0.35);
 
-        // Dusk / sunset horizon gradient
-        const horizonBand = pow(clamp(float(1.0).sub(abs(dir.y)), 0.0, 1.0), 1.5);
-        const duskGlow = horizonBand.mul(vec3(1.0, 0.45, 0.25)).mul(uDuskFactor).mul(uHorizonGlow);
+        // Horizon subtle warm rim
+        const horizonBand = pow(clamp(float(1.0).sub(abs(dir.y)), 0.0, 1.0), 3.0);
+        const duskGlow = horizonBand.mul(uSkyColorHorizon).mul(uHorizonGlow).mul(uDuskFactor);
 
-        // Night sky gradient
+        // Night sky base
         const nightBase = vec3(0.015, 0.02, 0.06);
         const nightSky = nightBase;
 
-        // Blend Day -> Dusk -> Night
-        const daySky = baseSky.add(sunGlow).add(sunDisc);
-        const duskSky = baseSky.mul(0.4).add(duskGlow).add(sunGlow.mul(0.8)).add(sunDisc.mul(0.5));
-        let sky = mix(daySky, duskSky, uDuskFactor);
+        // Composite atmospheric sky
+        let sky = baseAtmosphere.add(sunCorona).add(sunHaze).add(sunDisc).add(duskGlow);
         sky = mix(sky, nightSky, uNightFactor);
 
         // Storm darkening for base sky
@@ -131,7 +147,8 @@ export function createProceduralSky() {
         const finalCloudCol = mix(nightCloudCol, vec3(0.1, 0.12, 0.15), uStormDarken.mul(0.8));
 
         // Composite procedural clouds over sky
-        const compositeSky = mix(sky, finalCloudCol, finalAlpha);
+        const cloudContribution = finalAlpha.mul(uEnableProceduralClouds);
+        const compositeSky = mix(sky, finalCloudCol, cloudContribution);
 
         return vec4(compositeSky, 1.0);
     })();
@@ -145,9 +162,10 @@ export function createProceduralSky() {
         mesh,
         material,
         uniforms: {
-            uTime, uSunPosition, uSkyColorZenith, uSkyColorHorizon, uSunColor, uHorizonGlow,
+            uTime, uSunPosition, uSkyColorZenith, uSkyColorMid, uSkyColorHorizon, uSunColor,
+            uGradientPower, uGradientMidOffset, uGradientSkyEnabled, uSunCoronaIntensity, uHorizonGlow,
             uCloudColor, uCloudShadowColor, uCloudCoverage, uCloudEdge, uCloudSpeed,
-            uCloudTurbulence, uCloudOpacity, uStormDarken, uNightFactor, uDuskFactor
+            uCloudTurbulence, uCloudOpacity, uStormDarken, uNightFactor, uDuskFactor, uEnableProceduralClouds
         }
     };
 }

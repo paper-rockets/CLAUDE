@@ -63,9 +63,9 @@ export class FlightModelManager {
         this.toastEl = toast;
     }
 
-    showToast(message, icon = '🦅') {
+    showToast(message) {
         if (!this.toastEl) return;
-        this.toastEl.innerHTML = `<span style="font-size: 17px;">${icon}</span> <span>${message}</span>`;
+        this.toastEl.innerHTML = `<span>${message}</span>`;
         this.toastEl.style.opacity = '1';
         this.toastEl.style.transform = 'translateX(-50%) translateY(0px)';
         
@@ -254,7 +254,7 @@ export class FlightModelManager {
         }
 
         if (!silent) {
-            this.showToast(`${cfg.name}`, cfg.icon || '🦅');
+            this.showToast(`${cfg.name}`);
         }
 
         // Trigger custom event for UI updates
