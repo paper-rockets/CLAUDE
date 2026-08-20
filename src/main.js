@@ -360,7 +360,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         godRayDecay: 0.927,
         lumMin: 0.45,
         lumMax: 0.97,
-        sunAltitude: 160,
+        sunAltitude: 10000,
         sunAzimuth: 15,
         lockSunToPlayer: true,
         sunDistance: 20000,
@@ -547,6 +547,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         
         // Clear blue sky (day)
         params.timeOfDay = 'day';
+        if (typeof window.setTimePhase === 'function') window.setTimePhase(0);
+        else timePhase = 0;
         
         // Very little cloud
         if (typeof cloudParams !== 'undefined') {
@@ -754,15 +756,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     fogFolder.add(params, 'fogPlane').name('Enable Fog').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     params.biomeFogOffset = 0;
     const fogOffsetCtrl = fogFolder.add(params, 'biomeFogOffset', -50, 50).name('Biome Fog Offset').onChange(v => {
-        if (typeof playerGrp !== 'undefined') {
-            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+        if (typeof playerGrp !== 'undefined' && playerGrp.position) {
+            const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            const bName = b ? b.name : 'Unknown';
             window.biomeFogSettings[bName] = v;
         }
     });
     // Add an interval to update the slider when biome changes
     setInterval(() => {
-        if (typeof playerGrp !== 'undefined' && !fogOffsetCtrl.__onChangeBlocked) {
-            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+        if (typeof playerGrp !== 'undefined' && playerGrp.position && !fogOffsetCtrl.__onChangeBlocked) {
+            const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            const bName = b ? b.name : 'Unknown';
             const currentOffset = window.biomeFogSettings[bName] || 0;
             if (params.biomeFogOffset !== currentOffset) {
                 params.biomeFogOffset = currentOffset;
@@ -1077,6 +1081,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (typeof envFolder !== 'undefined') envFolder.open();
             isFlightPaused = true;
             document.getElementById('pause-toggle').innerText = '▶';
+            btn.innerText = '▲';
             btn.style.color = '#ff4444';
             btn.style.textShadow = '0 0 10px rgba(255, 68, 68, 0.9), 0 1px 3px rgba(0, 0, 0, 0.5)';
             btn.style.transform = 'scale(1.15)';
@@ -1101,6 +1106,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
             if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
 
+            btn.innerText = '▲';
             btn.style.color = 'rgba(255, 255, 255, 0.95)';
             btn.style.textShadow = '0 1px 3px rgba(0, 0, 0, 0.35), 0 0 8px rgba(0, 0, 0, 0.2)';
             btn.style.transform = 'scale(1.0)';
@@ -3972,15 +3978,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const tempVecMoonOff = new THREE.Vector3();
     const tempVecToLight = new THREE.Vector3();
     const tempColorTarget = new THREE.Color();
-    const quatIdentity = new THREE.Quaternion();
+    let timePhase = parseInt(localStorage.getItem('wl_timePhase')) || 0; // 0: Day, 1: Dusk, 2: Deep Twilight
 
     let envConfigs = [
-        {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.053, dirI: 2.14, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
-        {bg: 0x2a5090, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk — deep blue zenith, warm orange horizon+fog
-        {bg: 0x162d5a, fog: 0x224888, amb: 0x7788bb, dir: 0xffbb55, ambI: 1.5, dirI: 3.5, starOp: 1.0, sunY: -8000, moonY: 1600, glintCol: 0xffaa44, cloudCol: 0x2e4a80}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
+        {name: 'Day', bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.2, dirI: 2.4, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
+        {name: 'Dusk', bg: 0x2a5090, fog: 0xff8c66, amb: 0xffdab9, dir: 0xff9933, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 400, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk — deep blue zenith, warm orange horizon+fog
+        {name: 'Twilight', bg: 0x0f1d3a, fog: 0x16284d, amb: 0x556688, dir: 0x88bbff, ambI: 0.8, dirI: 1.8, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x66aaff, cloudCol: 0x223355}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
     ];
-    let currentSunY = 1500;
-    let currentMoonY = -1500;
+    let currentSunY = envConfigs[timePhase] ? envConfigs[timePhase].sunY : 10000;
+    let currentMoonY = envConfigs[timePhase] ? envConfigs[timePhase].moonY : -8000;
     let currentFps = 60;
 
     let lastFpsTime = performance.now();
@@ -4044,9 +4050,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const activeCam = isGodMode ? godCamera : camera;
             window.rainSystem.update(time, activeCam, params);
         }
-        if (typeof window.fogUniforms !== 'undefined' && window.fogGroup) {
+        if (typeof window.fogUniforms !== 'undefined' && window.fogGroup && typeof playerGrp !== 'undefined' && playerGrp.position) {
             window.fogUniforms.uTime.value = time;
-            const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
+            const currentB = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            const bName = currentB ? currentB.name : '🌊 Open Ocean';
             const biomeFogOffset = (window.biomeFogSettings && window.biomeFogSettings[bName]) ? window.biomeFogSettings[bName] : 0;
             const currentGroundY = getWorldHeight(playerGrp.position.x, playerGrp.position.z);
             // Smoothly interpolate fog group Y to prevent snapping, but snap X and Z to player
@@ -4091,7 +4098,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         starMaterial.opacity = 0;
         starField.visible = false;
 
-        // Procedural Sky — per-biome lerp + night factor
+        // Player warm lantern lights modulation (magical lantern at Twilight, warm rim at Dusk, subtle at Day)
+        const kikiGlow = (timePhase === 2) ? 2.5 : (timePhase === 1 ? 1.4 : 0.4);
+        if (typeof kikiLeftLight !== 'undefined' && typeof kikiRightLight !== 'undefined') {
+            kikiLeftLight.intensity += (kikiGlow - kikiLeftLight.intensity) * decayEnv;
+            kikiRightLight.intensity += (kikiGlow - kikiRightLight.intensity) * decayEnv;
+        }
+
+        // Procedural Sky — per-biome lerp + time of day factors
         if (skyUniforms && typeof playerGrp !== 'undefined') {
             const skyBiomeName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
             const biomeTarget = BIOME_SKY_CONFIGS[skyBiomeName] || BIOME_SKY_CONFIGS['🌊 Open Ocean'];
@@ -4126,23 +4140,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 }
             }
 
-            // Night factor from sun Y position
-            const nightFactor = THREE.MathUtils.smoothstep(-currentSunY, -200, 800);
-            skyUniforms.uNightFactor.value = nightFactor;
+            // Target factors based on currentSunY altitude and active phase
+            const targetNightFactor = (timePhase === 2) ? 1.0 : (THREE.MathUtils.smoothstep(-currentSunY, -500, 3000));
+            const duskHigh = 1.0 - THREE.MathUtils.smoothstep(currentSunY, 800, 3500);
+            const duskLow = THREE.MathUtils.smoothstep(currentSunY, -2000, -100);
+            const targetDuskFactor = (timePhase === 1) ? 1.0 : ((timePhase === 0 || timePhase === 2) ? 0.0 : (duskHigh * duskLow));
 
-            // Dusk factor: peaks when sun is low (sunY ~100-400), 0 at morning (1500) and night (-8000)
-            const duskHigh = 1.0 - THREE.MathUtils.smoothstep(currentSunY, 300, 800);
-            const duskLow = THREE.MathUtils.smoothstep(currentSunY, -500, 0);
-            const duskFactor = duskHigh * duskLow;
-            skyUniforms.uDuskFactor.value = duskFactor;
+            skyUniforms.uNightFactor.value += (targetNightFactor - skyUniforms.uNightFactor.value) * decayEnv;
+            skyUniforms.uDuskFactor.value += (targetDuskFactor - skyUniforms.uDuskFactor.value) * decayEnv;
 
-            // BLOWOUT FIX. BIOME_SKY_CONFIGS drives skyHorizon per BIOME only, never per time of
-            // day, and every biome value is a pale near-white blue (0xb8d4e8, 0xd0e0f0, ...). So at
-            // sunset the whole sky turned orange while the horizon strip stayed pale and bright --
-            // that strip is the band that burned out and hid the model. Blend the horizon (and, more
-            // gently, the zenith) toward the active time-of-day colour so the horizon belongs to the
-            // sunset instead of glowing through it.
-            const towardEnv = Math.min(1.0, duskFactor + nightFactor);
+            // Blend horizon and zenith toward active time-of-day colour during dusk/twilight
+            const towardEnv = Math.min(1.0, skyUniforms.uDuskFactor.value + skyUniforms.uNightFactor.value);
             if (towardEnv > 0.001) {
                 skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(target.fog), towardEnv * 1.0);
                 skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(target.bg), towardEnv * 0.65);
@@ -4166,8 +4174,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         // Floating Crystals — respawn in Crystal Land
         const crystalDist = 1200;
         let inCrystalLand = false;
-        if (typeof playerGrp !== 'undefined') {
-            inCrystalLand = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name.includes('Crystal');
+        if (typeof playerGrp !== 'undefined' && playerGrp.position) {
+            const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+            inCrystalLand = b && b.name ? b.name.includes('Crystal') : false;
         }
         
         if (typeof instCrystals !== 'undefined') {
@@ -4217,7 +4226,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
 
 
-        const inNorthPole = typeof playerGrp !== 'undefined' && getBiomeAt(playerGrp.position.x, playerGrp.position.z).name.includes('North Pole');
+        const npBiome = (typeof playerGrp !== 'undefined' && playerGrp.position) ? getBiomeAt(playerGrp.position.x, playerGrp.position.z) : null;
+        const inNorthPole = npBiome && npBiome.name ? npBiome.name.includes('North Pole') : false;
         instIcebergs.visible = inNorthPole;
         if (inNorthPole) {
             const icebergDist = 900;
@@ -4230,7 +4240,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                         const nx = playerGrp.position.x + (Math.random() - 0.5) * icebergDist * 2.0;
                         const nz = playerGrp.position.z + (Math.random() - 0.5) * icebergDist * 2.0;
                         const h = getWorldHeight(nx, nz);
-                        const bName = getBiomeAt(nx, nz).name;
+                        const bObj = getBiomeAt(nx, nz);
+                        const bName = bObj ? bObj.name : '';
                         if (bName.includes('North Pole') && h < 4.0 && h > -4.0) {
                             const s = 0.6 + Math.random() * 1.8;
                             dummy.position.set(nx, 1.0 + Math.random() * 1.5, nz);
@@ -4276,8 +4287,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     
 
-        // Update Sun & Celestial positioning from parameters
-        const targetSunY = (params.sunAltitude !== undefined) ? params.sunAltitude : target.sunY;
+        // Update Sun & Celestial positioning from active environment config
+        const targetSunY = target.sunY;
         const decaySunY = 1.0 - Math.exp(-3.0 * dt);
         currentSunY += (targetSunY - currentSunY) * decaySunY;
         currentMoonY += (target.moonY - currentMoonY) * decaySunY;
@@ -4467,30 +4478,34 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             composer.setSize(window.innerWidth, window.innerHeight);
         }
     });
-
-    let timePhase = parseInt(localStorage.getItem('wl_timePhase')) || 0; // 0: Day, 1: Dusk, 2: Deep Twilight
-    
-    // ... lighting targets for lerping
-    const envTargets = {
-        bg: new THREE.Color(),
-        fog: new THREE.Color(),
-        amb: new THREE.Color(),
-        dir: new THREE.Color(),
-    };
-    
     const timeToggleBtn = document.getElementById('time-toggle');
+    const timeIcons = ['☀️', '🌇', '🌙'];
+    const timeNames = ['Day', 'Dusk', 'Twilight'];
+    
+    function setTimePhase(phase) {
+        timePhase = (phase % 3 + 3) % 3;
+        if (envConfigs[timePhase]) {
+            params.sunAltitude = envConfigs[timePhase].sunY;
+        }
+        if (timeToggleBtn) {
+            timeToggleBtn.innerText = timeIcons[timePhase];
+            timeToggleBtn.title = `Current: ${timeNames[timePhase]} (Click to cycle)`;
+        }
+        localStorage.setItem('wl_timePhase', timePhase);
+        if (typeof gui !== 'undefined') {
+            gui.controllersRecursive().forEach(c => {
+                if (c.property === 'sunAltitude') c.updateDisplay();
+            });
+        }
+    }
+    window.setTimePhase = setTimePhase;
+
     if (timeToggleBtn) {
-        // Restore saved time phase icon on load
-        if (timePhase === 1) timeToggleBtn.innerText = '🌇';
-        else if (timePhase === 2) timeToggleBtn.innerText = '🌙';
-        else timeToggleBtn.innerText = '☀️';
+        timeToggleBtn.innerText = timeIcons[timePhase] || '☀️';
+        timeToggleBtn.title = `Current: ${timeNames[timePhase] || 'Day'} (Click to cycle)`;
 
         timeToggleBtn.addEventListener('click', () => {
-            timePhase = (timePhase + 1) % 3;
-            if (timePhase === 0) timeToggleBtn.innerText = '☼';
-            else if (timePhase === 1) timeToggleBtn.innerText = '🌇';
-            else timeToggleBtn.innerText = '🌙';
-            localStorage.setItem('wl_timePhase', timePhase);
+            setTimePhase(timePhase + 1);
         });
     }
 
@@ -4878,21 +4893,24 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         // Update sliders when biome changes (same pattern as Ground Fog)
         setInterval(() => {
-            if (typeof playerGrp !== 'undefined') {
-                const bName = getBiomeAt(playerGrp.position.x, playerGrp.position.z).name;
-                const cfg = BIOME_SKY_CONFIGS[bName];
-                if (cfg) {
-                    skyEditorParams.coverage = cfg.coverage;
-                    skyEditorParams.edge = cfg.edge;
-                    skyEditorParams.speed = cfg.speed;
-                    skyEditorParams.skyZenith = '#' + cfg.skyZenith.toString(16).padStart(6, '0');
-                    skyEditorParams.skyHorizon = '#' + cfg.skyHorizon.toString(16).padStart(6, '0');
-                    skyEditorParams.cloudCol = '#' + cfg.cloudCol.toString(16).padStart(6, '0');
-                    skyEditorParams.cloudShadow = '#' + cfg.cloudShadow.toString(16).padStart(6, '0');
-                    skyEditorParams.turbulence = cfg.turbulence;
-                    skyEditorParams.stormDarken = cfg.stormDarken;
-                    [skyCtrlCoverage, skyCtrlEdge, skyCtrlSpeed, skyCtrlZenith, skyCtrlHorizon, skyCtrlCloudCol, skyCtrlCloudShadow, skyCtrlTurb, skyCtrlDarken].forEach(c => c.updateDisplay());
-                    skyFolder.title('☁️ Procedural Sky (' + bName + ')');
+            if (typeof playerGrp !== 'undefined' && playerGrp.position) {
+                const b = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+                const bName = b ? b.name : null;
+                if (bName) {
+                    const cfg = BIOME_SKY_CONFIGS[bName];
+                    if (cfg) {
+                        skyEditorParams.coverage = cfg.coverage;
+                        skyEditorParams.edge = cfg.edge;
+                        skyEditorParams.speed = cfg.speed;
+                        skyEditorParams.skyZenith = '#' + cfg.skyZenith.toString(16).padStart(6, '0');
+                        skyEditorParams.skyHorizon = '#' + cfg.skyHorizon.toString(16).padStart(6, '0');
+                        skyEditorParams.cloudCol = '#' + cfg.cloudCol.toString(16).padStart(6, '0');
+                        skyEditorParams.cloudShadow = '#' + cfg.cloudShadow.toString(16).padStart(6, '0');
+                        skyEditorParams.turbulence = cfg.turbulence;
+                        skyEditorParams.stormDarken = cfg.stormDarken;
+                        [skyCtrlCoverage, skyCtrlEdge, skyCtrlSpeed, skyCtrlZenith, skyCtrlHorizon, skyCtrlCloudCol, skyCtrlCloudShadow, skyCtrlTurb, skyCtrlDarken].forEach(c => c.updateDisplay());
+                        skyFolder.title('Procedural Sky (' + bName + ')');
+                    }
                 }
             }
         }, 500);
@@ -4905,9 +4923,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         atmoFolder.add(atmoParams, 'dirI', 0, 5).name('Sun Intensity').onChange(v => envConfigs[timePhase].dirI = v);
         atmoFolder.addColor(atmoParams, 'glintCol').name('Water Glint').onChange(v => envConfigs[timePhase].glintCol = parseInt(v.replace('#',''), 16));
         
-        // ☀️ Dedicated Sun & God Rays Controls
-        const sunGodRaysFolder = atmoFolder.addFolder('☀️ Sun & God Rays Controls');
-        sunGodRaysFolder.add(params, 'sunAltitude', -1500, 6000, 10).name('Sun Height (Altitude)').onChange(v => {
+        // Dedicated Sun & God Rays Controls
+        const sunGodRaysFolder = atmoFolder.addFolder('Sun & God Rays Controls');
+        sunGodRaysFolder.add(params, 'sunAltitude', -8000, 15000, 50).name('Sun Height (Altitude)').onChange(v => {
             currentSunY = v;
         });
         sunGodRaysFolder.add(params, 'sunAzimuth', -180, 180, 1).name('Sun Azimuth (Angle °)');

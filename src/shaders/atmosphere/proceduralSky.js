@@ -81,7 +81,9 @@ export function createProceduralSky() {
         const nightSky = nightBase;
 
         // Blend Day -> Dusk -> Night
-        let sky = mix(baseSky.add(sunGlow).add(sunDisc), duskGlow.add(baseSky.mul(0.5)), uDuskFactor);
+        const daySky = baseSky.add(sunGlow).add(sunDisc);
+        const duskSky = baseSky.mul(0.4).add(duskGlow).add(sunGlow.mul(0.8)).add(sunDisc.mul(0.5));
+        let sky = mix(daySky, duskSky, uDuskFactor);
         sky = mix(sky, nightSky, uNightFactor);
 
         // Storm darkening for base sky

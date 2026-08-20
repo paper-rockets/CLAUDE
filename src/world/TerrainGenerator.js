@@ -115,9 +115,13 @@ export function getIslandData(worldX, worldZ) {
 }
 
 export function getBiomeAt(worldX, worldZ) {
+    if (worldX === undefined || isNaN(worldX) || worldZ === undefined || isNaN(worldZ)) {
+        return ZONE_OCEAN || ZONES[0];
+    }
     const data = getIslandData(worldX, worldZ);
-    if (data.mask === 0) return ZONE_OCEAN;
-    return data.mainBiome;
+    if (!data) return ZONE_OCEAN || ZONES[0];
+    if (data.mask === 0) return ZONE_OCEAN || ZONES[0];
+    return data.mainBiome || ZONE_OCEAN || ZONES[0];
 }
 
 export function getWorldHeight(worldX, worldZ) {
