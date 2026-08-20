@@ -17,7 +17,7 @@ import {
   Fn, uniform, float, vec2, vec3, vec4,
   sin, cos, atan, abs, dot, cross, normalize, length, mix, pow, max, clamp,
   fract, floor, smoothstep, distance, reflect,
-  positionLocal, positionWorld, cameraPosition
+  positionLocal, positionWorld, cameraPosition, texture
 } from 'three/tsl';
 
 /* ============================================================
@@ -53,6 +53,72 @@ export const objActiveUniform = uniform(0.0);
 export const objRippleStrengthUniform = uniform(1.0);
 export const foamSpreadUniform = uniform(0.65);
 export const foamOpacityUniform = uniform(1.0);
+
+/* ============================================================
+   Shoreline Depth Field — CPU-baked terrain height texture
+   (Phase 1 infrastructure. Populated by WaterAnime/TerrainDepthField.js
+    via WaterSystem; consumed by the shore shading in colorNode.)
+
+   Sampling contract for the shore shading pass:
+     const fieldUv = positionWorld.xz.sub(depthFieldOriginUniform).div(depthFieldSizeUniform);
+     const terrainH = terrainDepthTexNode.sample(fieldUv).r;
+     const depth    = waterLevelUniform.sub(terrainH);
+   `terrainDepthTexNode` is a stable node created at module load, so the
+   graph can never capture null. Its bound DataTexture is swapped in by
+   setTerrainDepthTexture() before createOpenSeaMaterial() runs.
+   Out of bounds the texture clamps to edge, so also mask on fieldUv
+   being inside 0..1 and on depthFieldValidUniform before applying shore FX.
+   Until the first bake completes every texel reads DEPTH_FIELD_SENTINEL
+   (-1000.0) => "very deep", so all shore effects fall away naturally.
+   ============================================================ */
+
+// Sentinel height written into unbaked texels. Anything at/below this is "no data".
+export const DEPTH_FIELD_SENTINEL = -1000.0;
+
+// 1x1 placeholder so the TSL graph always has a valid, correctly-formatted
+// texture bound. Must match the real field's format/type/filters/wrapping so
+// the generated WGSL is identical when the real texture is swapped in.
+const _depthFieldPlaceholder = new THREE.DataTexture(
+  new Float32Array([DEPTH_FIELD_SENTINEL]), 1, 1, THREE.RedFormat, THREE.FloatType
+);
+_depthFieldPlaceholder.minFilter = THREE.LinearFilter;
+_depthFieldPlaceholder.magFilter = THREE.LinearFilter;
+_depthFieldPlaceholder.wrapS = THREE.ClampToEdgeWrapping;
+_depthFieldPlaceholder.wrapT = THREE.ClampToEdgeWrapping;
+_depthFieldPlaceholder.generateMipmaps = false;
+_depthFieldPlaceholder.flipY = false;
+_depthFieldPlaceholder.unpackAlignment = 1;
+_depthFieldPlaceholder.needsUpdate = true;
+
+// Stable texture node. Never reassigned - only its bound texture value changes,
+// which THREE.NodeSampledTexture.update() picks up automatically each frame.
+export const terrainDepthTexNode = texture(_depthFieldPlaceholder);
+// Alias under the name used in WATER_SHORE_PLAN.md; same node object.
+export const terrainDepthTexUniform = terrainDepthTexNode;
+
+/**
+ * Binds the baked terrain-height DataTexture to the shared depth-field node.
+ * Call this BEFORE createOpenSeaMaterial() so the graph is built against the
+ * real texture (a later call still works - the binding is refreshed per frame).
+ * @param {THREE.DataTexture} tex
+ */
+export function setTerrainDepthTexture(tex) {
+  if (tex) terrainDepthTexNode.value = tex;
+}
+
+export const depthFieldOriginUniform  = uniform(new THREE.Vector2(0, 0));
+export const depthFieldSizeUniform    = uniform(4000.0);
+export const depthFieldValidUniform   = uniform(0.0);   // 0 until the first bake completes
+export const waterLevelUniform        = uniform(2.4);   // mirrors openSeaMesh.position.y
+
+export const sandColorUniform         = uniform(new THREE.Color(0.85, 0.80, 0.62));
+export const shoreShallowColorUniform = uniform(new THREE.Color(0.32, 0.72, 0.70));
+export const shoreDepthUniform        = uniform(6.0);
+export const shoreOpacityUniform      = uniform(0.10);
+export const shoreFoamWidthUniform    = uniform(2.2);
+export const shoreFoamSpeedUniform    = uniform(0.8);
+export const shoreFoamStrengthUniform = uniform(1.0);
+export const shoreRefractionUniform   = uniform(0.35);
 
 /* ============================================================
    Gerstner Swell — 5 Multi-directional Spectral Components

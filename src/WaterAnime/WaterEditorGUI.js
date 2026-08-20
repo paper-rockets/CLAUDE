@@ -15,6 +15,14 @@ import {
   horizonColorUniform,
   zenithColorUniform,
   sunColorUniform,
+  sandColorUniform,
+  shoreShallowColorUniform,
+  shoreDepthUniform,
+  shoreOpacityUniform,
+  shoreFoamWidthUniform,
+  shoreFoamSpeedUniform,
+  shoreFoamStrengthUniform,
+  shoreRefractionUniform,
   WAVE_PARAMS,
   updateWaveUniforms,
   setWindDirection,
@@ -63,6 +71,8 @@ export class WaterEditorGUI {
             horizon: '#' + horizonColorUniform.value.getHexString(),
             zenith: '#' + zenithColorUniform.value.getHexString(),
             sun: '#' + sunColorUniform.value.getHexString(),
+            sand: '#' + sandColorUniform.value.getHexString(),
+            shoreShallow: '#' + shoreShallowColorUniform.value.getHexString(),
             heightY: waterSystem.openSeaMesh ? waterSystem.openSeaMesh.position.y : 2.4,
             windAngle: 138,
             windSpread: 45
@@ -97,6 +107,16 @@ export class WaterEditorGUI {
         fSurface.add(foamAmountUniform, 'value', 0.0, 3.0, 0.05).name('Foam Amount');
         fSurface.add(chopPatchinessUniform, 'value', 0.0, 3.0, 0.05).name('Chop Patchiness');
         fSurface.add(foamEnabledUniform, 'value', 0.0, 1.0, 1.0).name('Foam Enabled (0/1)');
+
+        const fShore = this.gui.addFolder('🏖️ Shore');
+        fShore.addColor(colors, 'sand').name('Sand Band Color').onChange(c => sandColorUniform.value.set(c));
+        fShore.addColor(colors, 'shoreShallow').name('Shore Shallow Color').onChange(c => shoreShallowColorUniform.value.set(c));
+        fShore.add(shoreDepthUniform, 'value', 0.5, 30.0, 0.1).name('Shore Depth (m)');
+        fShore.add(shoreOpacityUniform, 'value', 0.0, 1.0, 0.01).name('Shore Opacity');
+        fShore.add(shoreFoamWidthUniform, 'value', 0.0, 12.0, 0.1).name('Shore Foam Width (m)');
+        fShore.add(shoreFoamSpeedUniform, 'value', 0.0, 4.0, 0.05).name('Shore Foam Speed');
+        fShore.add(shoreFoamStrengthUniform, 'value', 0.0, 3.0, 0.05).name('Shore Foam Strength');
+        fShore.add(shoreRefractionUniform, 'value', 0.0, 2.0, 0.01).name('Shore Refraction');
 
         const fSpectrum = this.gui.addFolder('📊 Spectral Waves');
         fSpectrum.add({ randomize: () => {

@@ -21,9 +21,12 @@ import {
   qualityModeUniform,
   distanceLodUniform,
   lodDistanceThresholdUniform,
+  waterLevelUniform,
+  setTerrainDepthTexture,
   getWaterHeightAt,
   getWaterNormalAt
 } from './OpenSeaOcean.js';
+import { TerrainDepthField } from './TerrainDepthField.js';
 
 export class WaterSystem {
     constructor(scene, renderer) {
@@ -41,10 +44,19 @@ export class WaterSystem {
         this.qualityMode = 'high'; // 'high' | 'performance'
         this.distanceLod = true;
 
+        // CPU-baked terrain height field for shoreline shading.
+        // MUST be constructed and registered before createOpenSeaMaterial(): TSL node
+        // graphs are built once, so the texture has to exist when the graph is created.
+        this.depthField = new TerrainDepthField(512, 4000, 32);
+        setTerrainDepthTexture(this.depthField.texture);
+
+        this.waterLevel = 2.4;
+        waterLevelUniform.value = this.waterLevel;
+
         this.openSeaMaterial = createOpenSeaMaterial();
         this.openSeaMesh = new THREE.Mesh(this.geometries['512'], this.openSeaMaterial);
         this.openSeaMesh.frustumCulled = false;
-        this.openSeaMesh.position.y = 2.4;
+        this.openSeaMesh.position.y = this.waterLevel;
         this.scene.add(this.openSeaMesh);
 
         this.visible = true;
@@ -88,7 +100,23 @@ export class WaterSystem {
     }
 
     setHeight(y) {
+        this.waterLevel = y;
+        waterLevelUniform.value = y;
         if (this.openSeaMesh) this.openSeaMesh.position.y = y;
+    }
+
+    /**
+     * Re-bake the terrain depth field around a new centre. Cheap - the actual
+     * height sampling is amortised across subsequent tickDepthField() calls.
+     * Called from updateTerrainGeometry() on every 150 m terrain step.
+     */
+    rebuildDepthField(centerX, centerZ) {
+        if (this.depthField) this.depthField.rebuild(centerX, centerZ);
+    }
+
+    /** Advance the amortised depth-field bake by one row block. No-op when idle. */
+    tickDepthField() {
+        if (this.depthField) this.depthField.tick();
     }
 
     getWaterHeight(x, z, time = 0) {
@@ -125,6 +153,10 @@ export class WaterSystem {
     }
 
     dispose() {
+        if (this.depthField) {
+            this.depthField.dispose();
+            this.depthField = null;
+        }
         if (this.openSeaMesh) {
             this.scene.remove(this.openSeaMesh);
             this.openSeaMesh.geometry.dispose();

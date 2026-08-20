@@ -11,7 +11,7 @@ import terrainNorthPole, { northPoleColors } from './world/biomes/terrain-northp
 import { WaterSystem } from './WaterAnime/WaterSystem.js';
 import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
 import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
-import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform } from './WaterAnime/OpenSeaOcean.js';
+import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform, deepColorUniform, shallowColorUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 import { GroundFogEditor } from './ui/GroundFogEditor.js';
 
@@ -333,7 +333,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
-        fogIntensity: 2.0,
+        fogIntensity: 3.5,   // dense golden-hour fog; higher = denser (far = 800/fogIntensity)
         terrainSmoothing: 0.0,
         trails: isWindTrailsOn, lockSunToPlayer: true,
         shadows: isShadowsOn,
@@ -356,8 +356,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         fogPlane: false,
         godRays: !LOW_GFX,
         godRayIntensity: 0.65,
+        godRayDensity: 0.50,
+        godRayDecay: 0.927,
+        lumMin: 0.45,
+        lumMax: 0.97,
+        sunAltitude: 160,
+        sunAzimuth: 15,
+        lockSunToPlayer: true,
+        sunDistance: 20000,
+        sunDiscScale: 1.8,
         highlightKnee: 0.75,
-        horizonGlow: 0.7,
+        horizonGlow: 0.45,
         treeScale: 1.5,
         quality: LOW_GFX ? 'Low' : 'Regular',
         showTerrain: true,
@@ -1412,6 +1421,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         
         const gridX = Math.round(playerX / stepThreshold) * stepThreshold;
         const gridZ = Math.round(playerZ / stepThreshold) * stepThreshold;
+        
+        // Re-bake the water shoreline depth field over the same footprint.
+        // Cheap here: the height sampling is amortised by tickDepthField() in the render loop.
+        if (animeWaterSystem) animeWaterSystem.rebuildDepthField(gridX, gridZ);
         
         terrain.position.set(gridX, 0, gridZ);
         
@@ -3963,7 +3976,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     let envConfigs = [
         {bg: 0x8cbce6, fog: 0x8cbce6, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.053, dirI: 2.14, starOp: 0, sunY: 1500, moonY: -1500, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
-        {bg: 0xffa07a, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk (lower sun)
+        {bg: 0x2a5090, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xffc090}, // Dusk — deep blue zenith, warm orange horizon+fog
         {bg: 0x162d5a, fog: 0x224888, amb: 0x7788bb, dir: 0xffbb55, ambI: 1.5, dirI: 3.5, starOp: 1.0, sunY: -8000, moonY: 1600, glintCol: 0xffaa44, cloudCol: 0x2e4a80}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
     ];
     let currentSunY = 1500;
@@ -4010,6 +4023,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const _wsd = (dirLight && playerGrp) ? new THREE.Vector3().copy(dirLight.position).sub(playerGrp.position).normalize() : null;
             animeWaterSystem.update(dt, time, activeCam, playerGrp ? playerGrp.position : null, _wsd);
         }
+        // Advance the amortised terrain depth-field bake (no-op when idle)
+        if (animeWaterSystem) animeWaterSystem.tickDepthField();
         if (typeof terrainUniforms !== 'undefined') {
             terrainUniforms.uTime.value = time;
             if (typeof dirLight !== 'undefined') {
@@ -4130,7 +4145,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const towardEnv = Math.min(1.0, duskFactor + nightFactor);
             if (towardEnv > 0.001) {
                 skyUniforms.uSkyColorHorizon.value.lerp(tempColorTarget.setHex(target.fog), towardEnv * 1.0);
-                skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(target.bg), towardEnv * 0.35);
+                skyUniforms.uSkyColorZenith.value.lerp(tempColorTarget.setHex(target.bg), towardEnv * 0.65);
             }
 
         }
@@ -4261,17 +4276,29 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     
 
-        // Keep the physical sun and flare exactly 20,000 units away directly in front of the player's flight path
-        const decaySunY = 1.0 - Math.exp(-2.0 * dt);
-        currentSunY += (target.sunY - currentSunY) * decaySunY;
+        // Update Sun & Celestial positioning from parameters
+        const targetSunY = (params.sunAltitude !== undefined) ? params.sunAltitude : target.sunY;
+        const decaySunY = 1.0 - Math.exp(-3.0 * dt);
+        currentSunY += (targetSunY - currentSunY) * decaySunY;
         currentMoonY += (target.moonY - currentMoonY) * decaySunY;
 
-        tempVecSunFwd.set(0, 0, -20000);
-        if (params.lockSunToPlayer) { tempVecSunFwd.applyQuaternion(playerGrp.quaternion); }
+        const azimuthRad = THREE.MathUtils.degToRad(params.sunAzimuth !== undefined ? params.sunAzimuth : 0);
+        const sunDist = params.sunDistance || 20000;
+        tempVecSunFwd.set(
+            Math.sin(azimuthRad) * sunDist,
+            0,
+            -Math.cos(azimuthRad) * sunDist
+        );
+        if (params.lockSunToPlayer) {
+            tempVecSunFwd.applyQuaternion(playerGrp.quaternion);
+        }
 
         // Sun positioning & visibility
         staticSun.position.copy(playerGrp.position).add(tempVecSunFwd);
         staticSun.position.y = playerGrp.position.y * 0.45 + currentSunY;
+        if (params.sunDiscScale && staticSun.scale.x !== params.sunDiscScale) {
+            staticSun.scale.setScalar(params.sunDiscScale);
+        }
         staticSun.visible = (timePhase !== 2);
 
         // Moon positioning
@@ -4877,6 +4904,82 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         atmoFolder.add(atmoParams, 'ambI', 0, 3).name('Amb Intensity').onChange(v => envConfigs[timePhase].ambI = v);
         atmoFolder.add(atmoParams, 'dirI', 0, 5).name('Sun Intensity').onChange(v => envConfigs[timePhase].dirI = v);
         atmoFolder.addColor(atmoParams, 'glintCol').name('Water Glint').onChange(v => envConfigs[timePhase].glintCol = parseInt(v.replace('#',''), 16));
+        
+        // ☀️ Dedicated Sun & God Rays Controls
+        const sunGodRaysFolder = atmoFolder.addFolder('☀️ Sun & God Rays Controls');
+        sunGodRaysFolder.add(params, 'sunAltitude', -1500, 6000, 10).name('Sun Height (Altitude)').onChange(v => {
+            currentSunY = v;
+        });
+        sunGodRaysFolder.add(params, 'sunAzimuth', -180, 180, 1).name('Sun Azimuth (Angle °)');
+        sunGodRaysFolder.add(params, 'lockSunToPlayer').name('Lock Sun to Player');
+        sunGodRaysFolder.add(params, 'sunDiscScale', 0.5, 5.0, 0.1).name('Sun Disc Size');
+        
+        sunGodRaysFolder.add(params, 'godRays').name('God Rays Enable').onChange(v => {
+            godRaysPass.enabled = v;
+        });
+        sunGodRaysFolder.add(params, 'godRayIntensity', 0, 2.5, 0.05).name('Ray Intensity').onChange(v => {
+            godRaysPass.uniforms.uIntensity.value = v;
+        });
+        sunGodRaysFolder.add(params, 'godRayDensity', 0.1, 1.5, 0.05).name('Ray Density').onChange(v => {
+            godRaysPass.uniforms.uDensity.value = v;
+        });
+        sunGodRaysFolder.add(params, 'godRayDecay', 0.80, 0.995, 0.005).name('Ray Decay').onChange(v => {
+            godRaysPass.uniforms.uDecay.value = v;
+        });
+        sunGodRaysFolder.add(params, 'lumMin', 0.0, 1.0, 0.01).name('Lum Gate Min').onChange(v => {
+            godRaysPass.uniforms.uLumMin.value = v;
+        });
+        sunGodRaysFolder.add(params, 'lumMax', 0.0, 1.0, 0.01).name('Lum Gate Max').onChange(v => {
+            godRaysPass.uniforms.uLumMax.value = v;
+        });
+
+        const rayColors = {
+            inner: '#' + godRaysPass.uniforms.uRayColorInner.value.getHexString(),
+            outer: '#' + godRaysPass.uniforms.uRayColorOuter.value.getHexString(),
+            applyPreset: () => {
+                timePhase = 1;
+                localStorage.setItem('wl_timePhase', 1);
+                params.sunAltitude = 180;
+                params.sunAzimuth = 15;
+                params.lockSunToPlayer = true;
+                params.sunDiscScale = 1.8;
+                params.godRays = true;
+                godRaysPass.enabled = true;
+                params.godRayIntensity = 0.75;
+                godRaysPass.uniforms.uIntensity.value = 0.75;
+                params.godRayDensity = 0.55;
+                godRaysPass.uniforms.uDensity.value = 0.55;
+                params.godRayDecay = 0.93;
+                godRaysPass.uniforms.uDecay.value = 0.93;
+                
+                envConfigs[1].bg = 0x2a5090;
+                envConfigs[1].fog = 0xffa07a;
+                envConfigs[1].amb = 0xffdab9;
+                envConfigs[1].dir = 0xffaa00;
+                envConfigs[1].glintCol = 0xffaa00;
+
+                if (skyUniforms) {
+                    skyUniforms.uHorizonGlow.value = 0.7;
+                    skyUniforms.uSkyColorZenith.value.setHex(0x2a5090);
+                    skyUniforms.uSkyColorHorizon.value.setHex(0xffa07a);
+                }
+                if (typeof zenithColorUniform !== 'undefined') zenithColorUniform.value.setHex(0x2a5090);
+                if (typeof horizonColorUniform !== 'undefined') horizonColorUniform.value.setHex(0xffa07a);
+                if (typeof deepColorUniform !== 'undefined') deepColorUniform.value.setHex(0x121a24);
+                if (typeof shallowColorUniform !== 'undefined') shallowColorUniform.value.setHex(0xd05432);
+                
+                updateAtmoParamsFromPhase();
+                sunGodRaysFolder.controllers.forEach(c => c.updateDisplay());
+                if (atmoFolder) atmoFolder.controllers.forEach(c => c.updateDisplay());
+            }
+        };
+        sunGodRaysFolder.addColor(rayColors, 'inner').name('Ray Color (Inner)').onChange(v => {
+            godRaysPass.uniforms.uRayColorInner.value.set(v);
+        });
+        sunGodRaysFolder.addColor(rayColors, 'outer').name('Ray Color (Outer)').onChange(v => {
+            godRaysPass.uniforms.uRayColorOuter.value.set(v);
+        });
+        sunGodRaysFolder.add(rayColors, 'applyPreset').name('✨ Apply Sunset Photo Look');
         
         // 🌙 Dedicated Moonlight & Night Editor
         const moonParams = {
