@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { LOW_GFX } from '../config/constants.js';
+import { budgetedPixelRatio, deviceTier, tierSettings, describeTier } from './DeviceTier.js';
 
 const container = document.getElementById('app');
 
@@ -16,9 +17,22 @@ export const renderer = new WebGPURenderer({
     powerPreference: 'high-performance'
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(LOW_GFX ? 0.5 : Math.min(window.devicePixelRatio, 1.5));
-renderer.shadowMap.enabled = !LOW_GFX;
-renderer.shadowMap.type = LOW_GFX ? THREE.BasicShadowMap : THREE.PCFShadowMap;
+
+// Cap by TOTAL PIXEL COUNT, not by device pixel ratio. A 4K panel reporting dpr 2 would
+// otherwise render 7680x4320 = 33M pixels; every full-screen pass then costs 4x what it
+// does at native 4K. budgetedPixelRatio() derives the ratio from the tier's pixel budget.
+export function applyRenderBudget(scale = 1.0) {
+    const ratio = LOW_GFX
+        ? 0.5
+        : budgetedPixelRatio(window.innerWidth, window.innerHeight) * scale;
+    renderer.setPixelRatio(Math.max(0.5, ratio));
+    return ratio;
+}
+applyRenderBudget();
+
+renderer.shadowMap.enabled = !LOW_GFX && tierSettings.shadows;
+renderer.shadowMap.type = (LOW_GFX || deviceTier === 'mobile') ? THREE.BasicShadowMap : THREE.PCFShadowMap;
+console.info('[Wanderlust] render tier:', describeTier());
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.8;
 

@@ -37,7 +37,18 @@ function getBiomeFromTempMoist(temp, moist) {
 const _tempC1 = new THREE.Color();
 const _tempC2 = new THREE.Color();
 
-let _cacheIslandX = NaN, _cacheIslandZ = NaN, _cacheIslandResult = null;
+// Island data is the single most expensive thing in terrain generation: 7 simplex-noise
+// evaluations per call, and it is called ~7 times per terrain vertex.
+//
+// The previous cache was a single slot. The terrain loop samples (x,z), then (x-12,z),
+// (x+12,z), (x,z-12), (x,z+12) for normals -- so every call evicted the one before it and
+// the hit rate was effectively zero. A small keyed map turns those 7 calls into at most 2.
+const _islandCache = new Map();
+const ISLAND_CACHE_LIMIT = 24000;
+
+export function clearIslandCache() {
+    _islandCache.clear();
+}
 
 export function computeIslandData(worldX, worldZ) {
     const warpX = snoise(worldX / 120000.0, worldZ / 120000.0) * 8000.0;
@@ -104,13 +115,17 @@ export function computeIslandData(worldX, worldZ) {
 }
 
 export function getIslandData(worldX, worldZ) {
-    if (worldX === _cacheIslandX && worldZ === _cacheIslandZ && _cacheIslandResult) {
-        return _cacheIslandResult;
-    }
+    // Quantise to 0.5 units. Island data varies over tens of thousands of units, so half a
+    // metre is far below any visible change, and it makes the neighbouring normal taps hit.
+    // Stride must exceed twice the maximum quantised |z| or distinct points collide.
+    // 2^22 covers +/-1,048,576 world units on Z; the whole biome map lives inside +/-100k.
+    const key = Math.round(worldX * 2) * 4194304 + (Math.round(worldZ * 2) + 2097152);
+    const hit = _islandCache.get(key);
+    if (hit !== undefined) return hit;
+
     const res = computeIslandData(worldX, worldZ);
-    _cacheIslandX = worldX;
-    _cacheIslandZ = worldZ;
-    _cacheIslandResult = res;
+    if (_islandCache.size >= ISLAND_CACHE_LIMIT) _islandCache.clear();
+    _islandCache.set(key, res);
     return res;
 }
 

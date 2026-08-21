@@ -32,8 +32,10 @@ import { setupGodMode, toggleGodMode, updateGodMode } from './physics/GodMode.js
 
 import { MeshToonNodeMaterial, MeshStandardNodeMaterial, MeshBasicNodeMaterial, PointsNodeMaterial } from 'three/webgpu';
 import { uniform, texture, Fn, positionLocal, abs, positionGeometry, sin, step, positionWorld, normalWorld, cameraPosition, float, vec2, vec3, vec4, dot, fract, mix, pow, clamp, normalize, smoothstep as tslSmoothstep, attribute } from 'three/tsl';
-import { scene, camera, renderer, clock } from './core/Engine.js';
-import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI, uRolloffKnee } from './core/PostProcessing.js';
+import { scene, camera, renderer, clock, applyRenderBudget } from './core/Engine.js';
+import { deviceTier, tierSettings, budgetedPixelRatio, AdaptiveResolution, describeTier } from './core/DeviceTier.js';
+import { GhibliTreeSystem } from './entities/GhibliTreeSystem.js';
+import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI, uRolloffKnee, setGodRaySunVisible, uPhaseExposure, uDitherAmount } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
     import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
@@ -76,7 +78,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let isTreeShadowsOn = false;
     let shadowDistMode = LOW_GFX ? 'Close' : 'Med';
     let isBloomOn = false;
-    let isHD = true;
+    // Adaptive resolution: samples frame time and nudges the render scale. Targets ~30fps
+    // (4K does not need 60). Hysteresis in AdaptiveResolution stops the screen breathing.
+    const adaptiveRes = new AdaptiveResolution({
+        onScaleChange: (scale) => {
+            applyRenderBudget(scale);
+            if (typeof params !== 'undefined') params.renderScale = scale;
+            if (composer && typeof composer.setSize === 'function') {
+                composer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+    });
     let cameraZoomDist = parseFloat(localStorage.getItem('wl_zoomDist')) || 12.0;
     let currentFrame = 0;
     let logicTimer = 0;
@@ -357,7 +369,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         shadowDist: shadowDistMode,
         bloom: isBloomOn,
         terrainRes: String(terrainRes),
-        renderHD: isHD,
+        autoResolution: true,
+        renderScale: 1.0,
+        exposureTrim: 1.0,
+        dayExposure: 0.62,
+        nightExposure: 1.35,
         treeColor0: '#ffffff',
         treeColor1: '#ddff88',
         treeColor2: '#88cc99',
@@ -386,7 +402,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         treeScale: 1.5,
         ghibliTreeScale: 1.2,
         ghibliTreeDensity: 1.0,
-        ghibliTreeMinDist: 14.0,
+        ghibliTreeMinDist: 4.5,
         ghibliTreeMinHeight: 6.8,
         ghibliTreeMaxHeight: 58.0,
         ghibliTreeWindSway: 1.0,
@@ -699,10 +715,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         localStorage.setItem('gfxQuality', v === 'Low' ? 'low' : 'regular');
         if (!isInitializingGui) location.reload();
     });
-    perfFolder.add(params, 'renderHD').name('Render HD').onChange(v => {
-        isHD = v;
-        renderer.setPixelRatio(isHD ? Math.min(window.devicePixelRatio, 2) : 0.5);
+    perfFolder.add(params, 'autoResolution').name('Auto Resolution').onChange(v => {
+        adaptiveRes.setEnabled(v);
+        if (v) { adaptiveRes.reset(); applyRenderBudget(1.0); }
+        else { applyRenderBudget(params.renderScale); }
     });
+    perfFolder.add(params, 'renderScale', 0.5, 1.0, 0.05).name('Render Scale').onChange(v => {
+        // Manual choice wins: turn auto off so the two don't fight over the framebuffer.
+        if (params.autoResolution) { params.autoResolution = false; adaptiveRes.setEnabled(false); gui.controllersRecursive().forEach(c => c.updateDisplay && c.updateDisplay()); }
+        applyRenderBudget(v);
+    });
+    perfFolder.add({ tier: describeTier() }, 'tier').name('Detected Tier').disable();
+    // Anti-banding. 0 = off (banding returns), 1 = correct 1-LSB dither, higher = visible grain.
+    perfFolder.add({ dither: uDitherAmount.value }, 'dither', 0.0, 3.0, 0.1).name('Dither (anti-band)')
+        .onChange(v => uDitherAmount.value = v);
     perfFolder.add(params, 'terrainRes', ['256', '128', '64']).name('Terrain Res').onChange(v => {
         terrainRes = parseInt(v);
         const newGeo = new THREE.PlaneGeometry(4000, 4000, terrainRes, terrainRes);
@@ -983,7 +1009,58 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     });
     ghibliTreeFolder.add({ respawn: () => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        if (window.ghibliTrees) window.ghibliTrees.respawn();
     }}, 'respawn').name('Respawn Trees');
+
+    // ---- Background Tree Atlas (the three Ghibli card trees) ----
+    // Separate subfolder so these do not collide with the legacy pine controls above.
+    const bgTreeParams = {
+        visible: true,
+        density: 1.0,
+        scale: 1.0,
+        elevMin: 6.8,
+        elevMax: 58.0,
+        maxSlope: 0.55,
+        wind: 1.0,
+        atlasMix: 0.75,
+        tintSpread: 0.18,
+        canopyShadow: '#2c5233',
+        canopyLit: '#6aa34a',
+        canopyTip: '#9ec96a',
+        trunkBase: '#3d2b1c',
+        trunkTop: '#6b4c33',
+        counts: '—'
+    };
+    const bgTreeFolder = ghibliTreeFolder.addFolder('Background Tree Atlas');
+    const _tsys = () => window.ghibliTrees;
+    const _respawnBg = () => { if (_tsys()) _tsys().respawn(); };
+
+    bgTreeFolder.add(bgTreeParams, 'visible').name('Visible').onChange(v => { if (_tsys()) _tsys().setVisible(v); });
+    bgTreeFolder.add(bgTreeParams, 'density', 0.0, 2.0, 0.05).name('Density').onChange(v => { if (_tsys()) { _tsys().density = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'scale', 0.4, 2.5, 0.05).name('Scale').onChange(v => { if (_tsys()) { _tsys().scaleMul = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'elevMin', 0.0, 40.0, 0.5).name('Elevation Min').onChange(v => { if (_tsys()) { _tsys().minElevation = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'elevMax', 20.0, 120.0, 1.0).name('Elevation Max').onChange(v => { if (_tsys()) { _tsys().maxElevation = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'maxSlope', 0.1, 2.0, 0.05).name('Max Slope').onChange(v => { if (_tsys()) { _tsys().maxSlope = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'wind', 0.0, 3.0, 0.05).name('Wind Sway').onChange(v => { if (_tsys()) _tsys().uWindStrength.value = v; });
+    bgTreeFolder.add(bgTreeParams, 'atlasMix', 0.0, 1.0, 0.05).name('Texture vs Palette').onChange(v => { if (_tsys()) _tsys().uAtlasMix.value = v; });
+    bgTreeFolder.add(bgTreeParams, 'tintSpread', 0.0, 0.6, 0.02).name('Per-Tree Variation').onChange(v => { if (_tsys()) _tsys().uTintSpread.value = v; });
+
+    const bgColorFolder = bgTreeFolder.addFolder('Colors');
+    bgColorFolder.addColor(bgTreeParams, 'canopyShadow').name('Canopy Shadow').onChange(v => { if (_tsys()) _tsys().setColor('canopyShadow', v); });
+    bgColorFolder.addColor(bgTreeParams, 'canopyLit').name('Canopy Lit').onChange(v => { if (_tsys()) _tsys().setColor('canopyLit', v); });
+    bgColorFolder.addColor(bgTreeParams, 'canopyTip').name('Canopy Tip').onChange(v => { if (_tsys()) _tsys().setColor('canopyTip', v); });
+    bgColorFolder.addColor(bgTreeParams, 'trunkBase').name('Trunk Base').onChange(v => { if (_tsys()) _tsys().setColor('trunkBase', v); });
+    bgColorFolder.addColor(bgTreeParams, 'trunkTop').name('Trunk Top').onChange(v => { if (_tsys()) _tsys().setColor('trunkTop', v); });
+
+    // Live instance readout, for tuning density against the frame budget
+    const bgCountCtrl = bgTreeFolder.add(bgTreeParams, 'counts').name('Instances (N/M/F)').disable();
+    setInterval(() => {
+        const t = _tsys();
+        if (!t || !bgCountCtrl) return;
+        const c = t.lastCounts;
+        bgTreeParams.counts = `${c.near} / ${c.mid} / ${c.far}`;
+        bgCountCtrl.updateDisplay();
+    }, 700);
 
     function setGodMode(enabled) {
         const target = typeof enabled === 'boolean' ? enabled : !isGodMode;
@@ -1697,6 +1774,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         return mask;
     }
 
+    // Hoisted: this was allocated fresh inside the per-vertex loop, 16,641 times per rebuild.
+    const COLOR_FROST_PATH = new THREE.Color(0xd0edff);
+
     function updateTerrainGeometry(playerX, playerZ) {
         const stepThreshold = 150;
         if (Math.hypot(playerX - lastTerrainGridX, playerZ - lastTerrainGridZ) < stepThreshold) return;
@@ -1723,11 +1803,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const worldX = pos.getX(i) + gridX;
             const worldZ = pos.getZ(i) + gridZ;
             const h = getWorldHeight(worldX, worldZ);
-            if (i === 0 && Math.random() < 0.05) console.log('Terrain H:', h, 'WorldX:', worldX, 'Colors:', tempColor);
             pos.setY(i, h);
-
-            getWorldColor(h, worldX, worldZ, tempColor);
-            colors.setXYZ(i, tempColor.r, tempColor.g, tempColor.b);
 
             // Fast analytical heightmap normals (avoids expensive computeVertexNormals triangle pass)
             const hL = getWorldHeight(worldX - 12, worldZ);
@@ -1737,8 +1813,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             tempVec1.set(hL - hR, 24.0, hD - hU).normalize();
             norm.setXYZ(i, tempVec1.x, tempVec1.y, tempVec1.z);
 
+            // Single colour evaluation. This used to run TWICE per vertex with the first
+            // result written to the buffer and then immediately overwritten — pure dead work
+            // across 16,641 vertices, every rebuild.
             getWorldColor(h, worldX, worldZ, tempColor);
-            
+
             // Add dirt / frost path
             const pathMask = getPathStrength(worldX, worldZ);
             const currentBiome = getBiomeAt(worldX, worldZ);
@@ -1753,7 +1832,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
             if (pathMask > 0 && h > 2.0 && h < 25.0) {
                 if (currentBiome && currentBiome.name && currentBiome.name.includes('North Pole')) {
-                    tempColor.lerp(new THREE.Color(0xd0edff), pathMask * 0.35);
+                    tempColor.lerp(COLOR_FROST_PATH, pathMask * 0.35);
                 } else if (!currentBiome || !currentBiome.name || (!currentBiome.name.includes('Crystal') && !currentBiome.name.includes('Ocean') && !currentBiome.name.includes('Desert') && !currentBiome.name.includes('Canyon'))) {
                     tempColor.lerp(colorPath, pathMask * 0.85);
                 }
@@ -2082,6 +2161,15 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         mesh.castShadow = false;
         mesh.receiveShadow = true;
         mesh.frustumCulled = false;
+        // Initialize all instances far below ground so spawn loop will recycle them
+        const initDummy = new THREE.Object3D();
+        initDummy.position.set(0, -1000, 0);
+        initDummy.scale.set(0, 0, 0);
+        initDummy.updateMatrix();
+        for (let i = 0; i < cfg.count; i++) {
+            mesh.setMatrixAt(i, initDummy.matrix);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
         scene.add(mesh);
         return mesh;
     });
@@ -3044,11 +3132,40 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const focusX = isFreeCam ? (isGodMode ? godCamera.position.x : camera.position.x) : playerX;
             const focusZ = isFreeCam ? (isGodMode ? godCamera.position.z : camera.position.z) : playerZ;
             
+            // Ghibli biome trees: deterministic cell-hash placement, three LOD bands.
+            // Runs on the same focus point as the pines so editor/God-mode freecam works.
+            if (ghibliTrees && ghibliTrees.ready) {
+                ghibliTrees.update(focusX, focusZ);
+            }
+
+
             // STRICT 800-METER TREE RADIUS WITH SEAMLESS PROGRESSIVE LOD HANDOFF
             const activeTreeDist = 800;
             const dense3dRadius = 420; // 3D GLB trees spawn from 0m to 420m
             const billboardMinDist = 380; // Billboards spawn from 380m out to 800m (40m overlap ring)
             const billboardMaxDist = 800;
+            // Re-enable frustum culling on the recycled instanced meshes.
+            //
+            // These all had frustumCulled = false, so every instance was submitted every frame
+            // regardless of where the camera pointed -- ~970 pines plus jungle and palm parts
+            // vertex-shaded while facing the other way. The flag was off because the meshes are
+            // recycled around the player, which makes the geometry's own bounding sphere stale
+            // instantly. Setting an explicit sphere centred on the focus point fixes that
+            // properly: culling comes back and nothing pops, because the radius is padded well
+            // past the spawn radius rather than fitted tightly.
+            {
+                const cullRadius = dense3dRadius + 120;   // spawn radius + tallest tree + slack
+                const applyCullSphere = (m) => {
+                    if (!m) return;
+                    if (!m.boundingSphere) m.boundingSphere = new THREE.Sphere();
+                    m.boundingSphere.center.set(focusX, 40, focusZ);
+                    m.boundingSphere.radius = cullRadius;
+                    m.frustumCulled = true;
+                };
+                if (typeof treeMeshes !== 'undefined') treeMeshes.forEach(applyCullSphere);
+                if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(applyCullSphere);
+                if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(applyCullSphere);
+            }
 
             if (params.showTrees) {
                 const playerBiome = getBiomeAt(focusX, focusZ);
@@ -3425,6 +3542,32 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Flight Model Manager initialization
     const flightModelManager = new FlightModelManager(playerVisuals, gltfLoader, resolveAssetUrl);
     window.flightModelManager = flightModelManager;
+
+    // ==========================================
+    // GHIBLI BIOME TREES (procedural, instanced, LOD)
+    // ==========================================
+    const ghibliTrees = new GhibliTreeSystem({
+        scene,
+        gltfLoader,
+        resolveAssetUrl,
+        uTime: terrainUniforms.uTime,
+        gradientMap,
+        getWorldHeight,
+        getBiomeAt,
+        getIslandData,
+        getPathStrength,
+        densityScale: tierSettings.treeDensity
+    });
+    window.ghibliTrees = ghibliTrees;
+    ghibliTrees.load().then(ok => {
+        if (ok) {
+            console.info(`[Wanderlust] Ghibli trees ready — pools near/mid/far =`,
+                ghibliTrees.poolSizes, `(tier ${deviceTier})`);
+            ghibliTrees.respawn();
+        } else {
+            console.warn('[Wanderlust] Ghibli tree system failed to build geometry');
+        }
+    }).catch(err => console.error('[Wanderlust] Ghibli tree load failed:', err));
 
     let isModelVisible = true;
     let isSoundMuted = false;
@@ -4383,48 +4526,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let velocity = 15.0; 
     let pitch = 0, yaw = 0, roll = 0;
     const BASE_FOV = 60;
-    // --- Low-Poly Particle Starfield ---
-    const starCount = LOW_GFX ? 2000 : 8000;
-    const starGeometry = new THREE.BufferGeometry();
-    const starPositions = new Float32Array(starCount * 3);
-    const starPulse = new Float32Array(starCount);
-
-    for (let i = 0; i < starCount * 3; i += 3) {
-        // Distribute randomly in a sphere well within camera.far (3000)
-        const radius = 2500;
-        const u = Math.random();
-        // Restrict v to [0.5, 1.0] to only generate stars in the upper hemisphere
-        const v = Math.random() * 0.5 + 0.5;
-        const theta = u * 2.0 * Math.PI;
-        const phi = Math.acos(2.0 * v - 1.0);
-        
-        const y = radius * Math.cos(phi);
-        const x = radius * Math.sin(phi) * Math.cos(theta);
-        const z = radius * Math.sin(phi) * Math.sin(theta);
-
-        starPositions[i] = x;
-        starPositions[i + 1] = y;
-        starPositions[i + 2] = z;
-        
-        // Make 10% of stars pulse
-        starPulse[i / 3] = Math.random() < 0.1 ? 1.0 : 0.0;
-    }
-
-    starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-    starGeometry.setAttribute('pulse', new THREE.BufferAttribute(starPulse, 1));
-    const starMaterial = new PointsNodeMaterial({
-        color: 0xffffff,
-        size: 2.5,
-        sizeAttenuation: false,
-        fog: false,
-        transparent: true,
-        opacity: 0.0
-    });
-    
-    const starField = new THREE.Points(starGeometry, starMaterial);
-    starField.renderOrder = -3;
-    starField.visible = false;
-    scene.add(starField);
+    // (Removed) Low-poly particle star field: 8,000 THREE.Points that were built, added to
+    // the scene, then force-hidden every single frame. Stars now come from the procedural
+    // sky shader instead — see starLayer() in src/shaders/atmosphere/proceduralSky.js.
 
     // --- Camera Rig Hierarchy ---
     cameraBase = new THREE.Group(); 
@@ -4496,10 +4600,13 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let timePhase = (localStorage.getItem('wl_timePhase') !== null) ? parseInt(localStorage.getItem('wl_timePhase')) : 1; // Default to 1: Dusk
 
     let envConfigs = [
-        {name: 'Day', bg: 0x4a90d9, mid: 0x7ab4e6, fog: 0xc8dce8, amb: 0xdcf2ff, dir: 0xfffaeb, ambI: 1.2, dirI: 2.4, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfffaec}, // Day / Morning
+        {name: 'Day', bg: 0x3f7fc4, mid: 0x74add9, fog: 0xbcd2e2, amb: 0xcfe6f7, dir: 0xfff3d8, ambI: 0.75, dirI: 1.60, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfdf7e8}, // Day / Morning — light energy cut from 3.6 to 2.35 and hue pulled off pure white; near-white light at high intensity pushed R,G,B over the soft-clip knee together, which is what flattened the frame to haze
         {name: 'Dusk', bg: 0x2a5090, mid: 0xc85078, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xfffaec}, // Dusk — deep blue zenith, magenta/peach mid, warm orange horizon+fog
-        {name: 'Twilight', bg: 0x040816, mid: 0x0f1d3a, fog: 0x16284d, amb: 0x556688, dir: 0x88bbff, ambI: 0.8, dirI: 1.8, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x66aaff, cloudCol: 0x223355}, // Twilight / Night (Bright Moonlight & Warm Kiki Glow)
+        {name: 'Twilight', bg: 0x0a1330, mid: 0x1b2f5c, fog: 0x24406e, amb: 0x6b82ad, dir: 0x9ecbff, ambI: 1.05, dirI: 2.2, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x8cc4ff, cloudCol: 0x33507d}, // Twilight / Night — moonlight lifted so terrain is readable; sky no longer collapses to a flat 2% dome
     ];
+    // Exposure defaults live on `params` (dayExposure / nightExposure) so the sliders drive
+    // them live. Dusk deliberately has NO slider and is hard-pinned to 1.0 below.
+
     let currentSunY = envConfigs[timePhase] ? envConfigs[timePhase].sunY : 160;
     let currentMoonY = envConfigs[timePhase] ? envConfigs[timePhase].moonY : 200;
     let currentFps = 60;
@@ -4529,15 +4636,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             cameraManager = new CameraManager(camera, cameraBase, cameraZoomDist);
         }
         lastAnimTime = nowAnimTime;
+        adaptiveRes.sample(rawDt * 1000);
         if (rawDt > 0.1 || rawDt <= 0) rawDt = 0.0166;
         smoothedDt = smoothedDt * 0.7 + rawDt * 0.3;
         let dt = smoothedDt;
 
         const time = clock.getElapsedTime();
-
-        if (starMaterial.userData.shader) {
-            starMaterial.userData.shader.uniforms.time.value = time;
-        }
 
         if (animeWaterSystem && animeWaterSystem.visible) {
             const activeCam = isGodMode ? godCamera : camera;
@@ -4601,6 +4705,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         // 3-Stage Lighting Engine Lerp
         const target = envConfigs[timePhase];
         const decayEnv = 1.0 - Math.exp(-2.0 * dt);
+
+        // Per-phase exposure. Index 1 (Dusk) is EXACTLY 1.0 — a multiply by one cannot change
+        // a pixel, so the golden dusk look is provably untouched by this whole system.
+        // Day and Night read live from the sliders; Dusk is hard-pinned to 1.0 and has no slider.
+        const targetExposure = timePhase === 0 ? params.dayExposure
+                             : timePhase === 2 ? params.nightExposure
+                             : 1.0;
+        const wantExposure = targetExposure * params.exposureTrim;
+        uPhaseExposure.value += (wantExposure - uPhaseExposure.value) * decayEnv;
+        // Snap once the lerp is within a rounding error. Without this, returning to dusk from
+        // another phase leaves the exposure at 0.9999... forever — visually identical, but the
+        // dusk guarantee is meant to be exact, not approximate.
+        if (Math.abs(wantExposure - uPhaseExposure.value) < 0.0005) uPhaseExposure.value = wantExposure;
         if (scene.background && scene.background.isColor) {
             scene.background.lerp(tempColorTarget.setHex(target.bg), decayEnv);
         }
@@ -4610,9 +4727,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         ambientLight.intensity += (target.ambI - ambientLight.intensity) * decayEnv;
         dirLight.color.lerp(tempColorTarget.setHex(target.dir), decayEnv);
         dirLight.intensity += (target.dirI - dirLight.intensity) * decayEnv;
-        // Hide old star field — procedural sky handles stars now
-        starMaterial.opacity = 0;
-        starField.visible = false;
+        // Old points-based star field removed — the procedural sky now genuinely draws stars.
+        // (It previously did not: the comment here claimed it did, but proceduralSky.js had no
+        // star code at all, which is why night had none.)
 
         // Player warm lantern lights modulation (magical lantern at Twilight, warm rim at Dusk, subtle at Day)
         const kikiGlow = (timePhase === 2) ? 2.5 : (timePhase === 1 ? 1.4 : 0.4);
@@ -5001,6 +5118,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             } else {
                 godRaysPass.uniforms.uSunVisible.value = 0.0;
             }
+
+            // uSunVisible already goes to 0 at night, off-screen and behind the camera, but
+            // multiplying by it does not stop the 24-sample loop from running. Drop the node
+            // out of the graph instead. Asymmetric thresholds give hysteresis so a sun sitting
+            // exactly on the horizon cannot thrash the shader recompile every frame.
+            const _rayVis = godRaysPass.uniforms.uSunVisible.value;
+            if (_rayVis > 0.01) setGodRaySunVisible(true);
+            else if (_rayVis < 0.001) setGodRaySunVisible(false);
         }
 
         if (typeof scenePass !== 'undefined' && scenePass) {
@@ -5014,6 +5139,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        // Re-derive the pixel budget: dragging onto a 4K monitor must not quadruple the
+        // framebuffer. setSize() alone never re-evaluated pixel ratio.
+        if (params.autoResolution) applyRenderBudget(adaptiveRes.scale);
         if (composer && typeof composer.setSize === 'function') {
             composer.setSize(window.innerWidth, window.innerHeight);
         }
@@ -5661,9 +5789,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         };
 
         const moonFolder = envFolder.addFolder('Moonlight & Night');
-        moonFolder.add(params, 'exposure', 0.5, 4.0, 0.1).name('Global Brightness').onChange(v => {
-            renderer.toneMappingExposure = v;
-        });
+        // NOTE: this used to write renderer.toneMappingExposure, which is completely inert
+        // while PostProcessing sets outputColorTransform = false. It now drives the real
+        // exposure multiplier, so the slider actually does something.
+        moonFolder.add(params, 'exposureTrim', 0.4, 2.0, 0.02).name('Global Brightness');
+        moonFolder.add(params, 'nightExposure', 0.6, 3.0, 0.05).name('Night Exposure');
         moonFolder.addColor(moonParams, 'moonlightColor').name('Moonlight Color').onChange(v => envConfigs[2].dir = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonlightIntensity', 0, 10, 0.1).name('Moonlight Power').onChange(v => envConfigs[2].dirI = v);
         moonFolder.addColor(moonParams, 'nightAmbColor').name('Night Fill Color').onChange(v => envConfigs[2].amb = parseInt(v.replace('#',''), 16));
@@ -5671,6 +5801,53 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         moonFolder.addColor(moonParams, 'nightSkyColor').name('Night Sky Color').onChange(v => envConfigs[2].bg = parseInt(v.replace('#',''), 16));
         moonFolder.addColor(moonParams, 'nightFogColor').name('Night Fog Color').onChange(v => envConfigs[2].fog = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonAltitude', 200, 4000, 50).name('Moon Altitude').onChange(v => envConfigs[2].moonY = v);
+
+        // Star controls. Every one of these is multiplied by uNightFactor in the shader, which
+        // is exactly 0.0 at dusk — so no setting here can affect the golden dusk look.
+        if (skyUniforms && skyUniforms.uStarDensity) {
+            const starParams = {
+                starDensity: skyUniforms.uStarDensity.value,
+                starBrightness: skyUniforms.uStarBrightness.value,
+                starTwinkle: skyUniforms.uStarTwinkle.value,
+                milkyWay: skyUniforms.uMilkyWay.value,
+                nightSkyLift: skyUniforms.uNightSkyLift.value
+            };
+            moonFolder.add(starParams, 'starDensity', 0.0, 0.25, 0.005).name('Star Density').onChange(v => skyUniforms.uStarDensity.value = v);
+            moonFolder.add(starParams, 'starBrightness', 0.0, 3.0, 0.05).name('Star Brightness').onChange(v => skyUniforms.uStarBrightness.value = v);
+            moonFolder.add(starParams, 'starTwinkle', 0.0, 1.0, 0.05).name('Star Twinkle').onChange(v => skyUniforms.uStarTwinkle.value = v);
+            moonFolder.add(starParams, 'nightSkyLift', 0.0, 3.0, 0.05).name('Night Sky Lift').onChange(v => skyUniforms.uNightSkyLift.value = v);
+
+            const mwFolder = moonFolder.addFolder('Milky Way');
+            const mwParams = {
+                strength: skyUniforms.uMilkyWay.value,
+                dust: skyUniforms.uMilkyDust.value,
+                armColor: '#' + new THREE.Color().copy(skyUniforms.uMilkyArmColor.value).getHexString(),
+                coreColor: '#' + new THREE.Color().copy(skyUniforms.uMilkyCoreColor.value).getHexString()
+            };
+            mwFolder.add(mwParams, 'strength', 0.0, 3.0, 0.05).name('Strength').onChange(v => skyUniforms.uMilkyWay.value = v);
+            mwFolder.add(mwParams, 'dust', 0.0, 1.0, 0.05).name('Dust Lanes').onChange(v => skyUniforms.uMilkyDust.value = v);
+            mwFolder.addColor(mwParams, 'armColor').name('Arm Color').onChange(v => skyUniforms.uMilkyArmColor.value.set(v));
+            mwFolder.addColor(mwParams, 'coreColor').name('Core Color').onChange(v => skyUniforms.uMilkyCoreColor.value.set(v));
+        }
+
+        // 4b. Daylight Subfolder — day was blown out because near-white light at high
+        // intensity pushed every channel over the soft-clip knee at once.
+        const dayParams = {
+            dayLightColor: '#' + envConfigs[0].dir.toString(16).padStart(6, '0'),
+            dayLightIntensity: envConfigs[0].dirI,
+            dayAmbColor: '#' + envConfigs[0].amb.toString(16).padStart(6, '0'),
+            dayAmbIntensity: envConfigs[0].ambI,
+            daySkyColor: '#' + envConfigs[0].bg.toString(16).padStart(6, '0'),
+            dayFogColor: '#' + envConfigs[0].fog.toString(16).padStart(6, '0')
+        };
+        const dayFolder = envFolder.addFolder('Daylight');
+        dayFolder.add(params, 'dayExposure', 0.25, 1.5, 0.01).name('Day Exposure');
+        dayFolder.addColor(dayParams, 'dayLightColor').name('Sunlight Color').onChange(v => envConfigs[0].dir = parseInt(v.replace('#',''), 16));
+        dayFolder.add(dayParams, 'dayLightIntensity', 0, 5, 0.05).name('Sunlight Power').onChange(v => envConfigs[0].dirI = v);
+        dayFolder.addColor(dayParams, 'dayAmbColor').name('Day Fill Color').onChange(v => envConfigs[0].amb = parseInt(v.replace('#',''), 16));
+        dayFolder.add(dayParams, 'dayAmbIntensity', 0, 3, 0.05).name('Day Fill Power').onChange(v => envConfigs[0].ambI = v);
+        dayFolder.addColor(dayParams, 'daySkyColor').name('Day Sky Color').onChange(v => envConfigs[0].bg = parseInt(v.replace('#',''), 16));
+        dayFolder.addColor(dayParams, 'dayFogColor').name('Day Fog Color').onChange(v => envConfigs[0].fog = parseInt(v.replace('#',''), 16));
 
         // 5. Weather & Fog Subfolder
         const weatherFolder = envFolder.addFolder('Weather & Fog');
@@ -6121,6 +6298,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     }
     async function start() {
         initPostProcessing();
-        renderer.setAnimationLoop(animate);
+        // animate() is async, so a throw inside it becomes an unhandled rejection that the
+        // console swallows silently and the frame just stops updating with no visible error.
+        // Surface it once instead of losing it.
+        let _animErrorLogged = false;
+        const _reportAnimError = (e) => {
+            if (_animErrorLogged) return;
+            _animErrorLogged = true;
+            console.error('[Wanderlust] render loop error:', e);
+        };
+        renderer.setAnimationLoop((t, f) => {
+            try {
+                const rv = animate(t, f);
+                if (rv && rv.catch) rv.catch(_reportAnimError);
+            } catch (e) { _reportAnimError(e); }
+        });
     }
     start();
