@@ -5,6 +5,30 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 // --- Preset Tree Models Index ---
 const TREE_PRESETS = [
+  // Compressed Models
+  { name: 'Pine Trees (Compressed Single-Mesh)', path: 'assets/Trees_Compressed/pine_trees.glb', category: 'Compressed' },
+  { name: 'Atlas 001 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_001_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 002 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_002_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 003 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_003_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 004 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_004_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 005 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_005_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 006 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_006_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 007 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_007_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 009 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_009_alt.glb', category: 'Compressed' },
+  { name: 'Atlas 010 (Compressed)', path: 'assets/Trees_Compressed/Background_Tree_Atlas_010_alt.glb', category: 'Compressed' },
+  
+  // Ultra-Lightweight Toon / Procedural
+  { name: 'Atlas 001 Toon (3 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_001_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 002 Toon (2.7 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_002_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 003 Toon (3.2 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_003_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 004 Toon (3.2 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_004_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 005 Toon (3.2 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_005_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 006 Toon (3.3 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_006_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 007 Toon (3.2 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_007_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 009 Toon (2.7 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_009_alt.glb', category: 'Compressed Toon' },
+  { name: 'Atlas 010 Toon (3.3 KB)', path: 'assets/Trees_Compressed_Toon/Background_Tree_Atlas_010_alt.glb', category: 'Compressed Toon' },
+
+  // Original Presets
   { name: 'Background Tree Atlas', path: 'assets/Trees/Background_Tree_Atlas.glb', category: 'Atlas' },
   { name: 'Tree Atlas 001', path: 'assets/Trees/Background_Tree_Atlas_001.glb', category: 'Atlas' },
   { name: 'Tree Atlas 002', path: 'assets/Trees/Background_Tree_Atlas_002.glb', category: 'Atlas' },
@@ -190,6 +214,7 @@ class ModelViewerApp {
 
     let totalVerts = 0;
     let totalFaces = 0;
+    let hasBarkMask = false;
 
     // Clone materials to allow independent color tweaking per model
     modelScene.traverse((child) => {
@@ -197,11 +222,61 @@ class ModelViewerApp {
         child.castShadow = true;
         child.receiveShadow = true;
 
+        if (child.geometry && (child.geometry.attributes._aisbark || child.geometry.attributes.color)) {
+          hasBarkMask = true;
+        }
+
+        const setupDualColor = (mat) => {
+          const clonedMat = mat.clone();
+          clonedMat.userData.customUniforms = {
+            uCanopyColor: { value: new THREE.Color('#388e3c') },
+            uTrunkColor: { value: new THREE.Color('#5d4037') },
+            uDualColorActive: { value: 1.0 }
+          };
+          clonedMat.onBeforeCompile = (shader) => {
+            shader.uniforms.uCanopyColor = clonedMat.userData.customUniforms.uCanopyColor;
+            shader.uniforms.uTrunkColor = clonedMat.userData.customUniforms.uTrunkColor;
+            shader.uniforms.uDualColorActive = clonedMat.userData.customUniforms.uDualColorActive;
+
+            shader.vertexShader = `
+              attribute float _aisbark;
+              varying float vCustomBark;
+              ${shader.vertexShader}
+            `.replace(
+              '#include <begin_vertex>',
+              `#include <begin_vertex>
+               #ifdef USE_COLOR
+                 vCustomBark = color.r;
+               #else
+                 vCustomBark = _aisbark;
+               #endif
+              `
+            );
+
+            shader.fragmentShader = `
+              uniform vec3 uCanopyColor;
+              uniform vec3 uTrunkColor;
+              uniform float uDualColorActive;
+              varying float vCustomBark;
+              ${shader.fragmentShader}
+            `.replace(
+              '#include <color_fragment>',
+              `#include <color_fragment>
+               if (uDualColorActive > 0.5) {
+                 vec3 maskCol = mix(uCanopyColor, uTrunkColor, clamp(vCustomBark, 0.0, 1.0));
+                 diffuseColor.rgb *= maskCol;
+               }
+              `
+            );
+          };
+          return clonedMat;
+        };
+
         if (child.material) {
           if (Array.isArray(child.material)) {
-            child.material = child.material.map((m) => m.clone());
+            child.material = child.material.map(setupDualColor);
           } else {
-            child.material = child.material.clone();
+            child.material = setupDualColor(child.material);
           }
         }
 
@@ -251,6 +326,9 @@ class ModelViewerApp {
       polycount: Math.round(totalFaces),
       vertices: totalVerts,
       isDraco: isDraco,
+      hasBarkMask: hasBarkMask,
+      canopyColor: '#388e3c',
+      trunkColor: '#5d4037',
       visible: true,
       wireframe: false,
       mixer: mixer,
@@ -546,6 +624,22 @@ class ModelViewerApp {
       }
     });
 
+    const dualColorSection = model.hasBarkMask ? `
+      <div class="control-group" style="margin-top: 6px; padding: 6px; background: rgba(255,255,255,0.05); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
+        <label class="control-label" style="color: #4ade80; font-weight: 600;">Canopy (Foliage) Color</label>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+          <input type="color" id="input-canopy-color" value="${model.canopyColor || '#388e3c'}" style="width: 32px; height: 26px; border: none; border-radius: 4px; cursor: pointer; background: none;">
+          <span style="font-size: 10px; color: var(--text-muted);">Editable Canopy</span>
+        </div>
+
+        <label class="control-label" style="color: #fb923c; font-weight: 600; margin-top: 6px;">Trunk (Bark) Color</label>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+          <input type="color" id="input-trunk-color" value="${model.trunkColor || '#5d4037'}" style="width: 32px; height: 26px; border: none; border-radius: 4px; cursor: pointer; background: none;">
+          <span style="font-size: 10px; color: var(--text-muted);">Editable Trunk</span>
+        </div>
+      </div>
+    ` : '';
+
     detailsContainer.innerHTML = `
       <div class="control-group">
         <label class="control-label">Scale <span class="control-value" id="val-scale">${model.group.scale.x.toFixed(1)}</span></label>
@@ -559,8 +653,9 @@ class ModelViewerApp {
         <label class="control-label">Position Y <span class="control-value" id="val-posy">${model.group.position.y.toFixed(1)}</span></label>
         <input type="range" class="slider-input" id="input-posy" min="-5" max="10" step="0.2" value="${model.group.position.y}">
       </div>
+      ${dualColorSection}
       <div class="control-group" style="margin-top: 4px;">
-        <label class="control-label">Material Color Tint</label>
+        <label class="control-label">Base Light / Tint</label>
         <div style="display: flex; align-items: center; gap: 8px;">
           <input type="color" id="input-mat-color" value="${initialColor}" style="width: 32px; height: 28px; border: none; border-radius: 4px; cursor: pointer; background: none;">
           <button class="btn btn-icon" id="btn-reset-color" style="font-size: 10px;" title="Reset Color">Reset Tint</button>
@@ -602,6 +697,43 @@ class ModelViewerApp {
       model.boxHelper.update();
       document.getElementById('val-posy').textContent = py.toFixed(1);
     };
+
+    if (model.hasBarkMask) {
+      const canopyInput = document.getElementById('input-canopy-color');
+      const trunkInput = document.getElementById('input-trunk-color');
+
+      if (canopyInput) {
+        canopyInput.oninput = (e) => {
+          model.canopyColor = e.target.value;
+          model.scene.traverse((child) => {
+            if (child.isMesh && child.material) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material];
+              mats.forEach((m) => {
+                if (m.userData && m.userData.customUniforms) {
+                  m.userData.customUniforms.uCanopyColor.value.set(e.target.value);
+                }
+              });
+            }
+          });
+        };
+      }
+
+      if (trunkInput) {
+        trunkInput.oninput = (e) => {
+          model.trunkColor = e.target.value;
+          model.scene.traverse((child) => {
+            if (child.isMesh && child.material) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material];
+              mats.forEach((m) => {
+                if (m.userData && m.userData.customUniforms) {
+                  m.userData.customUniforms.uTrunkColor.value.set(e.target.value);
+                }
+              });
+            }
+          });
+        };
+      }
+    }
 
     // Single edit material color tint without affecting grid layout!
     document.getElementById('input-mat-color').oninput = (e) => {

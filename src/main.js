@@ -90,6 +90,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let isGodMode = false;
     let godCamera = null;
     let godControls = null;
+    let cameraBase = null;
     let isInitializingGui = true;
 
     // Clouds config
@@ -343,10 +344,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let presetsFolder = null;
     let presetDropdownControllers = [];
 
-    const gui = new GUI();
+    const gui = new GUI({ title: 'Controls & Settings' });
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
+        showFog: true,
         fogIntensity: 3.5,   // dense golden-hour fog; higher = denser (far = 800/fogIntensity)
         terrainSmoothing: 0.0,
         trails: isWindTrailsOn, lockSunToPlayer: true,
@@ -382,6 +384,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         highlightKnee: 0.75,
         horizonGlow: 0.45,
         treeScale: 1.5,
+        ghibliTreeScale: 1.2,
+        ghibliTreeDensity: 1.0,
+        ghibliTreeMinDist: 14.0,
+        ghibliTreeMinHeight: 6.8,
+        ghibliTreeMaxHeight: 58.0,
+        ghibliTreeWindSway: 1.0,
         quality: LOW_GFX ? 'Low' : 'Regular',
         showTerrain: true,
         showWater: true,
@@ -426,6 +434,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         birdFlockRadius: 35,
         birdFlockSpread: 12,
         birdMaxSpeed: 45,
+        godMode: false,
     };
 
     const toonShaderManager = new ToonShaderManager();
@@ -769,16 +778,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const btn = document.getElementById('editor-toggle');
             if (btn) btn.click();
         }
-    }}, 'openTerrainEditor').name('🔧 Terrain Editor');
+    }}, 'openTerrainEditor').name('Terrain Editor');
     editorFolder.add({ openCrystalEditor: () => {
         const crystalEditor = document.getElementById('crystal-editor');
         if (crystalEditor) crystalEditor.style.display = crystalEditor.style.display === 'none' ? 'block' : 'none';
-    }}, 'openCrystalEditor').name('💎 Edit Crystals');
+    }}, 'openCrystalEditor').name('Edit Crystals');
     editorFolder.add({ openTreeBillboardEditor: () => {
         if (window.treeBillboardEditor) {
             window.treeBillboardEditor.togglePanel(true);
         }
-    }}, 'openTreeBillboardEditor').name('🌲 Tree & Billboard Editor');
+    }}, 'openTreeBillboardEditor').name('Tree & Billboard Editor');
 
     editorFolder.add({ loadCustomModel: () => {
         const input = document.createElement('input');
@@ -791,9 +800,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             }
         };
         input.click();
-    }}, 'loadCustomModel').name('📦 Load Custom Toon Model');
+    }}, 'loadCustomModel').name('Load Custom Toon Model');
 
-    customModelFolder = editorFolder.addFolder('📦 Custom Model');
+    customModelFolder = editorFolder.addFolder('Custom Model');
     customModelFolder.close();
 
     params.selectedModelIdx = 0;
@@ -846,11 +855,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     customModelFolder.add({ cloneModel: () => {
         if (window.cloneSelectedModel) window.cloneSelectedModel();
-    }}, 'cloneModel').name('👥 Clone Selected');
+    }}, 'cloneModel').name('Clone Selected');
 
     customModelFolder.add({ deleteModel: () => {
         if (window.deleteSelectedModel) window.deleteSelectedModel();
-    }}, 'deleteModel').name('🗑️ Delete Selected');
+    }}, 'deleteModel').name('Delete Selected');
 
     // Flight Models Folder
     flightFolder = gui.addFolder('Flight Models');
@@ -867,7 +876,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     flightModelDropdownController = flightFolder.add(flightParams, 'modelId', flightModelOptions)
         .name('Active Model')
         .onChange(id => {
-            if (typeof flightModelManager !== 'undefined' && flightModelManager) flightModelManager.setModelById(id);
+            if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+                const cur = flightModelManager.getCurrentConfig();
+                if (!cur || cur.id !== id) {
+                    flightModelManager.setModelById(id);
+                }
+            }
         });
     flightFolder.add(flightParams, 'nextModel').name('Next Model');
     flightFolder.add(flightParams, 'prevModel').name('Previous Model');
@@ -901,10 +915,18 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     };
     soundMuteController = audioFolder.add(audioParams, 'soundEnabled')
         .name('Sound Enabled')
-        .onChange(v => { if (typeof setSoundMuted === 'function') setSoundMuted(!v); });
+        .onChange(v => {
+            if (typeof setSoundMuted === 'function' && isSoundMuted !== !v) {
+                setSoundMuted(!v);
+            }
+        });
     engineSoundController = audioFolder.add(audioParams, 'engineSound')
         .name('Biplane Engine Sound')
-        .onChange(v => { if (typeof setEngineSoundEnabled === 'function') setEngineSoundEnabled(v); });
+        .onChange(v => {
+            if (typeof setEngineSoundEnabled === 'function' && isEngineSoundOn !== !!v) {
+                setEngineSoundEnabled(v);
+            }
+        });
     audioFolder.add(audioParams, 'engineVolume', 0.0, 0.2, 0.005)
         .name('Engine Volume')
         .onChange(v => {
@@ -921,7 +943,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         .name('Current Track')
         .onChange(name => {
             const idx = tracks.findIndex(t => t.name === name);
-            if (idx !== -1 && typeof selectMusicTrack === 'function') {
+            if (idx !== -1 && idx !== currentTrack && typeof selectMusicTrack === 'function') {
                 selectMusicTrack(idx);
             }
         });
@@ -932,7 +954,149 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     audioFolder.add(audioParams, 'toggleMasterSound').name('Toggle Master Sound');
     audioFolder.add(audioParams, 'toggleEngineSound').name('Toggle Engine Sound');
 
-    const debugFolder = gui.addFolder('🔧 Debug Render');
+    // Ghibli Trees GUI Folder
+    const ghibliTreeFolder = gui.addFolder('Ghibli Trees');
+    ghibliTreeFolder.add(params, 'showTrees').name('Trees Visible').onChange(v => {
+        if (typeof treeMeshes !== 'undefined') treeMeshes.forEach(m => m.visible = v);
+        if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v);
+        if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v);
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeScale', 0.2, 3.5, 0.05).name('Tree Scale').onChange(v => {
+        if (typeof window.updateGhibliTreeScale === 'function') window.updateGhibliTreeScale(v);
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeDensity', 0.1, 3.0, 0.05).name('Tree Density').onChange(() => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMinDist', 6.0, 30.0, 0.5).name('Min Spacing').onChange(() => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMinHeight', 6.0, 25.0, 0.5).name('Elevation Min').onChange(() => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMaxHeight', 25.0, 95.0, 1.0).name('Elevation Max').onChange(() => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeWindSway', 0.0, 3.0, 0.1).name('Wind Sway').onChange(v => {
+        if (typeof treeUniforms !== 'undefined' && treeUniforms && treeUniforms.uTreeScale) {
+            treeUniforms.uTreeScale.value = 1.5 * v;
+        }
+    });
+    ghibliTreeFolder.add({ respawn: () => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+    }}, 'respawn').name('Respawn Trees');
+
+    function setGodMode(enabled) {
+        const target = typeof enabled === 'boolean' ? enabled : !isGodMode;
+        if (isGodMode === target) return;
+        isGodMode = target;
+        params.godMode = isGodMode;
+
+        if (isGodMode) {
+            if (typeof params !== 'undefined') {
+                params.groundFog = false;
+                params.godRays = false;
+                if (typeof isWindTrailsOn !== 'undefined') params.trails = false;
+                params.wind = false;
+                params.rain = false;
+                params.sceneFog = false;
+                params.showClouds = false;
+            }
+            // Automatically hide ALL cloud layers in God Mode
+            if (typeof instClouds !== 'undefined') instClouds.visible = false;
+            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = false;
+            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = false;
+            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = false;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 0.0;
+
+            if (typeof scene !== 'undefined' && scene.fog) { scene.fog.near = 100000; scene.fog.far = 200000; }
+            if (typeof groundFog !== 'undefined') groundFog.visible = false;
+            if (typeof godRaysGroup !== 'undefined') godRaysGroup.visible = false;
+            if (typeof windTrailsGroup !== 'undefined') windTrailsGroup.visible = false;
+            
+            if (typeof debugFolder !== 'undefined') debugFolder.open();
+            if (typeof envFolder !== 'undefined') envFolder.open();
+            isFlightPaused = true;
+            const pauseToggle = document.getElementById('pause-toggle');
+            if (pauseToggle) pauseToggle.innerText = '▶';
+
+            if (!godCamera) {
+                const gm = setupGodMode(scene, cameraBase, renderer, playerGrp);
+                godCamera = gm.godCamera;
+                godControls = gm.godControls;
+            }
+            toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
+                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
+            });
+        } else {
+            if (typeof params !== 'undefined') {
+                params.showClouds = true;
+            }
+            if (typeof instClouds !== 'undefined') instClouds.visible = true;
+            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = true;
+            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = true;
+            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
+            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
+
+            toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
+                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
+            });
+        }
+
+        const btn = document.getElementById('god-mode-btn');
+        if (btn) {
+            btn.innerText = '▲';
+            btn.style.color = isGodMode ? '#ff4444' : 'rgba(255, 255, 255, 0.95)';
+            btn.style.textShadow = isGodMode ? '0 0 10px rgba(255, 68, 68, 0.9), 0 1px 3px rgba(0, 0, 0, 0.5)' : '0 1px 3px rgba(0, 0, 0, 0.35), 0 0 8px rgba(0, 0, 0, 0.2)';
+            btn.style.transform = isGodMode ? 'scale(1.15)' : 'scale(1.0)';
+            btn.title = isGodMode ? 'God Mode: ON (Free Camera Active) [G]' : 'Toggle God Mode (Free Camera) [G]';
+        }
+
+        if (typeof gui !== 'undefined' && gui) {
+            gui.controllersRecursive().forEach(c => {
+                if (c.property === 'godMode') c.updateDisplay();
+            });
+        }
+    }
+    window.setGodMode = setGodMode;
+
+    function setAllFogEnabled(enabled) {
+        params.showFog = enabled;
+        params.sceneFog = enabled;
+        if (!enabled) {
+            if (typeof scene !== 'undefined' && scene.fog) {
+                scene.fog.near = 100000;
+                scene.fog.far = 200000;
+            }
+            if (typeof window.fogGroup !== 'undefined') {
+                window.fogGroup.visible = false;
+            }
+            if (typeof groundFog !== 'undefined') {
+                groundFog.visible = false;
+            }
+        } else {
+            if (typeof scene !== 'undefined' && scene.fog && typeof playerGrp !== 'undefined' && playerGrp.position) {
+                const dynamicFar = (800 + Math.max(0, playerGrp.position.y - 300.0) * 2.2) / (params.fogIntensity || 3.5);
+                const dynamicNear = (10 + Math.max(0, playerGrp.position.y - 300.0) * 0.4) / (params.fogIntensity || 3.5);
+                scene.fog.near = dynamicNear;
+                scene.fog.far = dynamicFar;
+            }
+            if (typeof window.fogGroup !== 'undefined') {
+                window.fogGroup.visible = params.showFogPlanes;
+            }
+        }
+
+        if (typeof gui !== 'undefined' && gui) {
+            gui.controllersRecursive().forEach(c => {
+                if (c.property === 'sceneFog' || c.property === 'showFog') {
+                    c.updateDisplay();
+                }
+            });
+        }
+    }
+    window.setAllFogEnabled = setAllFogEnabled;
+
+    const debugFolder = gui.addFolder('Debug Render');
+    debugFolder.add(params, 'godMode').name('God Mode (Free Cam) [G]').listen().onChange(v => setGodMode(v));
     debugFolder.add(params, 'showProceduralSky').name('Procedural Sky').onChange(v => {
         if (typeof window.setSkyRenderMode === 'function') {
             if (!v) {
@@ -950,7 +1114,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     debugFolder.add(params, 'showTerrain').name('Terrain').onChange(v => { terrain.visible = v; });
 
-    debugFolder.add(params, 'showWater').name('🌊 Ocean Visible').onChange(v => {
+    debugFolder.add(params, 'showWater').name('Ocean Visible').onChange(v => {
         if (animeWaterSystem) animeWaterSystem.setVisible(v);
     });
 
@@ -968,11 +1132,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
         instMesh.instanceMatrix.needsUpdate = true;
     }
+    debugFolder.add(params, 'showFog').name('All Fog').listen().onChange(v => setAllFogEnabled(v));
+    debugFolder.add(params, 'showFogPlanes').name('Fog Planes').listen().onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     debugFolder.add(params, 'showBirds').name('Birds').onChange(v => { if(typeof instBirds !== 'undefined') instBirds.visible = v; if(typeof flockGrp !== 'undefined') flockGrp.visible = v; });
-    debugFolder.add(params, 'showFogPlanes').name('Fog Planes').onChange(v => { if(typeof window.fogGroup !== 'undefined') window.fogGroup.visible = v; });
     debugFolder.add(params, 'showCrystals').name('Crystals').onChange(v => { instCrystals.visible = v; });
 
-    const shadingFolder = debugFolder.addFolder('🎨 Shade Mode');
+    const shadingFolder = debugFolder.addFolder('Shade Mode');
     shadingFolder.add(params, 'shadeMode', ['original', 'cel', 'flat'])
         .name('Mode (1/2/3)')
         .onChange(v => toonShaderManager.apply(scene, v));
@@ -980,7 +1145,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     debugFolder.add(params, 'showMap').name('World Map').onChange(v => { const el = document.getElementById('world-map'); if(el) el.style.display = v ? 'block' : 'none'; });
 
     // Bird & Flock Settings
-    const birdFolder = debugFolder.addFolder('🐦 Bird & Flock Settings');
+    const birdFolder = debugFolder.addFolder('Bird & Flock Settings');
     params.birdCount = LOW_GFX ? 12 : 40;
     params.birdScale = 0.42;
     params.birdColor = '#d6e5f5';
@@ -1074,19 +1239,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         });
     }
 
-    // Attach click listener on root title to minimize directly to cogwheel
-    const rootTitle = gui.domElement.querySelector('.title');
-    if (rootTitle) {
-        rootTitle.addEventListener('click', () => {
-            setTimeout(() => {
-                if (gui._closed) {
-                    toggleGUI(false);
-                }
-            }, 10);
-        });
-    }
-
-    debugFolder.add(params, 'showGUI').name('lil-gui Panel').onChange(v => toggleGUI(v));
+    debugFolder.add(params, 'showGUI').name('Settings Panel').onChange(v => toggleGUI(v));
     debugFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
     debugFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
 
@@ -1115,8 +1268,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             else openOceanInGui();
         }
         if ((e.key === 'g' || e.key === 'G') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-            const godBtn = document.getElementById('god-mode-btn');
-            if (godBtn) godBtn.click();
+            setGodMode();
         }
     });
 
@@ -1211,19 +1363,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         });
     }
 
-    if (drawerGodBtn && normalGodBtn) {
+    if (drawerGodBtn) {
         setTimeout(() => {
             const isGod = isGodMode;
-            drawerGodBtn.innerText = isGod ? '👁️ God Mode: ON' : '👁️ God Mode: OFF';
+            drawerGodBtn.innerText = isGod ? 'God Mode: ON' : 'God Mode: OFF';
             drawerGodBtn.style.color = isGod ? '#ff4444' : '#ffaa00';
         }, 1000);
 
         drawerGodBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            normalGodBtn.click();
+            setGodMode();
             setTimeout(() => {
                 const isGod = isGodMode;
-                drawerGodBtn.innerText = isGod ? '👁️ God Mode: ON' : '👁️ God Mode: OFF';
+                drawerGodBtn.innerText = isGod ? 'God Mode: ON' : 'God Mode: OFF';
                 drawerGodBtn.style.color = isGod ? '#ff4444' : '#ffaa00';
             }, 50);
         });
@@ -1236,72 +1388,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         document.getElementById('pause-toggle').innerText = isFlightPaused ? '▶' : '⏸';
     });
 
-    document.getElementById('god-mode-btn').addEventListener('click', () => {
-        isGodMode = !isGodMode;
-        const btn = document.getElementById('god-mode-btn');
-        if (isGodMode) {
-            if (typeof params !== 'undefined') {
-                params.groundFog = false;
-                params.godRays = false;
-                if (typeof isWindTrailsOn !== 'undefined') params.trails = false;
-                params.wind = false;
-                params.rain = false;
-                params.sceneFog = false;
-                params.showClouds = false;
-            }
-            // Automatically hide ALL cloud layers in God Mode
-            if (typeof instClouds !== 'undefined') instClouds.visible = false;
-            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = false;
-            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = false;
-            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = false;
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 0.0;
-
-            if (typeof scene !== 'undefined' && scene.fog) { scene.fog.near = 100000; scene.fog.far = 200000; }
-            if (typeof groundFog !== 'undefined') groundFog.visible = false;
-            if (typeof godRaysGroup !== 'undefined') godRaysGroup.visible = false;
-            if (typeof windTrailsGroup !== 'undefined') windTrailsGroup.visible = false;
-            
-            if (typeof debugFolder !== 'undefined') debugFolder.open();
-            if (typeof envFolder !== 'undefined') envFolder.open();
-            isFlightPaused = true;
-            document.getElementById('pause-toggle').innerText = '▶';
-            btn.innerText = '▲';
-            btn.style.color = '#ff4444';
-            btn.style.textShadow = '0 0 10px rgba(255, 68, 68, 0.9), 0 1px 3px rgba(0, 0, 0, 0.5)';
-            btn.style.transform = 'scale(1.15)';
-            btn.title = 'God Mode: ON (Free Camera Active) [G]';
-
-            if (!godCamera) {
-                const gm = setupGodMode(scene, cameraBase, renderer, playerGrp);
-                godCamera = gm.godCamera;
-                godControls = gm.godControls;
-            }
-            toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
-                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
-            });
-    
-        } else {
-            if (typeof params !== 'undefined') {
-                params.showClouds = true;
-            }
-            if (typeof instClouds !== 'undefined') instClouds.visible = true;
-            if (typeof instHighClouds !== 'undefined') instHighClouds.visible = true;
-            if (typeof instWispyClouds !== 'undefined') instWispyClouds.visible = true;
-            if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
-            if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
-
-            btn.innerText = '▲';
-            btn.style.color = 'rgba(255, 255, 255, 0.95)';
-            btn.style.textShadow = '0 1px 3px rgba(0, 0, 0, 0.35), 0 0 8px rgba(0, 0, 0, 0.2)';
-            btn.style.transform = 'scale(1.0)';
-            btn.title = 'Toggle God Mode (Free Camera) [G]';
-
-            toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
-                if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
-            });
-    
-        }
-    });
+    if (normalGodBtn) {
+        normalGodBtn.addEventListener('click', () => {
+            setGodMode();
+        });
+    }
 
 
 
@@ -1542,6 +1633,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         uPlayerPos: uniform(new THREE.Vector3(0, 0, 0)),
         uTreeScale: uniform(1.5)
     };
+    window.treeUniforms = treeUniforms;
     
     const matTree = createTreeMaterial(
         terrainUniforms.uTime,
@@ -1968,18 +2060,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     geoCloud.computeVertexNormals();
 
     // Meshes — 10 Distinct 3D Stylized Pine Tree Instanced Meshes
-    const PINE_CONFIGS = [
-        { key: 'pine_var1', name: 'Stylized Pine 1 (Tall Majestic)', path: 'assets/stylized_pine_var1.glb', count: 120, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 0 },
-        { key: 'pine_var2', name: 'Stylized Pine 2 (Full Tiered)', path: 'assets/stylized_pine_var2.glb', count: 120, height: 22.0, fallbackGeo: geoTree2, clusterGroup: 0 },
-        { key: 'pine_var3', name: 'Stylized Pine 3 (Mountain)', path: 'assets/Pine/stylized_pine_var3.glb', count: 110, height: 21.0, fallbackGeo: geoTree3, clusterGroup: 0 },
-        { key: 'pine_var4', name: 'Stylized Pine 4 (Dense Alpine)', path: 'assets/Pine/stylized_pine_var4.glb', count: 110, height: 20.0, fallbackGeo: geoTree4, clusterGroup: 1 },
-        { key: 'pine_fast', name: 'Pine (Ultra Fast Classic)', path: 'assets/Pine_ultra_fast.glb', count: 90, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 1 },
-        { key: 'pine_fast1', name: 'Pine Alt (Ultra Fast Spire)', path: 'assets/Pine_1_ultra_fast.glb', count: 80, height: 22.0, fallbackGeo: geoTree3, clusterGroup: 1 },
-        { key: 'pine_small1', name: 'Small Stylized Pine 1', path: 'assets/small_stylized_pine_var1.glb', count: 90, height: 15.0, fallbackGeo: geoTree2, clusterGroup: 2 },
-        { key: 'pine_small2', name: 'Small Stylized Pine 2 (Highland)', path: 'assets/Pine/small_stylized_pine_var2.glb', count: 90, height: 14.0, fallbackGeo: geoTree3, clusterGroup: 2 },
-        { key: 'pine_small3', name: 'Small Stylized Pine 3 (Dwarf)', path: 'assets/small_stylized_pine_var3.glb', count: 80, height: 12.0, fallbackGeo: geoTree1, clusterGroup: 2 },
-        { key: 'pine_sapling', name: 'Sapling Pine', path: 'assets/Pine/sapling_stylized_pine.glb', count: 80, height: 8.0, fallbackGeo: geoTree4, clusterGroup: 2 }
+    const GHIBLI_TREE_CONFIGS = [
+        { key: 'pine_ghibli_02', name: 'Pine Ghibli 02 (Majestic)', path: 'assets/Pines/Pine_Ghibli_02.glb', count: 120, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 0 },
+        { key: 'pine_model_a2', name: 'Pine Model A (Tall)', path: 'assets/Pines/Pine model  A (2).glb', count: 120, height: 22.0, fallbackGeo: geoTree2, clusterGroup: 0 },
+        { key: 'pine_model_a3', name: 'Pine Model A (Dense)', path: 'assets/Pines/Pine model  A (3).glb', count: 110, height: 21.0, fallbackGeo: geoTree3, clusterGroup: 0 },
+        { key: 'pine_model_a4', name: 'Pine Model A (Highland)', path: 'assets/Pines/Pine model  A (4).glb', count: 110, height: 20.0, fallbackGeo: geoTree4, clusterGroup: 1 },
+        { key: 'pine_model_a5', name: 'Pine Model A (Spire)', path: 'assets/Pines/Pine model  A (5).glb', count: 90, height: 22.0, fallbackGeo: geoTree1, clusterGroup: 1 },
+        { key: 'pine_model_a6', name: 'Pine Model A (Tiered)', path: 'assets/Pines/Pine model  A (6).glb', count: 80, height: 22.0, fallbackGeo: geoTree3, clusterGroup: 1 },
+        { key: 'pine_model_a7', name: 'Pine Model A (Alpine)', path: 'assets/Pines/Pine model  A (7).glb', count: 90, height: 18.0, fallbackGeo: geoTree2, clusterGroup: 2 },
+        { key: 'pine_model_a8', name: 'Pine Model A (Small)', path: 'assets/Pines/Pine model  A (8).glb', count: 90, height: 14.0, fallbackGeo: geoTree3, clusterGroup: 2 },
+        { key: 'pine_model_b1', name: 'Pine Model B (Grove 1)', path: 'assets/Pines/Pine model B (1).glb', count: 80, height: 12.0, fallbackGeo: geoTree1, clusterGroup: 2 },
+        { key: 'pine_model_b2', name: 'Pine Model B (Grove 2)', path: 'assets/Pines/Pine model B (2).glb', count: 80, height: 10.0, fallbackGeo: geoTree4, clusterGroup: 2 }
     ];
+    const PINE_CONFIGS = GHIBLI_TREE_CONFIGS;
 
     const pineTreeMeshes = PINE_CONFIGS.map(cfg => {
         const mesh = new THREE.InstancedMesh(cfg.fallbackGeo, matTree, cfg.count);
@@ -2752,6 +2845,46 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         return getBiomeAt(worldX, worldZ).treesOk;
     }
 
+    let prevGhibliTreeScale = params.ghibliTreeScale || 1.2;
+    function updateGhibliTreeScale(newScale) {
+        if (!newScale || newScale <= 0) return;
+        const ratio = newScale / prevGhibliTreeScale;
+        prevGhibliTreeScale = newScale;
+        const dummyObj = new THREE.Object3D();
+        pineTreeMeshes.forEach(mesh => {
+            const count = mesh.maxCount || mesh.count;
+            let changed = false;
+            for (let i = 0; i < count; i++) {
+                mesh.getMatrixAt(i, dummyObj.matrix);
+                dummyObj.matrix.decompose(dummyObj.position, dummyObj.quaternion, dummyObj.scale);
+                if (dummyObj.position.y > -500) {
+                    dummyObj.scale.multiplyScalar(ratio);
+                    dummyObj.updateMatrix();
+                    mesh.setMatrixAt(i, dummyObj.matrix);
+                    changed = true;
+                }
+            }
+            if (changed) mesh.instanceMatrix.needsUpdate = true;
+        });
+    }
+    window.updateGhibliTreeScale = updateGhibliTreeScale;
+
+    function respawnGhibliTrees() {
+        treeGrid.clear();
+        const dummyObj = new THREE.Object3D();
+        dummyObj.position.set(0, -1000, 0);
+        dummyObj.scale.set(0, 0, 0);
+        dummyObj.updateMatrix();
+        pineTreeMeshes.forEach(mesh => {
+            const count = mesh.maxCount || mesh.count;
+            for (let i = 0; i < count; i++) {
+                mesh.setMatrixAt(i, dummyObj.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+        });
+    }
+    window.respawnGhibliTrees = respawnGhibliTrees;
+
     function updateInstances(playerX, playerZ, time, dt, playerYaw) {
         const dist = 850; 
         
@@ -2971,15 +3104,32 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                                         continue;
                                     }
 
+                                    // Tree density filter
+                                    const treeDensity = params.ghibliTreeDensity !== undefined ? params.ghibliTreeDensity : 1.0;
+                                    if (treeDensity < 1.0 && Math.random() > treeDensity) {
+                                        attempts++;
+                                        continue;
+                                    }
+
                                     h = getWorldHeight(nx, nz);
                                     pathVal = getPathStrength(nx, nz);
                                     const bObj = getBiomeAt(nx, nz);
                                     bName = bObj && bObj.name ? bObj.name : '';
 
+                                    let isGhibli = bName.includes('Ghibli Land');
                                     let isForest = true;
-                                    let biomeMatch = !bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty');
+                                    let biomeMatch = isGhibli || (!bName.toLowerCase().includes('jungle') && !bName.includes('Crystal Land') && !bName.includes('Desert') && !bName.includes('Canyon') && !bName.includes('North Pole') && !bName.includes('Misty'));
                                     let islandMaskOk = (getIslandData(nx, nz).mask >= 0.35);
-                                    let elevationValid = (h >= 6.8 && h <= 55.0) && islandMaskOk;
+
+                                    let minElev = params.ghibliTreeMinHeight !== undefined ? params.ghibliTreeMinHeight : 6.8;
+                                    let maxElev = params.ghibliTreeMaxHeight !== undefined ? params.ghibliTreeMaxHeight : 58.0;
+                                    let elevationValid = (h >= minElev && h <= maxElev) && islandMaskOk;
+
+                                    let minDist = params.ghibliTreeMinDist !== undefined ? params.ghibliTreeMinDist : 14.0;
+                                    if (treeDensity > 1.0) {
+                                        minDist = Math.max(6.0, minDist / Math.sqrt(treeDensity));
+                                    }
+                                    let minDistSq = minDist * minDist;
 
                                     if (isForest && elevationValid && pathVal < 0.20 && isTreeZone(nx, nz) && biomeMatch) {
                                         let cx = Math.floor(nx / TREE_CELL_SIZE);
@@ -2991,7 +3141,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                                                 const ncz = (cz + dz + 32768) & 0xFFFF;
                                                 let neighbor = treeGrid.get((ncx << 16) | ncz);
                                                 if (neighbor) {
-                                                    if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < 20) tooClose = true;
+                                                    if ((neighbor.x - nx)**2 + (neighbor.z - nz)**2 < minDistSq) tooClose = true;
                                                 }
                                             }
                                         }
@@ -3006,7 +3156,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                                 treeGrid.set(getTreeCell(nx, nz), {x: nx, z: nz});
                                 dummy.position.set(nx, h, nz);
                                 dummy.rotation.set(0, Math.random() * Math.PI * 2.0, 0);
-                                let baseS = 0.90 + Math.random() * 0.40;
+                                const curScale = params.ghibliTreeScale !== undefined ? params.ghibliTreeScale : 1.2;
+                                let baseS = (0.90 + Math.random() * 0.40) * curScale;
                                 dummy.scale.set(baseS * (0.92 + Math.random() * 0.16), baseS * (0.94 + Math.random() * 0.12), baseS * (0.92 + Math.random() * 0.16));
                             } else {
                                 dummy.position.set(0, -1000, 0);
@@ -3301,8 +3452,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (charBtn) {
             charBtn.innerText = `MODEL: ${cfg.name.toUpperCase()}`;
         }
+        const topModelSelect = document.getElementById('top-model-select');
+        if (topModelSelect && topModelSelect.value !== cfg.id) {
+            topModelSelect.value = cfg.id;
+        }
         if (typeof flightModelDropdownController !== 'undefined' && flightModelDropdownController) {
-            flightModelDropdownController.setValue(cfg.id);
+            if (flightModelDropdownController.getValue() !== cfg.id) {
+                flightModelDropdownController.setValue(cfg.id);
+            }
         }
     }
 
@@ -3412,6 +3569,50 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     document.getElementById('top-music-btn')?.addEventListener('click', () => {
         document.getElementById('music-toggle')?.click();
     });
+
+    // Top Bar Model Switcher UI Initialization
+    const topModelSelect = document.getElementById('top-model-select');
+    const topModelPrev = document.getElementById('top-model-prev-btn');
+    const topModelNext = document.getElementById('top-model-next-btn');
+
+    if (topModelSelect) {
+        topModelSelect.innerHTML = '';
+        FLIGHT_MODELS.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = m.name;
+            topModelSelect.appendChild(opt);
+        });
+
+        if (initCfg) {
+            topModelSelect.value = initCfg.id;
+        }
+
+        topModelSelect.addEventListener('change', (e) => {
+            const id = e.target.value;
+            if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+                flightModelManager.setModelById(id);
+            }
+        });
+    }
+
+    if (topModelPrev) {
+        topModelPrev.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+                flightModelManager.prevModel();
+            }
+        });
+    }
+
+    if (topModelNext) {
+        topModelNext.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof flightModelManager !== 'undefined' && flightModelManager) {
+                flightModelManager.nextModel();
+            }
+        });
+    }
 
     window.updateCustomModelTransform = function(model) {
         if (!model) return;
@@ -3645,10 +3846,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     });
 
     // ==========================================
-    // GLB Pine Tree Loader — Merged Single Draw Call
+    // GLB Tree Loader — Ghibli Atlas & Instancing
     // ==========================================
-    // Merges Bark + Leaves primitives into ONE geometry with vertex colors.
-    // 1 InstancedMesh = 1 draw call per tree slot (not 2).
 
     function applyGLBPineTree(gltf, targetInstancedMeshes, targetHeight) {
         gltf.scene.updateMatrixWorld(true);
@@ -3662,6 +3861,40 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         const modelHeight = bbox.max.y - bbox.min.y;
         const sc = modelHeight > 0 ? (targetHeight / modelHeight) : 1.0;
         const offsetY = -bbox.min.y;
+
+        // Check if there is an atlas map on the GLTF mesh
+        let atlasMap = null;
+        for (let i = 0; i < childMeshes.length; i++) {
+            const m = childMeshes[i];
+            if (m.material) {
+                if (m.material.map) {
+                    atlasMap = m.material.map;
+                    break;
+                } else if (Array.isArray(m.material) && m.material[0] && m.material[0].map) {
+                    atlasMap = m.material[0].map;
+                    break;
+                }
+            }
+        }
+
+        let customTreeMat = matTree;
+        if (atlasMap) {
+            atlasMap.colorSpace = THREE.SRGBColorSpace;
+            customTreeMat = new MeshToonNodeMaterial({
+                color: new THREE.Color(0xffffff),
+                map: atlasMap,
+                gradientMap: gradientMap,
+                alphaTest: 0.35,
+                side: THREE.DoubleSide,
+                transparent: false,
+                depthWrite: true,
+                depthTest: true,
+                dithering: true
+            });
+            if (typeof windSwayNode === 'function') {
+                customTreeMat.positionNode = windSwayNode(terrainUniforms.uTime, treeUniforms.uTreeScale);
+            }
+        }
 
         targetInstancedMeshes.forEach((instMesh) => {
             const geos = [];
@@ -3722,21 +3955,21 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             mergedGeom.computeBoundingSphere();
 
             instMesh.geometry = mergedGeom;
-            instMesh.material = matTree;
+            instMesh.material = customTreeMat;
             instMesh.instanceColor = null;
             instMesh.instanceMatrix.needsUpdate = true;
         });
     }
 
-    // Asynchronously load ALL 10 GLTF Pine tree assets into their respective instanced meshes
+    // Asynchronously load ALL 10 GLTF Ghibli tree assets into their respective instanced meshes
     PINE_CONFIGS.forEach((cfg, idx) => {
         const instMesh = pineTreeMeshes[idx];
         const fullUrl = resolveAssetUrl(cfg.path);
         gltfLoader.load(fullUrl, (gltf) => {
             applyGLBPineTree(gltf, [instMesh], cfg.height);
-            console.log('✓ Successfully loaded and applied pine model:', cfg.name, fullUrl);
+            console.log('Successfully loaded and applied Ghibli tree model:', cfg.name, fullUrl);
         }, undefined, (err) => {
-            console.error('Failed to load pine model:', fullUrl, err);
+            console.error('Failed to load Ghibli tree model:', fullUrl, err);
         });
     });
 
@@ -4194,7 +4427,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     scene.add(starField);
 
     // --- Camera Rig Hierarchy ---
-    const cameraBase = new THREE.Group(); 
+    cameraBase = new THREE.Group(); 
     scene.add(cameraBase);
 
     const cameraPivot = new THREE.Group(); 
@@ -4628,9 +4861,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         const dynamicFar = (800 + Math.max(0, playerGrp.position.y - 300.0) * 2.2) / params.fogIntensity;
         const dynamicNear = (10 + Math.max(0, playerGrp.position.y - 300.0) * 0.4) / params.fogIntensity;
         
-        if (params.sceneFog) {
+        if (params.sceneFog && params.showFog !== false) {
             scene.fog.far += (dynamicFar - scene.fog.far) * dt * 2.0;
             scene.fog.near += (dynamicNear - scene.fog.near) * dt * 2.0;
+        } else {
+            scene.fog.near = 100000;
+            scene.fog.far = 200000;
         }
 
         const altitude = Math.max(0, playerGrp.position.y - currentGroundY);
@@ -4881,20 +5117,29 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let sequenceTime = 0;
     let arpIndex = 0;
 
+    let isSyncingTrack = false;
     function selectMusicTrack(idx) {
-        currentTrack = ((idx % tracks.length) + tracks.length) % tracks.length;
-        sequenceTime = 0;
-        chordIndex = 0;
-        arpIndex = 0;
-        if (audioCtx) {
-            nextNoteTime = audioCtx.currentTime + 0.1;
-        }
-        const trackBtn = document.getElementById('track-toggle');
-        if (trackBtn) {
-            trackBtn.innerText = "Track: " + tracks[currentTrack].name;
-        }
-        if (typeof trackDropdownController !== 'undefined' && trackDropdownController) {
-            trackDropdownController.setValue(tracks[currentTrack].name);
+        if (isSyncingTrack) return;
+        isSyncingTrack = true;
+        try {
+            currentTrack = ((idx % tracks.length) + tracks.length) % tracks.length;
+            sequenceTime = 0;
+            chordIndex = 0;
+            arpIndex = 0;
+            if (audioCtx) {
+                nextNoteTime = audioCtx.currentTime + 0.1;
+            }
+            const trackBtn = document.getElementById('track-toggle');
+            if (trackBtn) {
+                trackBtn.innerText = "Track: " + tracks[currentTrack].name;
+            }
+            if (typeof trackDropdownController !== 'undefined' && trackDropdownController) {
+                if (trackDropdownController.getValue() !== tracks[currentTrack].name) {
+                    trackDropdownController.setValue(tracks[currentTrack].name);
+                }
+            }
+        } finally {
+            isSyncingTrack = false;
         }
     }
     window.selectMusicTrack = selectMusicTrack;
@@ -5429,10 +5674,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         // 5. Weather & Fog Subfolder
         const weatherFolder = envFolder.addFolder('Weather & Fog');
-        weatherFolder.add(params, 'sceneFog').name('Global Fog').onChange(v => {
-            if (!v && typeof scene !== 'undefined' && scene.fog) {
-                scene.fog.near = 100000;
-                scene.fog.far = 200000;
+        weatherFolder.add(params, 'sceneFog').name('Global Fog').listen().onChange(v => {
+            if (typeof setAllFogEnabled === 'function') {
+                setAllFogEnabled(v);
             }
         });
         weatherFolder.add(params, 'fogIntensity', 0.1, 5.0, 0.1).name('Fog Intensity');
@@ -5843,10 +6087,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         // Reorder folders: most-used first
         const folderOrder = [
-            flightFolder, audioFolder, debugFolder, navFolder, perfFolder, envFolder,
-            editorFolder, presetsFolder
+            flightFolder, editorFolder, audioFolder, debugFolder, navFolder, perfFolder, envFolder, presetsFolder
         ].filter(Boolean);
-        const guiContainer = gui.domElement.querySelector('.children') || gui.domElement;
+        const guiContainer = gui.$children || gui.domElement.querySelector('.children') || gui.domElement;
         folderOrder.forEach(f => {
             const dom = f.domElement || f;
             if (dom && dom.parentElement) guiContainer.appendChild(dom);
