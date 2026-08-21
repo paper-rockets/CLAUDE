@@ -22,6 +22,20 @@ import {
   shoreFoamSpeedUniform,
   shoreFoamStrengthUniform,
   shoreRefractionUniform,
+  chopStrengthUniform,
+  crestSharpnessUniform,
+  microRoughnessUniform,
+  sparkleUniform,
+  foamJacobianUniform,
+  foamTrailUniform,
+  foamStreakUniform,
+  sssColorUniform,
+  sssStrengthUniform,
+  sssPowerUniform,
+  extinctionUniform,
+  inScatterUniform,
+  aerialStrengthUniform,
+  aerialDistanceUniform,
   WAVE_PARAMS,
   updateWaveUniforms,
   randomizeSeaSpectrum,
@@ -40,6 +54,28 @@ const SHORE_DEFAULTS = {
     shoreFoamStrength: 1.0,
     shoreRefraction: 0.35
 };
+
+// Surface-realism defaults — mirrors the uniform defaults declared in OpenSeaOcean.js.
+const SURFACE_DEFAULTS = {
+    chopStrength: 4.5,
+    crestSharpness: 0.8,
+    microRoughness: 1.0,
+    sparkle: 1.0,
+    foamJacobian: 0.66,
+    foamTrail: 1.0,
+    foamStreak: 1.0,
+    sssColor: '#1a9e8d',
+    sssStrength: 1.35,
+    sssPower: 4.5,
+    clarity: 1.0,
+    inScatter: 0.55,
+    aerialStrength: 0.85,
+    aerialDistance: 7000
+};
+
+// Base per-metre absorption, scaled by the Clarity slider. Red is extinguished ~5x faster than
+// blue, which is the whole reason shallow water reads turquoise and deep water reads blue.
+const EXTINCTION_BASE = { r: 0.75, g: 0.30, b: 0.16 };
 
 export class WaterModalUI {
     constructor(waterSystem) {
@@ -319,6 +355,13 @@ export class WaterModalUI {
                 color: var(--oc-accent);
             }
 
+            .oc-hint {
+                margin-top: 6px;
+                font-size: 10.5px;
+                line-height: 1.45;
+                color: rgba(200, 220, 235, 0.45);
+            }
+
             .oc-color-grid {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
@@ -389,6 +432,7 @@ export class WaterModalUI {
                         <button class="oc-tab-btn active" data-tab="waves">Waves</button>
                         <button class="oc-tab-btn" data-tab="spectrum">Spectrum</button>
                         <button class="oc-tab-btn" data-tab="shore">Shore</button>
+                        <button class="oc-tab-btn" data-tab="surface">Surface</button>
                         <button class="oc-tab-btn" data-tab="atmosphere">Atmosphere</button>
                         <button class="oc-tab-btn" data-tab="view">View</button>
                         <button class="oc-tab-btn" data-tab="debug">Debug</button>
@@ -650,6 +694,145 @@ export class WaterModalUI {
                         </div>
                     </div>
 
+
+                    <!-- Tab: Surface realism -->
+                    <div class="oc-tab-content" id="oc-tab-surface">
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label>Wave Shape</label>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-chopStrength">Crest Sharpening (Q)</label>
+                                <span class="oc-value" id="oc-chopStrengthVal">4.50</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-chopStrength" min="0" max="7" value="4.5" step="0.05"/>
+                            <div class="oc-hint">Pinches peaks and flattens troughs. Above ~3.5 the surface starts folding through itself.</div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-crestSharp">Peak Pinch (Stokes)</label>
+                                <span class="oc-value" id="oc-crestSharpVal">0.80</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-crestSharp" min="0" max="2" value="0.8" step="0.05"/>
+                            <div class="oc-hint">Extra sharpening at the very tip of the crest. Does not change wave height.</div>
+                        </div>
+                        <div class="oc-control" style="margin-top:14px;">
+                            <div class="oc-control-head">
+                                <label>Micro-Surface &amp; Specular</label>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-microRough">Normal Filtering</label>
+                                <span class="oc-value" id="oc-microRoughVal">1.00</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-microRough" min="0" max="2" value="1.0" step="0.05"/>
+                            <div class="oc-hint">Turns sub-pixel ripple into roughness. Drop to 0 to see the raw sparkle it removes.</div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-sparkle">Sun Glitter</label>
+                                <span class="oc-value" id="oc-sparkleVal">1.00</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-sparkle" min="0" max="3" value="1.0" step="0.05"/>
+                        </div>
+                        <div class="oc-control" style="margin-top:14px;">
+                            <div class="oc-control-head">
+                                <label>Whitecaps</label>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-foamJac">Break Threshold</label>
+                                <span class="oc-value" id="oc-foamJacVal">0.66</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-foamJac" min="0.1" max="1.0" value="0.66" step="0.01"/>
+                            <div class="oc-hint">How steep a crest must get before it foams. Higher = foam on more waves.</div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-foamTrail">Foam Trail Length</label>
+                                <span class="oc-value" id="oc-foamTrailVal">1.00</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-foamTrail" min="0" max="3" value="1.0" step="0.05"/>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-foamStreak">Streak Anisotropy</label>
+                                <span class="oc-value" id="oc-foamStreakVal">1.00</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-foamStreak" min="0" max="1" value="1.0" step="0.05"/>
+                            <div class="oc-hint">0 = round clumps, 1 = streaks stretched along the swell direction.</div>
+                        </div>
+                        <div class="oc-control" style="margin-top:14px;">
+                            <div class="oc-control-head">
+                                <label>Subsurface Scattering</label>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-col-sss">Backlight Colour</label>
+                            </div>
+                            <div class="oc-color-grid">
+                                <div class="oc-color-item">
+                                    <span>Backlight</span>
+                                    <input type="color" id="oc-col-sss" value="#1a9e8d"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-sssStrength">SSS Strength</label>
+                                <span class="oc-value" id="oc-sssStrengthVal">1.35</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-sssStrength" min="0" max="4" value="1.35" step="0.05"/>
+                            <div class="oc-hint">Glow through a wave lit from behind. Peaks on thin, steep crests.</div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-sssPower">SSS Tightness</label>
+                                <span class="oc-value" id="oc-sssPowerVal">4.5</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-sssPower" min="1" max="16" value="4.5" step="0.1"/>
+                        </div>
+                        <div class="oc-control" style="margin-top:14px;">
+                            <div class="oc-control-head">
+                                <label>Water Clarity &amp; Air</label>
+                            </div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-clarity">Water Clarity</label>
+                                <span class="oc-value" id="oc-clarityVal">1.00</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-clarity" min="0.2" max="3" value="1.0" step="0.05"/>
+                            <div class="oc-hint">Lower = clearer water, the bottom shows through from deeper. Higher = murkier.</div>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-inScatter">Turquoise In-Scatter</label>
+                                <span class="oc-value" id="oc-inScatterVal">0.55</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-inScatter" min="0" max="2" value="0.55" step="0.05"/>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-aerialStrength">Haze Strength</label>
+                                <span class="oc-value" id="oc-aerialStrengthVal">0.85</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-aerialStrength" min="0" max="1.5" value="0.85" step="0.05"/>
+                        </div>
+                        <div class="oc-control">
+                            <div class="oc-control-head">
+                                <label for="oc-aerialDist">Haze Distance</label>
+                                <span class="oc-value" id="oc-aerialDistVal">7000m</span>
+                            </div>
+                            <input class="oc-slider" type="range" id="oc-aerialDist" min="800" max="20000" value="7000" step="100"/>
+                        </div>
+                    </div>
+
                     <!-- Tab 4: Atmosphere & Colors -->
                     <div class="oc-tab-content" id="oc-tab-atmosphere">
                         <div class="oc-control">
@@ -903,6 +1086,64 @@ export class WaterModalUI {
         modal.querySelector('#oc-col-sand').addEventListener('input', e => sandColorUniform.value.set(e.target.value));
         modal.querySelector('#oc-col-shoreShallow').addEventListener('input', e => shoreShallowColorUniform.value.set(e.target.value));
 
+        // Tab: Surface realism
+        bindSlider('oc-chopStrength', 'oc-chopStrengthVal', (v) => {
+            chopStrengthUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-crestSharp', 'oc-crestSharpVal', (v) => {
+            crestSharpnessUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-microRough', 'oc-microRoughVal', (v) => {
+            microRoughnessUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-sparkle', 'oc-sparkleVal', (v) => {
+            sparkleUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-foamJac', 'oc-foamJacVal', (v) => {
+            foamJacobianUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-foamTrail', 'oc-foamTrailVal', (v) => {
+            foamTrailUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-foamStreak', 'oc-foamStreakVal', (v) => {
+            foamStreakUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-sssStrength', 'oc-sssStrengthVal', (v) => {
+            sssStrengthUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-sssPower', 'oc-sssPowerVal', (v) => {
+            sssPowerUniform.value = v;
+        }, v => v.toFixed(1));
+
+        // One slider scales all three absorption channels together, keeping their ratio -- that
+        // ratio is what produces the turquoise-to-blue gradient and should not be user-editable.
+        bindSlider('oc-clarity', 'oc-clarityVal', (v) => {
+            extinctionUniform.value.set(
+                EXTINCTION_BASE.r * v, EXTINCTION_BASE.g * v, EXTINCTION_BASE.b * v);
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-inScatter', 'oc-inScatterVal', (v) => {
+            inScatterUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-aerialStrength', 'oc-aerialStrengthVal', (v) => {
+            aerialStrengthUniform.value = v;
+        }, v => v.toFixed(2));
+
+        bindSlider('oc-aerialDist', 'oc-aerialDistVal', (v) => {
+            aerialDistanceUniform.value = v;
+        }, v => `${Math.round(v)}m`);
+
+        modal.querySelector('#oc-col-sss').addEventListener('input', e => sssColorUniform.value.set(e.target.value));
+
         // Tab 4: Atmosphere & Color Presets
         const presets = {
             deep: { deep: '#04171c', shallow: '#0f525c', sun: '#ffffff', horizon: '#85adae' },
@@ -1006,10 +1247,25 @@ export class WaterModalUI {
             shoreFoamSpeedUniform.value = SHORE_DEFAULTS.shoreFoamSpeed;
             shoreFoamStrengthUniform.value = SHORE_DEFAULTS.shoreFoamStrength;
             shoreRefractionUniform.value = SHORE_DEFAULTS.shoreRefraction;
+            chopStrengthUniform.value = SURFACE_DEFAULTS.chopStrength;
+            crestSharpnessUniform.value = SURFACE_DEFAULTS.crestSharpness;
+            microRoughnessUniform.value = SURFACE_DEFAULTS.microRoughness;
+            sparkleUniform.value = SURFACE_DEFAULTS.sparkle;
+            foamJacobianUniform.value = SURFACE_DEFAULTS.foamJacobian;
+            foamTrailUniform.value = SURFACE_DEFAULTS.foamTrail;
+            foamStreakUniform.value = SURFACE_DEFAULTS.foamStreak;
+            sssColorUniform.value.set(SURFACE_DEFAULTS.sssColor);
+            sssStrengthUniform.value = SURFACE_DEFAULTS.sssStrength;
+            sssPowerUniform.value = SURFACE_DEFAULTS.sssPower;
+            extinctionUniform.value.set(EXTINCTION_BASE.r, EXTINCTION_BASE.g, EXTINCTION_BASE.b);
+            inScatterUniform.value = SURFACE_DEFAULTS.inScatter;
+            aerialStrengthUniform.value = SURFACE_DEFAULTS.aerialStrength;
+            aerialDistanceUniform.value = SURFACE_DEFAULTS.aerialDistance;
             this.waterSystem.setHeight(2.4);
             this.waterSystem.setQualityMode('high');
             this.syncQualityUI();
             this.updateShoreUI();
+            this.updateSurfaceUI();
             presetBtns[0].click();
         });
     }
@@ -1033,6 +1289,34 @@ export class WaterModalUI {
         if (sandEl) sandEl.value = '#' + sandColorUniform.value.getHexString();
         const shallowEl = this.dom.querySelector('#oc-col-shoreShallow');
         if (shallowEl) shallowEl.value = '#' + shoreShallowColorUniform.value.getHexString();
+    }
+
+    updateSurfaceUI() {
+        const setSlider = (id, value, format) => {
+            const el = this.dom.querySelector(`#${id}`);
+            const valEl = this.dom.querySelector(`#${id}Val`);
+            if (el) el.value = value;
+            if (valEl) valEl.textContent = format(value);
+        };
+        const f2 = v => v.toFixed(2);
+
+        setSlider('oc-chopStrength', chopStrengthUniform.value, f2);
+        setSlider('oc-crestSharp', crestSharpnessUniform.value, f2);
+        setSlider('oc-microRough', microRoughnessUniform.value, f2);
+        setSlider('oc-sparkle', sparkleUniform.value, f2);
+        setSlider('oc-foamJac', foamJacobianUniform.value, f2);
+        setSlider('oc-foamTrail', foamTrailUniform.value, f2);
+        setSlider('oc-foamStreak', foamStreakUniform.value, f2);
+        setSlider('oc-sssStrength', sssStrengthUniform.value, f2);
+        setSlider('oc-sssPower', sssPowerUniform.value, v => v.toFixed(1));
+        // Clarity is stored as the scale factor applied to EXTINCTION_BASE, so read it back out.
+        setSlider('oc-clarity', extinctionUniform.value.x / EXTINCTION_BASE.r, f2);
+        setSlider('oc-inScatter', inScatterUniform.value, f2);
+        setSlider('oc-aerialStrength', aerialStrengthUniform.value, f2);
+        setSlider('oc-aerialDist', aerialDistanceUniform.value, v => `${Math.round(v)}m`);
+
+        const sssEl = this.dom.querySelector('#oc-col-sss');
+        if (sssEl) sssEl.value = '#' + sssColorUniform.value.getHexString();
     }
 
     syncQualityUI() {

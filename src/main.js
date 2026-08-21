@@ -1117,9 +1117,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 godCamera = gm.godCamera;
                 godControls = gm.godControls;
             }
+            const curWaterY = (animeWaterSystem && animeWaterSystem.waterLevel !== undefined) ? animeWaterSystem.waterLevel : 2.4;
             toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
                 if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
-            });
+            }, curWaterY);
         } else {
             if (typeof params !== 'undefined') {
                 params.showClouds = true;
@@ -1130,9 +1131,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (typeof instMegaClouds !== 'undefined') instMegaClouds.visible = true;
             if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) toonCloudMat.uniforms.uEnableClouds.value = 1.0;
 
+            const curWaterY = (animeWaterSystem && animeWaterSystem.waterLevel !== undefined) ? animeWaterSystem.waterLevel : 2.4;
             toggleGodMode(isGodMode, godCamera, camera, godControls, playerGrp, (cam) => {
                 if (typeof scenePass !== 'undefined' && scenePass) scenePass.camera = cam;
-            });
+            }, curWaterY);
         }
 
         const btn = document.getElementById('god-mode-btn');
@@ -2552,6 +2554,136 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const { mesh: proceduralSkyMesh, material: proceduralSkyMat, uniforms: skyUniforms } = createProceduralSky();
     window._skyDbg = skyUniforms;
     scene.add(proceduralSkyMesh);
+
+    // ==========================================
+    // MILKY WAY NIGHT SKY (photographic cubemap)
+    // Real full-sky Milky Way panorama, extracted from galactic-home. It overlays the
+    // procedural night dome and fades in ONLY at night. Its opacity is driven by
+    // skyUniforms.uNightFactor, which is exactly 0.0 at Day and Dusk, so the locked
+    // Golden Hour Dusk look is provably untouched (neutral value at dusk).
+    // ==========================================
+    const uMilkyWayOpacity = uniform(0.0);
+    const uMilkyWayBrightness = uniform(1.5);
+    const uMilkyWayFilter = uniform(0.06); // luminance threshold — pixels below fade out (suppresses point stars)
+    let milkyWayMesh = null;
+    // Live-tunable so the look can be perfected from the GUI (Environment > Moonlight & Night
+    // > Milky Way Photo). The bright galactic core lives on the -Z / -Y faces of this cubemap,
+    // so the default tilt swings that core up into the forward view as an arc across the sky.
+    const milkyWayParams = {
+        brightness: 1.5,   // multiplies texture colour; core clips slightly for a glow
+        opacity: 0.95,     // max blend at full night
+        filter: 0.06,      // luminance threshold: raise to kill more stars from the equirect
+        tiltX: -32,        // degrees — lifts the -Z core up toward the zenith
+        tiltY: 18,         // degrees — swings the core left/right into view
+        tiltZ: 24          // degrees — diagonal lean of the galactic band
+    };
+    const applyMilkyWayTilt = () => {
+        if (!milkyWayMesh) return;
+        milkyWayMesh.rotation.set(
+            THREE.MathUtils.degToRad(milkyWayParams.tiltX),
+            THREE.MathUtils.degToRad(milkyWayParams.tiltY),
+            THREE.MathUtils.degToRad(milkyWayParams.tiltZ)
+        );
+    };
+    try {
+        // Equirectangular Milky Way panorama (built from the galactic-home cubemap). Using a
+        // single 2D texture on a sphere — the same proven setup as the procedural sky dome —
+        // instead of a samplerCube node, which dropped the WebGPU device on this renderer.
+        const mwTex = new THREE.TextureLoader().load('assets/skybox/milkyway_equirect.png');
+        mwTex.colorSpace = THREE.SRGBColorSpace;
+        mwTex.anisotropy = 4;
+
+        const mwMat = new MeshBasicNodeMaterial({
+            side: THREE.BackSide,
+            depthWrite: false,
+            transparent: true,
+            fog: false,
+            // Additive: the panorama's near-black sky adds nothing, so the procedural starfield
+            // underneath stays visible — we only ADD the Milky Way band/glow on top of it.
+            // depthTest=true (default) ensures it doesn't bleed through the water surface.
+            blending: THREE.AdditiveBlending
+        });
+        // Standard sphere UVs map the equirect panorama seamlessly.
+        // Luminance threshold mask: suppresses small point-stars from the equirect while preserving
+        // the broad diffuse galaxy band (which sits well above the threshold).
+        const mwSample = texture(mwTex);
+        const mwRaw = mwSample.rgb.mul(mwSample.a);
+        const mwLum = dot(mwRaw, vec3(0.299, 0.587, 0.114));
+        const mwMask = tslSmoothstep(uMilkyWayFilter, uMilkyWayFilter.add(float(0.25)), mwLum);
+        mwMat.colorNode = mwRaw.mul(mwMask).mul(uMilkyWayBrightness);
+        mwMat.opacityNode = uMilkyWayOpacity;
+
+        const mwGeo = new THREE.SphereGeometry(16000, 64, 32);
+        milkyWayMesh = new THREE.Mesh(mwGeo, mwMat);
+        milkyWayMesh.renderOrder = -999; // just after the procedural dome (-1000), before terrain
+        milkyWayMesh.frustumCulled = false;
+        applyMilkyWayTilt();
+        scene.add(milkyWayMesh);
+    } catch (e) {
+        console.warn('[MilkyWay] failed to init sky panorama', e);
+    }
+    window._milkyWay = () => milkyWayMesh;
+
+    // ==========================================
+    // AURORA BOREALIS — animated curtain rings
+    // CylinderGeometry (open) + TSL overlapping sine waves + AdditiveBlending.
+    // Gated by uNightFactor so it never appears at Dusk or Day.
+    // ==========================================
+    const uAuroraOpacity = uniform(0.0);
+    const uAuroraIntensity = uniform(1.0);
+    const uAuroraTime = uniform(0.0);
+    let auroraMesh = null;
+    const auroraParams = {
+        opacity: 0.75,
+        intensity: 1.0,
+        speed: 1.0,
+        altitude: 2500,  // Y offset above camera
+    };
+
+    try {
+        const auroraMat = new MeshBasicNodeMaterial({
+            side: THREE.BackSide,
+            depthWrite: false,
+            transparent: true,
+            fog: false,
+            blending: THREE.AdditiveBlending
+        });
+
+        // Cylinder half-height = 2500, radius = 12000
+        const px = positionLocal.x.div(float(12000));
+        const pz = positionLocal.z.div(float(12000));
+        // Normalise Y: 0 at bottom of cylinder, 1 at top
+        const pyNorm = positionLocal.y.add(float(2500)).div(float(5000));
+
+        // Soft fade at top and bottom edges of the curtain
+        const vFade = tslSmoothstep(float(0.0), float(0.2), pyNorm)
+            .mul(tslSmoothstep(float(1.0), float(0.8), pyNorm));
+
+        const t = uAuroraTime.mul(float(0.4));
+        // Three overlapping sine waves — different frequencies & phase speeds create organic ribbons
+        const w1 = sin(px.mul(float(9.0)).add(t)).mul(float(0.5)).add(float(0.5));
+        const w2 = sin(pz.mul(float(7.0)).sub(t.mul(float(1.3)))).mul(float(0.5)).add(float(0.5));
+        const w3 = sin(px.mul(float(11.0)).add(pz.mul(float(8.0))).sub(t.mul(float(0.8)))).mul(float(0.5)).add(float(0.5));
+
+        // Multiply + power to get narrow bright ribbons with soft falloff
+        const ribbon = w1.mul(w2.mul(float(0.7)).add(float(0.3))).mul(w3).pow(float(2.0));
+
+        const cGreen = vec3(0.0, 1.0, 0.3);
+        const cBlue  = vec3(0.0, 0.4, 1.0);
+        const auroraColor = mix(cGreen, cBlue, w2).mul(ribbon).mul(vFade);
+
+        auroraMat.colorNode = auroraColor.mul(uAuroraIntensity);
+        auroraMat.opacityNode = uAuroraOpacity;
+
+        const auroraGeo = new THREE.CylinderGeometry(12000, 12000, 5000, 64, 1, true);
+        auroraMesh = new THREE.Mesh(auroraGeo, auroraMat);
+        auroraMesh.renderOrder = -998;
+        auroraMesh.frustumCulled = false;
+        scene.add(auroraMesh);
+    } catch (e) {
+        console.warn('[Aurora] failed to init', e);
+    }
+    window._aurora = () => auroraMesh;
 
     // SKY MODE. "flat" reproduces flight-merged (WebGL): the procedural dome is hidden and a solid
     // background colour carries the sky, which the dense fog fades geometry into. The dome is kept
@@ -4778,6 +4910,32 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             skyUniforms.uNightFactor.value += (targetNightFactor - skyUniforms.uNightFactor.value) * decayEnv;
             skyUniforms.uDuskFactor.value += (targetDuskFactor - skyUniforms.uDuskFactor.value) * decayEnv;
 
+            // Milky Way night skybox — fade in with night, keep centred on the camera.
+            // Driven off uNightFactor so it is fully invisible at Dusk (dusk look untouched).
+            if (milkyWayMesh) {
+                uMilkyWayOpacity.value = skyUniforms.uNightFactor.value * milkyWayParams.opacity;
+                uMilkyWayBrightness.value = milkyWayParams.brightness;
+                uMilkyWayFilter.value = milkyWayParams.filter;
+                milkyWayMesh.visible = uMilkyWayOpacity.value > 0.01;
+                const activeCam = isGodMode ? godCamera : camera;
+                activeCam.getWorldPosition(tempVec1);
+                milkyWayMesh.position.copy(tempVec1);
+            }
+            if (auroraMesh) {
+                const nightF = skyUniforms.uNightFactor.value;
+                uAuroraTime.value += dt * auroraParams.speed;
+                uAuroraOpacity.value = nightF * auroraParams.opacity;
+                uAuroraIntensity.value = auroraParams.intensity;
+                const activeCam = isGodMode ? godCamera : camera;
+                activeCam.getWorldPosition(tempVec1);
+                auroraMesh.position.set(
+                    tempVec1.x,
+                    tempVec1.y + auroraParams.altitude,
+                    tempVec1.z
+                );
+                auroraMesh.visible = uAuroraOpacity.value > 0.01;
+            }
+
             // Compute distinct zenith, mid, and horizon colors based on time of day
             let targetZenithHex = (timePhase === 1) ? target.bg : ((timePhase === 2) ? target.bg : biomeTarget.skyZenith);
             let targetMidHex = target.mid || 0x7ab4e6;
@@ -4929,34 +5087,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             right: keys.d || touchState.x > 0.1
         };
 
+        const curWaterY = (animeWaterSystem && animeWaterSystem.waterLevel !== undefined) ? animeWaterSystem.waterLevel : 2.4;
+
         if (isGodMode && godControls) {
-            updateGodMode(dt, keys, godControls, godCamera);
+            updateGodMode(dt, keys, godControls, godCamera, curWaterY);
         }
 
         if (playerPhysics) {
             playerPhysics.update(dt, inputState, isBraking, isBoosting, isFlightPaused, treeGrid);
             
             if (cameraManager) {
-                cameraManager.update(dt, playerGrp, playerPhysics.currentYaw, isBoosting);
-
-                // Keep the camera above the sea surface.
-                //
-                // The rig had no water awareness, so flying low let the camera dip under the
-                // ocean plane. Because the water is DoubleSide with no underwater treatment,
-                // you saw the underside of the waves over an empty void. This is a flying
-                // game -- going under is never intended, so lift the rig rather than building
-                // a whole submerged look.
-                if (animeWaterSystem && animeWaterSystem.visible && !isGodMode) {
-                    const waterY = animeWaterSystem.waterLevel !== undefined ? animeWaterSystem.waterLevel : 2.4;
-                    // Clear the wave crests too, not just the still level.
-                    const clearance = waterY + 3.5;
-                    camera.updateMatrixWorld(true);
-                    const camWorldY = camera.matrixWorld.elements[13];
-                    if (camWorldY < clearance) {
-                        cameraBase.position.y += (clearance - camWorldY);
-                        camera.updateMatrixWorld(true);
-                    }
-                }
+                cameraManager.update(dt, playerGrp, playerPhysics.currentYaw, isBoosting, curWaterY);
             }
         }
     
@@ -5863,6 +6004,26 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             mwFolder.add(mwParams, 'dust', 0.0, 1.0, 0.05).name('Dust Lanes').onChange(v => skyUniforms.uMilkyDust.value = v);
             mwFolder.addColor(mwParams, 'armColor').name('Arm Color').onChange(v => skyUniforms.uMilkyArmColor.value.set(v));
             mwFolder.addColor(mwParams, 'coreColor').name('Core Color').onChange(v => skyUniforms.uMilkyCoreColor.value.set(v));
+        }
+
+        // Photographic Milky Way cubemap (extracted from galactic-home). Night-only:
+        // its opacity is uNightFactor * opacity, and uNightFactor is exactly 0 at dusk,
+        // so none of these controls can touch the locked Golden Hour Dusk look.
+        if (typeof milkyWayParams !== 'undefined') {
+            const mwPhoto = moonFolder.addFolder('Milky Way Photo');
+            mwPhoto.add(milkyWayParams, 'brightness', 0.0, 4.0, 0.05).name('Brightness');
+            mwPhoto.add(milkyWayParams, 'opacity', 0.0, 1.0, 0.05).name('Opacity');
+            mwPhoto.add(milkyWayParams, 'filter', 0.0, 0.4, 0.01).name('Star Filter (↑ fewer photo stars)');
+            mwPhoto.add(milkyWayParams, 'tiltX', -180, 180, 1).name('Elevation (tip up/down)').onChange(applyMilkyWayTilt);
+            mwPhoto.add(milkyWayParams, 'tiltY', -180, 180, 1).name('Azimuth (spin L/R)').onChange(applyMilkyWayTilt);
+            mwPhoto.add(milkyWayParams, 'tiltZ', -180, 180, 1).name('Roll').onChange(applyMilkyWayTilt);
+        }
+        if (typeof auroraParams !== 'undefined') {
+            const auroraFolder = moonFolder.addFolder('Aurora Borealis');
+            auroraFolder.add(auroraParams, 'opacity', 0.0, 1.0, 0.05).name('Opacity');
+            auroraFolder.add(auroraParams, 'intensity', 0.0, 3.0, 0.1).name('Intensity');
+            auroraFolder.add(auroraParams, 'speed', 0.1, 4.0, 0.1).name('Speed');
+            auroraFolder.add(auroraParams, 'altitude', -2000, 8000, 100).name('Altitude');
         }
 
         // 4b. Daylight Subfolder — day was blown out because near-white light at high

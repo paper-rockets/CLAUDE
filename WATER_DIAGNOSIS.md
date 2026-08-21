@@ -389,3 +389,74 @@ back** continuously.
 - **FBM hash precision death at world coordinates** (part 2.2) - not addressed.
 - **Horizon fade never engages** (part 4) - not addressed.
 - **objectRippleDisplacement** is still dead code; no object interaction with the water.
+
+---
+
+# Round 2 — surface realism, 2026-08-21
+
+The corduroy and the frozen ocean were gone, but the surface still read as a displaced rubber
+sheet. Five complaints, five causes. All are in `src/WaterAnime/OpenSeaOcean.js`; every new knob
+is a slider on the new **Surface** tab of the ocean editor.
+
+| Complaint | Cause | Fix |
+|---|---|---|
+| Specular grain, pixel sparkle | FBM detail down to 12 cm was point-sampled; a pixel covers that much water by ~120 m out, so a `pow(.,420)` lobe was reading random per-pixel normals | Band-limited FBM (`fbmBL`) fades each octave as it approaches the pixel footprint; the removed slope variance is converted into roughness (`gloss`), which widens and dims the lobe instead of dropping the detail |
+| Round detached foam clumps | `smoothstep(0.5,0.95, fbm) * smoothstep(1,2, crest)` — isotropic noise gated on crest HEIGHT | Foam gated on the displacement **Jacobian** (`waveSurface().y`). Foam is born on the crest line and inherits its shape. Lagged Jacobian samples (t−1.1 s, t−2.7 s) leave a dissipating trail behind the moving crest; the foam texture is stretched along the swell axis |
+| Soft rounded mounds, no trochoid | `Q = 0.75` put `SUM(Q*a*k)` at **0.095** of a cusp. The steepness column is scaled by `sea = 0.45`, which the earlier note missed | `Q = 4.5` → `SUM(Q*a*k) = 0.567`. Plus a Stokes second-order term `−0.5*k*a²*cos(2f)`, Nyquist-gated on its own half-wavelength via `geo2`, which pinches the peak and flattens the trough without changing wave height |
+| Flat turquoise patches, no SSS | `pow(dot(V, sunDir),3) * crest` — a screen-wide term with no geometry in it | Backlight through the crest: `pow(dot(V, −normalize(L + N*distortion)), p)` gated on **slope** and elevation, so it peaks on thin steep lips |
+| No depth extinction, no aerial perspective | Deep↔shallow mixed by crest height; horizon was one `smoothstep(8000,15500)` | Per-channel Beer-Lambert `exp(−sigma*d*2)` with `sigma = (0.75, 0.30, 0.16)/m`, so red dies in ~1 m and the turquoise→blue ramp is physical rather than painted. Aerial perspective is now exponential from the camera |
+
+Also fixed along the way:
+
+- **Whitecaps never fired.** The Jacobian threshold shipped at 0.58 but the surface bottomed out
+  at J = 0.71, so foam coverage was exactly 0%. Threshold is now calibrated against the measured
+  minimum (0.49 at the default sea state) — 0.66 gives ~6% coverage.
+- **The surf line was invisible.** Alpha at the waterline is 0.10, and foam was multiplied by it.
+  Foam is aerated spray sitting *on* the water, so alpha is now `max(depthAlpha, foam)`.
+- **Buoyancy read the wrong point.** A Gerstner surface is parametric; sampling height at the
+  world position ignores the horizontal displacement, and that error scales with Q. Two
+  fixed-point iterations invert it — mean error 1.4 cm on ~9 m waves.
+- **Grazing pixels lost all texture.** A grazing pixel is a long thin sliver. Filtering to its
+  long axis smooths near water into a sheet, so the footprint is split: the short axis governs
+  how much surface detail survives, the long axis governs how wide the specular lobe gets.
+- `shoreRefractionUniform` was declared but never read; it now displaces the sea-bed lookup by
+  the surface normal, so the sand ripples under the waves.
+
+Verified by generating the material's WGSL headlessly and compiling it on the real WebGPU
+device: 0 errors, 0 warnings, vertex 11.5 KB / fragment 121 KB.
+
+## Follow-up — the "odd lines", same day
+
+Raising Q to 4.5 exposed a latent error in `waveNormal`. Differentiating the Gerstner map
+
+```
+P = (x + SUM Q*a*d.x*cos f,   SUM a*sin f,   z + SUM Q*a*d.z*cos f)
+```
+
+gives `dP/dx = (1 - SUM Q*a*k*d.x^2*sin f,  SUM a*k*d.x*cos f,  -SUM Q*a*k*d.x*d.z*sin f)`.
+**Q appears on the horizontal components only** — chop drags the surface sideways, it does not
+make the wave taller. The code applied the same `q` (chop included) to the vertical rise as well.
+
+Measured against the true slope of the geometry over an 800 m patch:
+
+| | mean tilt | max tilt |
+|---|---:|---:|
+| `waveNormal` as written | **13.0 deg** | **34.0 deg** |
+| correct derivation | 3.0 deg | 8.5 deg |
+| true slope of the displaced geometry | 2.5 deg | 7.7 deg |
+
+At the old `Q = 0.75` this was a harmless 25% undershoot. At `Q = 4.5` it became a 4.5x
+overshoot, and a `pow(.,520)` specular lobe riding 34-degree normals drew a bright line along
+every crest — the "odd lines". Fixed; the shading normal now matches the geometry it describes.
+
+Two knock-on retunes, both forced by the same change:
+
+- The SSS steepness gate was `1 - N.y`, which is a few thousandths once the normals tilt only a
+  few degrees. Now `length(N.xz)` (the sine of the tilt), scaled to reach 1.0 at the steepest crests.
+- `swellLostVar` lost its Q factor and dropped ~20x, so the roughness constant went from 800 to
+  20000 to keep the specular lobe running 520 (close) down to ~40 (a few hundred metres out).
+
+Ruled out along the way, with evidence rather than argument: the noise hash does **not** lose
+precision at world-scale coordinates (290 unique values per 400 samples in f32), and neither the
+Jacobian whitecap mask nor the anisotropic streak noise shows linear structure when rendered
+over a 300 m patch.

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { getWorldHeight } from './src/world/TerrainGenerator.js';
 
 const EDITOR_SERVER = 'http://localhost:9100';
 
@@ -729,6 +730,13 @@ export function initTerrainEditor(scene, camera, renderer, terrainMesh) {
             camera.position.add(move);
             orbitControls.target.add(move);
         }
+
+        const waterY = 2.4;
+        const targetGroundY = getWorldHeight(orbitControls.target.x, orbitControls.target.z);
+        orbitControls.target.y = Math.max(orbitControls.target.y, Math.max(targetGroundY, waterY) + 1.0);
+
+        const camGroundY = getWorldHeight(camera.position.x, camera.position.z);
+        camera.position.y = Math.max(camera.position.y, Math.max(camGroundY, waterY) + 2.0);
     }
     window._updateEditorCameraMovement = updateEditorCameraMovement;
 
