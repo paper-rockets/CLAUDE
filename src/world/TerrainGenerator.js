@@ -43,8 +43,12 @@ const _tempC2 = new THREE.Color();
 // The previous cache was a single slot. The terrain loop samples (x,z), then (x-12,z),
 // (x+12,z), (x,z-12), (x,z+12) for normals -- so every call evicted the one before it and
 // the hit rate was effectively zero. A small keyed map turns those 7 calls into at most 2.
+// Sized against the largest single consumer, not the smallest. The water depth-field bake
+// (TerrainDepthField) streams 16,384 samples per tick and 262,144 per full rebuild, so a
+// 24k cap was being blown ~11 times per rebuild -- and each clear() also wiped the terrain
+// rebuild's own locality, which is what the cache exists for.
 const _islandCache = new Map();
-const ISLAND_CACHE_LIMIT = 24000;
+const ISLAND_CACHE_LIMIT = 96000;
 
 export function clearIslandCache() {
     _islandCache.clear();
@@ -124,7 +128,16 @@ export function getIslandData(worldX, worldZ) {
     if (hit !== undefined) return hit;
 
     const res = computeIslandData(worldX, worldZ);
-    if (_islandCache.size >= ISLAND_CACHE_LIMIT) _islandCache.clear();
+    if (_islandCache.size >= ISLAND_CACHE_LIMIT) {
+        // Evict the oldest half rather than clearing outright. Map iterates in insertion
+        // order, so this keeps recent (spatially local) entries alive instead of throwing
+        // away every hit the moment a streaming consumer fills the table.
+        let toDrop = _islandCache.size >> 1;
+        for (const k of _islandCache.keys()) {
+            _islandCache.delete(k);
+            if (--toDrop <= 0) break;
+        }
+    }
     _islandCache.set(key, res);
     return res;
 }

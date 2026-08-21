@@ -987,25 +987,43 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v);
         if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v);
     });
+    // These drive BOTH tree systems: the legacy instanced pines AND the Background Tree Atlas
+    // trees. Wiring only the pines is what made "Tree Scale" look dead -- the trees actually on
+    // screen in Ghibli Land are the atlas ones.
+    const _bgTrees = () => window.ghibliTrees;
+
     ghibliTreeFolder.add(params, 'ghibliTreeScale', 0.2, 3.5, 0.05).name('Tree Scale').onChange(v => {
         if (typeof window.updateGhibliTreeScale === 'function') window.updateGhibliTreeScale(v);
+        const t = _bgTrees();
+        if (t) { t.scaleMul = v; t.respawn(); }
     });
-    ghibliTreeFolder.add(params, 'ghibliTreeDensity', 0.1, 3.0, 0.05).name('Tree Density').onChange(() => {
+    ghibliTreeFolder.add(params, 'ghibliTreeDensity', 0.1, 3.0, 0.05).name('Tree Density').onChange(v => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.density = v; t.respawn(); }
     });
-    ghibliTreeFolder.add(params, 'ghibliTreeMinDist', 6.0, 30.0, 0.5).name('Min Spacing').onChange(() => {
+    ghibliTreeFolder.add(params, 'ghibliTreeMinDist', 6.0, 30.0, 0.5).name('Min Spacing').onChange(v => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        // Cell size IS the spacing guarantee for the atlas trees, so this maps directly.
+        const t = _bgTrees();
+        if (t && typeof t.setCellSize === 'function') t.setCellSize(v * 2.4);
     });
-    ghibliTreeFolder.add(params, 'ghibliTreeMinHeight', 6.0, 25.0, 0.5).name('Elevation Min').onChange(() => {
+    ghibliTreeFolder.add(params, 'ghibliTreeMinHeight', 0.0, 40.0, 0.5).name('Elevation Min').onChange(v => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.minElevation = v; t.respawn(); }
     });
-    ghibliTreeFolder.add(params, 'ghibliTreeMaxHeight', 25.0, 95.0, 1.0).name('Elevation Max').onChange(() => {
+    ghibliTreeFolder.add(params, 'ghibliTreeMaxHeight', 25.0, 120.0, 1.0).name('Elevation Max').onChange(v => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.maxElevation = v; t.respawn(); }
     });
     ghibliTreeFolder.add(params, 'ghibliTreeWindSway', 0.0, 3.0, 0.1).name('Wind Sway').onChange(v => {
         if (typeof treeUniforms !== 'undefined' && treeUniforms && treeUniforms.uTreeScale) {
             treeUniforms.uTreeScale.value = 1.5 * v;
         }
+        const t = _bgTrees();
+        if (t) t.uWindStrength.value = v;
     });
     ghibliTreeFolder.add({ respawn: () => {
         if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
@@ -1035,13 +1053,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const _tsys = () => window.ghibliTrees;
     const _respawnBg = () => { if (_tsys()) _tsys().respawn(); };
 
+    // Scale / Density / Elevation / Wind live on the PARENT folder and drive both tree
+    // systems. Only atlas-specific controls belong here, so there is exactly one slider
+    // per concept.
     bgTreeFolder.add(bgTreeParams, 'visible').name('Visible').onChange(v => { if (_tsys()) _tsys().setVisible(v); });
-    bgTreeFolder.add(bgTreeParams, 'density', 0.0, 2.0, 0.05).name('Density').onChange(v => { if (_tsys()) { _tsys().density = v; _respawnBg(); } });
-    bgTreeFolder.add(bgTreeParams, 'scale', 0.4, 2.5, 0.05).name('Scale').onChange(v => { if (_tsys()) { _tsys().scaleMul = v; _respawnBg(); } });
-    bgTreeFolder.add(bgTreeParams, 'elevMin', 0.0, 40.0, 0.5).name('Elevation Min').onChange(v => { if (_tsys()) { _tsys().minElevation = v; _respawnBg(); } });
-    bgTreeFolder.add(bgTreeParams, 'elevMax', 20.0, 120.0, 1.0).name('Elevation Max').onChange(v => { if (_tsys()) { _tsys().maxElevation = v; _respawnBg(); } });
     bgTreeFolder.add(bgTreeParams, 'maxSlope', 0.1, 2.0, 0.05).name('Max Slope').onChange(v => { if (_tsys()) { _tsys().maxSlope = v; _respawnBg(); } });
-    bgTreeFolder.add(bgTreeParams, 'wind', 0.0, 3.0, 0.05).name('Wind Sway').onChange(v => { if (_tsys()) _tsys().uWindStrength.value = v; });
     bgTreeFolder.add(bgTreeParams, 'atlasMix', 0.0, 1.0, 0.05).name('Texture vs Palette').onChange(v => { if (_tsys()) _tsys().uAtlasMix.value = v; });
     bgTreeFolder.add(bgTreeParams, 'tintSpread', 0.0, 0.6, 0.02).name('Per-Tree Variation').onChange(v => { if (_tsys()) _tsys().uTintSpread.value = v; });
 
@@ -4922,6 +4938,25 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             
             if (cameraManager) {
                 cameraManager.update(dt, playerGrp, playerPhysics.currentYaw, isBoosting);
+
+                // Keep the camera above the sea surface.
+                //
+                // The rig had no water awareness, so flying low let the camera dip under the
+                // ocean plane. Because the water is DoubleSide with no underwater treatment,
+                // you saw the underside of the waves over an empty void. This is a flying
+                // game -- going under is never intended, so lift the rig rather than building
+                // a whole submerged look.
+                if (animeWaterSystem && animeWaterSystem.visible && !isGodMode) {
+                    const waterY = animeWaterSystem.waterLevel !== undefined ? animeWaterSystem.waterLevel : 2.4;
+                    // Clear the wave crests too, not just the still level.
+                    const clearance = waterY + 3.5;
+                    camera.updateMatrixWorld(true);
+                    const camWorldY = camera.matrixWorld.elements[13];
+                    if (camWorldY < clearance) {
+                        cameraBase.position.y += (clearance - camWorldY);
+                        camera.updateMatrixWorld(true);
+                    }
+                }
             }
         }
     

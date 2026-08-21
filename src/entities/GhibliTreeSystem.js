@@ -58,7 +58,7 @@ const LOD_BANDS = [
     { name: 'far',  maxDist: 1100, doubleSided: false, sway: false, alphaTest: 0.62 }
 ];
 
-const CELL_SIZE = 34.0;          // world units; also the effective minimum tree spacing
+const DEFAULT_CELL_SIZE = 34.0;  // world units; also the effective minimum tree spacing
 const REBUILD_DISTANCE = 55.0;   // rebuild the field once the focus has moved this far
 const REBUILD_FRAMES = 18;       // spread one rebuild across this many frames
 
@@ -120,6 +120,7 @@ export class GhibliTreeSystem {
         this.maxSlope = 0.55;
         this.density = 1.0;
         this.scaleMul = 1.0;
+        this.cellSize = DEFAULT_CELL_SIZE;
     }
 
     // ---------------------------------------------------------------------------------
@@ -319,8 +320,8 @@ export class GhibliTreeSystem {
      */
     _visitCell(cx, cz, focusX, focusZ, maxDistSq, out) {
         // Cheap circular reject before touching any noise
-        const ddx = (cx + 0.5) * CELL_SIZE - focusX;
-        const ddz = (cz + 0.5) * CELL_SIZE - focusZ;
+        const ddx = (cx + 0.5) * this.cellSize - focusX;
+        const ddz = (cz + 0.5) * this.cellSize - focusZ;
         const distSq = ddx * ddx + ddz * ddz;
         if (distSq > maxDistSq) return;
 
@@ -338,8 +339,8 @@ export class GhibliTreeSystem {
         for (let s = 0; s < slots; s++) {
             const jx = cellHash(cx, cz, s * 3 + 1);
             const jz = cellHash(cx, cz, s * 3 + 2);
-            const x = (cx + jx) * CELL_SIZE;
-            const z = (cz + jz) * CELL_SIZE;
+            const x = (cx + jx) * this.cellSize;
+            const z = (cz + jz) * this.cellSize;
 
             const h = this._isValidSite(x, z);
             if (h === null) continue;
@@ -369,9 +370,9 @@ export class GhibliTreeSystem {
     /** Full synchronous collection. Used by tooling and tests; the frame path slices it. */
     _collectCandidates(focusX, focusZ) {
         const maxDist = LOD_BANDS[LOD_BANDS.length - 1].maxDist;
-        const R = Math.ceil(maxDist / CELL_SIZE);
-        const baseCX = Math.floor(focusX / CELL_SIZE);
-        const baseCZ = Math.floor(focusZ / CELL_SIZE);
+        const R = Math.ceil(maxDist / this.cellSize);
+        const baseCX = Math.floor(focusX / this.cellSize);
+        const baseCZ = Math.floor(focusZ / this.cellSize);
         const out = [];
         for (let dz = -R; dz <= R; dz++)
             for (let dx = -R; dx <= R; dx++)
@@ -464,18 +465,29 @@ export class GhibliTreeSystem {
         this._lastFocusZ = focusZ;
 
         const maxDist = LOD_BANDS[LOD_BANDS.length - 1].maxDist;
-        const radius = Math.ceil(maxDist / CELL_SIZE);
+        const radius = Math.ceil(maxDist / this.cellSize);
         const width = radius * 2 + 1;
         this._collected = [];
         this._walk = {
-            baseCX: Math.floor(focusX / CELL_SIZE),
-            baseCZ: Math.floor(focusZ / CELL_SIZE),
+            baseCX: Math.floor(focusX / this.cellSize),
+            baseCZ: Math.floor(focusZ / this.cellSize),
             focusX, focusZ,
             radius, width,
             total: width * width,
             maxDistSq: maxDist * maxDist,
             i: 0
         };
+    }
+
+    /**
+     * Cell size IS the minimum-spacing guarantee, so the Min Spacing slider maps onto it
+     * directly. Clamped: below ~14 the walk visits far more cells for little visual gain.
+     */
+    setCellSize(v) {
+        const next = Math.max(14.0, Math.min(90.0, v));
+        if (Math.abs(next - this.cellSize) < 0.01) return;
+        this.cellSize = next;
+        this.respawn();
     }
 
     /** Force a full rebuild — used when a placement rule changes from the GUI. */

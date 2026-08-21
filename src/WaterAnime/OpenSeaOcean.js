@@ -16,7 +16,7 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, uniform, float, vec2, vec3, vec4,
   sin, cos, atan, abs, dot, cross, normalize, length, mix, pow, max, clamp,
-  fract, floor, smoothstep, distance, reflect,
+  fract, floor, smoothstep, distance, reflect, step,
   positionLocal, positionWorld, cameraPosition, texture
 } from 'three/tsl';
 
@@ -31,6 +31,10 @@ export const foamAmountUniform = uniform(1.0);
 export const waterOpacityUniform = uniform(0.92);
 export const foamEnabledUniform = uniform(1.0);
 export const chopPatchinessUniform = uniform(1.0);
+// Gerstner horizontal displacement (Q). Was hardcoded to 0.35, which put the effective Q*ka at
+// ~3% of the value where a crest begins to sharpen -- so the surface was a pure sinusoid, and
+// waveNormal shaded it as if Q were 1.0. Now a real uniform, and both paths use it.
+export const chopStrengthUniform = uniform(0.75);
 export const waveHeightUniform = uniform(1.0);
 export const oceanScaleUniform = uniform(1.0);
 export const swellWavelengthUniform = uniform(1.0);
@@ -96,6 +100,11 @@ export const terrainDepthTexNode = texture(_depthFieldPlaceholder);
 // Alias under the name used in WATER_SHORE_PLAN.md; same node object.
 export const terrainDepthTexUniform = terrainDepthTexNode;
 
+// Separate node for the VERTEX stage. The vertex shader has no implicit derivatives, so it
+// must sample with an explicit LOD; keeping that on its own node avoids forcing the fragment
+// path to do the same. Both nodes are rebound together by setTerrainDepthTexture().
+export const terrainDepthTexNodeVS = texture(_depthFieldPlaceholder);
+
 /**
  * Binds the baked terrain-height DataTexture to the shared depth-field node.
  * Call this BEFORE createOpenSeaMaterial() so the graph is built against the
@@ -103,7 +112,9 @@ export const terrainDepthTexUniform = terrainDepthTexNode;
  * @param {THREE.DataTexture} tex
  */
 export function setTerrainDepthTexture(tex) {
-  if (tex) terrainDepthTexNode.value = tex;
+  if (!tex) return;
+  terrainDepthTexNode.value = tex;
+  terrainDepthTexNodeVS.value = tex;
 }
 
 export const depthFieldOriginUniform  = uniform(new THREE.Vector2(0, 0));
@@ -124,17 +135,49 @@ export const shoreRefractionUniform   = uniform(0.35);
    Gerstner Swell — 5 Multi-directional Spectral Components
    ============================================================ */
 export let WAVE_PARAMS = [
-  // Primary ocean swell - long wavelength (160m), high amplitude
-  { dir: [0.92, 0.38], wavelength: 160.0, steepness: 0.22, phase: 0.0 },
-  // Secondary cross-swell (88m)
-  { dir: [0.38, 0.92], wavelength: 88.0, steepness: 0.16, phase: 1.4 },
-  // Medium choppy wind wave (42m)
-  { dir: [-0.65, 0.76], wavelength: 42.0, steepness: 0.12, phase: 2.8 },
-  // High-frequency surface chop (20m)
-  { dir: [0.78, -0.62], wavelength: 20.0, steepness: 0.08, phase: 4.1 },
-  // Capillary detail wave (9.5m)
-  { dir: [-0.85, -0.52], wavelength: 9.5, steepness: 0.05, phase: 5.5 }
+  // Re-authored 2026-08-21. The previous spectrum (160/88/42/20/9.5 m) put THREE of five
+  // components below the Nyquist limit of the 31.25 m vertex grid. Sub-Nyquist waves do not
+  // disappear -- they fold back into large coherent ridge families (the 20 m chop aliased into
+  // a 139 m ridge train at 7.1 deg, almost exactly along the Z grid axis). That was the
+  // corduroy. See WATER_DIAGNOSIS.md part 1.1.
+  //
+  // Now: the three longest waves carry the geometry (4.5-10.9 samples per wavelength), and
+  // everything shorter contributes to the NORMAL only, where there is no vertex grid to alias
+  // against. Ridge axes are spread with a 17 deg minimum separation (was 9 deg, which produced
+  // near-parallel reinforcing doublets).
+  { dir: [ 0.927,  0.375], wavelength: 340.0, steepness: 0.100, phase: 0.0 },  // primary swell
+  { dir: [ 0.454,  0.891], wavelength: 215.0, steepness: 0.090, phase: 1.4 },  // secondary swell
+  { dir: [ 0.998,  0.070], wavelength: 141.0, steepness: 0.075, phase: 2.8 },  // tertiary swell
+  { dir: [-0.087,  0.996], wavelength:  83.0, steepness: 0.060, phase: 4.1 },  // wind wave (partial geo)
+  { dir: [-0.743,  0.669], wavelength:  44.0, steepness: 0.050, phase: 5.5 },  // chop (normals only)
+  { dir: [-0.906,  0.423], wavelength:  19.0, steepness: 0.038, phase: 2.1 }   // fine chop (normals only)
 ];
+
+// Vertex spacing of the ocean mesh (16000 / 512). Anything shorter than ~4x this cannot be
+// represented in geometry without aliasing.
+export const OCEAN_VERTEX_SPACING = 16000.0 / 512.0;   // 31.25 m
+
+const _smoothstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/**
+ * How much of a wave may be expressed in GEOMETRY.
+ * 0 below the Nyquist wavelength, ramping to 1 at 4x the vertex spacing.
+ * Waves below the cut still shade (via waveNormal) -- they just stop aliasing the mesh.
+ */
+export function geometryWeightFor(wavelength) {
+  return _smoothstep(2.0 * OCEAN_VERTEX_SPACING, 4.0 * OCEAN_VERTEX_SPACING, wavelength);
+}
+
+/**
+ * Deep-water phase speed. c = sqrt(g / k), NOT sqrt(g * k).
+ *
+ * The original code used sqrt(9.8 * k), which is exactly g / c_true -- an INVERTED dispersion
+ * relation. It made the 340 m swell travel at 0.62 m/s with a 258 second period, i.e. a still
+ * image. This one-line error was the whole of "the water doesn't move".
+ */
+function phaseSpeedFor(k) {
+  return Math.sqrt(9.8 / k);
+}
 
 export let WAVES = WAVE_PARAMS.map(({ dir, wavelength, steepness, phase }) => {
   const len = Math.hypot(dir[0], dir[1]) || 1.0;
@@ -143,9 +186,10 @@ export let WAVES = WAVE_PARAMS.map(({ dir, wavelength, steepness, phase }) => {
     dx: uniform(dir[0] / len),
     dz: uniform(dir[1] / len),
     k: uniform(k),
-    c: uniform(Math.sqrt(9.8 * k)),
+    c: uniform(phaseSpeedFor(k)),
     steepness: uniform(steepness),
-    phase: uniform(phase || 0.00001)
+    phase: uniform(phase || 0.00001),
+    geo: uniform(geometryWeightFor(wavelength))
   };
 });
 
@@ -154,24 +198,30 @@ export function updateWaveUniforms(i) {
   const w = WAVES[i];
   const len = Math.hypot(p.dir[0], p.dir[1]) || 1.0;
   const k = (2 * Math.PI) / p.wavelength;
-  
+
   w.dx.value = p.dir[0] / len;
   w.dz.value = p.dir[1] / len;
   w.k.value = k;
-  w.c.value = Math.sqrt(9.8 * k);
+  w.c.value = phaseSpeedFor(k);
   w.steepness.value = p.steepness;
   w.phase.value = p.phase;
+  w.geo.value = geometryWeightFor(p.wavelength);
 }
 
 export function randomizeSeaSpectrum() {
+  // Previously produced exactly TWO direction clusters and three sub-Nyquist wavelengths.
+  // Now: golden-angle direction spread (never clusters) and a wavelength ladder whose top
+  // three entries always stay above the geometry cut.
+  const base = Math.random() * Math.PI * 2;
+  const ladder = [340, 215, 141, 83, 44, 19];
   for (let i = 0; i < WAVES.length; i++) {
-    const angle = (Math.random() * 0.9 - 0.45) + (i % 2 === 0 ? 0 : Math.PI * 0.62);
-    const wavelength = 160.0 * Math.pow(0.55, i) * (0.85 + Math.random() * 0.35);
-    const steepness = 0.22 * Math.pow(0.72, i) * (0.8 + Math.random() * 0.4);
-    
+    const angle = base + i * 2.39996323 + (Math.random() - 0.5) * 0.35;  // golden angle
+    const wavelength = (ladder[i] !== undefined ? ladder[i] : 19) * (0.88 + Math.random() * 0.24);
+    const steepness = 0.10 * Math.pow(0.86, i) * (0.85 + Math.random() * 0.3);
+
     WAVE_PARAMS[i] = {
       dir: [Math.cos(angle), Math.sin(angle)],
-      wavelength: Math.max(wavelength, 2.0),
+      wavelength: Math.max(wavelength, 8.0),
       steepness: Math.max(steepness, 0.01),
       phase: Math.random() * Math.PI * 2
     };
@@ -180,11 +230,17 @@ export function randomizeSeaSpectrum() {
 }
 
 export function setWindDirection(angleDeg, spreadPercent = 45) {
+  // The old version packed all components into a narrow fan with wave 0 exactly on the wind
+  // axis -- maximal corduroy, and it permanently discarded the authored directions.
+  //
+  // Real wind seas ARE directional, but the long swell should stay closest to the wind axis
+  // while short chop fans out widest, and no two components should end up near-parallel.
+  // Offsets alternate sign and grow with index, scaled to a full +/-75 deg at 100% spread.
   const mainAngleRad = (angleDeg * Math.PI) / 180;
-  const spreadFactor = spreadPercent / 100.0;
+  const spreadFactor = Math.max(0, Math.min(1.5, spreadPercent / 100.0));
+  const FAN = [0.10, -0.34, 0.58, -0.82, 1.06, -1.30];   // radians at spread = 1.0
   WAVES.forEach((w, i) => {
-    const spreadOffset = ((i % 2 === 0 ? 1 : -1) * (i * 0.25)) * spreadFactor;
-    const finalAngle = mainAngleRad + spreadOffset;
+    const finalAngle = mainAngleRad + (FAN[i % FAN.length] * spreadFactor);
     WAVE_PARAMS[i].dir[0] = Math.cos(finalAngle);
     WAVE_PARAMS[i].dir[1] = Math.sin(finalAngle);
     w.dx.value = Math.cos(finalAngle);
@@ -197,16 +253,21 @@ const wavePhase = (w, xz, time) =>
   w.k.mul(dot(vec2(w.dx, w.dz), xz).sub(time.mul(w.c))).add(w.phase);
 
 // displaced surface point for a given parametric xz (sampled in world space for true physical waves)
-const wavePosition = Fn(([localXz, time, sea]) => {
+const wavePosition = Fn(([localXz, time, sea, shallowFade]) => {
   const worldXz = localXz.add(cameraPosition.xz);
   const xz = worldXz.mul(oceanScaleUniform).toVar();
   const p = vec3(localXz.x, float(0.0), localXz.y).toVar();
   for (const w of WAVES) {
-    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform).mul(waveHeightUniform);
+    // w.geo is 0 for wavelengths the vertex grid cannot represent. Those waves still shade
+    // (waveNormal uses them at full strength) but no longer alias the mesh into ridges.
+    const a = w.steepness.mul(sea).div(w.k)
+      .mul(swellWavelengthUniform).mul(waveHeightUniform)
+      .mul(w.geo).mul(shallowFade);
     const f = wavePhase(w, xz, time);
-    p.x.addAssign(a.mul(w.dx).mul(cos(f)).mul(0.35));
+    const q = chopStrengthUniform;
+    p.x.addAssign(a.mul(w.dx).mul(cos(f)).mul(q));
     p.y.addAssign(a.mul(sin(f)));
-    p.z.addAssign(a.mul(w.dz).mul(cos(f)).mul(0.35));
+    p.z.addAssign(a.mul(w.dz).mul(cos(f)).mul(q));
   }
   return p;
 });
@@ -230,12 +291,20 @@ const objectRippleDisplacement = Fn(([xz, time, objPos, objRadius, objActive, ri
 });
 
 // analytic tangent/binormal derivatives — stable broad normals
-const waveNormal = Fn(([rawXz, time, sea]) => {
+const waveNormal = Fn(([rawXz, time, sea, sharpness]) => {
   const xz = rawXz.mul(oceanScaleUniform).toVar();
   const tangent = vec3(1.0, 0.0, 0.0).toVar();
   const binormal = vec3(0.0, 0.0, 1.0).toVar();
   for (const w of WAVES) {
-    const q = w.steepness.mul(sea).mul(waveHeightUniform);
+    // Now includes swellWavelengthUniform and the real chop strength, so the shading finally
+    // describes the surface that is actually being displaced.
+    //
+    // `sharpness` fades the SHORT waves out with distance. Their normal contribution is what
+    // aliases per-pixel into static once a pixel covers more water than a wavelength; the long
+    // swell (w.geo == 1) is left untouched so the horizon keeps its shape.
+    const shortFade = mix(sharpness, float(1.0), w.geo);
+    const q = w.steepness.mul(sea).mul(waveHeightUniform)
+      .mul(swellWavelengthUniform).mul(chopStrengthUniform).mul(shortFade);
     const f = wavePhase(w, xz, time);
     const s = sin(f);
     const co = cos(f);
@@ -250,11 +319,13 @@ const waveNormal = Fn(([rawXz, time, sea]) => {
 });
 
 // signed crest height, drives tint / subsurface / foam
-const waveCrest = Fn(([rawXz, time, sea]) => {
+const waveCrest = Fn(([rawXz, time, sea, shallowFade]) => {
   const xz = rawXz.mul(oceanScaleUniform).toVar();
   const h = float(0.0).toVar();
   for (const w of WAVES) {
-    const a = w.steepness.mul(sea).div(w.k).mul(swellWavelengthUniform).mul(waveHeightUniform);
+    const a = w.steepness.mul(sea).div(w.k)
+      .mul(swellWavelengthUniform).mul(waveHeightUniform)
+      .mul(w.geo).mul(shallowFade);
     h.addAssign(a.mul(sin(wavePhase(w, xz, time))));
   }
   return h;
@@ -311,6 +382,27 @@ const skyColor = Fn(([rawDir]) => {
 });
 
 /* ============================================================
+   Shore depth sampling  (Phase 2a — was specified and never written)
+   ============================================================ */
+
+/**
+ * Water depth in metres at a world XZ, from the CPU-baked terrain height field.
+ * Returns a large positive number ("very deep") whenever the field is unavailable, so every
+ * shore effect degrades to open ocean rather than popping.
+ */
+const sampleWaterDepth = Fn(([worldXz]) => {
+  const uv = worldXz.sub(depthFieldOriginUniform).div(depthFieldSizeUniform).toVar();
+  // The texture clamps to edge, so outside the footprint we must mask explicitly or the
+  // border texel would smear a fake shoreline across the whole horizon.
+  const inside = step(0.0, uv.x).mul(step(uv.x, 1.0))
+    .mul(step(0.0, uv.y)).mul(step(uv.y, 1.0));
+  const terrainH = terrainDepthTexNode.sample(uv).r;
+  const rawDepth = waterLevelUniform.sub(terrainH);
+  // Unbaked texels hold DEPTH_FIELD_SENTINEL (-1000), which yields a huge depth already.
+  return mix(float(9999.0), rawDepth, inside.mul(depthFieldValidUniform));
+});
+
+/* ============================================================
    Create Open Sea NodeMaterial
    ============================================================ */
 export const createOpenSeaMaterial = () => {
@@ -319,7 +411,21 @@ export const createOpenSeaMaterial = () => {
   oceanMaterial.side = THREE.DoubleSide;
 
   const scaledTime = timeUniform.mul(speedUniform);
-  const gerstnerP = wavePosition(positionLocal.xz, scaledTime, seaUniform);
+
+  // Waves must die as the water shallows out, or the surface swings several metres up and down
+  // through the beach face every cycle (the swinging waterline in WATER_DIAGNOSIS.md 3.7).
+  // Sampled at the undisplaced grid position; explicit level 0 because the vertex stage has no
+  // derivatives and the field has no mips.
+  const vtxWorldXz = positionLocal.xz.add(cameraPosition.xz);
+  const vtxUv = vtxWorldXz.sub(depthFieldOriginUniform).div(depthFieldSizeUniform);
+  const vtxInside = step(0.0, vtxUv.x).mul(step(vtxUv.x, 1.0))
+    .mul(step(0.0, vtxUv.y)).mul(step(vtxUv.y, 1.0));
+  const vtxTerrainH = terrainDepthTexNodeVS.sample(vtxUv).level(0).r;
+  const vtxDepth = mix(float(9999.0), waterLevelUniform.sub(vtxTerrainH),
+                       vtxInside.mul(depthFieldValidUniform));
+  const shallowFade = smoothstep(0.0, shoreDepthUniform.mul(0.9), vtxDepth);
+
+  const gerstnerP = wavePosition(positionLocal.xz, scaledTime, seaUniform, shallowFade);
   oceanMaterial.positionNode = vec3(gerstnerP.x, gerstnerP.y, gerstnerP.z);
 
   oceanMaterial.colorNode = Fn(() => {
@@ -332,8 +438,17 @@ export const createOpenSeaMaterial = () => {
     const effectiveLodFactor = mix(float(1.0), distLod, distanceLodUniform);
     const effectiveQuality = mix(float(0.55), float(1.0), qualityModeUniform);
 
-    const n0 = waveNormal(xz, scaledTime, seaUniform);
-    const crest = waveCrest(xz, scaledTime, seaUniform).toVar();
+    // Approximate pixel footprint. Past a few hundred metres a pixel covers more water than a
+    // short wavelength, so those normal terms become per-pixel noise. Fading them (rather than
+    // leaving them at full strength as before) is the actual fix for the horizon static.
+    const footprint = clamp(camDist.div(600.0), 0.0, 1.0).toVar();
+    const sharpness = float(1.0).sub(footprint.mul(0.92));
+
+    const depth = sampleWaterDepth(xz).toVar();
+    const shallowFadeF = smoothstep(0.0, shoreDepthUniform.mul(0.9), depth).toVar();
+
+    const n0 = waveNormal(xz, scaledTime, seaUniform, sharpness);
+    const crest = waveCrest(xz, scaledTime, seaUniform, shallowFadeF).toVar();
 
     const h0 = detailHeight(xz, scaledTime);
     const hx = detailHeight(xz.add(vec2(0.1, 0.0)), scaledTime);
@@ -351,7 +466,11 @@ export const createOpenSeaMaterial = () => {
       .mul(nonUniformChop)
       .mul(crestChopMult);
 
-    const detail = vec3(h0.sub(hx), 0.0, h0.sub(hz)).mul(effectiveDetail);
+    // Divide by the 0.1 m sample epsilon so this is a SLOPE, not a raw height difference --
+    // the old form silently scaled the perturbation 10x and tilted normals by up to 35 deg.
+    // Also fade it with the pixel footprint so it stops aliasing at distance.
+    const detail = vec3(h0.sub(hx), 0.0, h0.sub(hz))
+      .mul(effectiveDetail).mul(0.1).mul(sharpness);
     const N = normalize(n0.add(detail)).toVar();
 
     const V = normalize(cameraPosition.sub(P)).toVar();
@@ -365,6 +484,14 @@ export const createOpenSeaMaterial = () => {
     const sss = pow(max(dot(V, sunDirUniform), 0.0), 3.0).mul(max(crest, 0.0)).mul(0.18);
     body.addAssign(mix(shallowColorUniform, sunColorUniform, 0.5).mul(sss));
 
+    // ---- SHORE: depth-graded water colour ----
+    // Deep -> shore-shallow -> sand as the bottom rises. Beer-Lambert-ish falloff rather than
+    // a linear ramp, so the band hugs the waterline instead of washing halfway out to sea.
+    const shoreT = clamp(float(1.0).sub(depth.div(max(shoreDepthUniform, float(0.01)))), 0.0, 1.0).toVar();
+    const shoreCurve = shoreT.mul(shoreT).toVar();
+    body.assign(mix(body, shoreShallowColorUniform, shoreCurve.mul(0.85)));
+    body.assign(mix(body, sandColorUniform, pow(shoreT, 4.0).mul(0.8)));
+
     const R = reflect(V.negate(), N).toVar();
     R.y.assign(max(R.y, 0.04));
     R.assign(normalize(R));
@@ -377,20 +504,49 @@ export const createOpenSeaMaterial = () => {
     const H = normalize(sunDirUniform.add(V));
     const glitterNoise = fbm(xz.mul(2.1).add(vec2(scaledTime.mul(-0.4), scaledTime.mul(0.5))))
       .mul(0.5).add(0.5);
-    const glitter = pow(max(dot(N, H), 0.0), 500.0).mul(mix(0.4, 3.4, glitterNoise));
-    const sheen = pow(max(dot(N, H), 0.0), 48.0).mul(0.12);
-    color.addAssign(sunColorUniform.mul(glitter.add(sheen)).mul(effectiveLodFactor.mul(0.6).add(0.4)));
+    // A pow(.,500) lobe is a delta function. Fed a per-pixel-aliased normal it produces
+    // isolated blown-out pixels with no coherence -- the TV static. Widen the lobe and drop the
+    // gain as the footprint grows, which is the cheap stand-in for proper normal filtering.
+    const specPower = mix(float(420.0), float(38.0), footprint);
+    const specGain = mix(float(2.6), float(0.30), footprint);
+    const NdotH = max(dot(N, H), 0.0).toVar();
+    const glitter = pow(NdotH, specPower).mul(mix(float(0.35), specGain, glitterNoise));
+    const sheen = pow(NdotH, 48.0).mul(0.12);
+    // No 0.4 floor any more -- glitter is allowed to actually fade out at the horizon.
+    color.addAssign(sunColorUniform.mul(glitter.add(sheen)).mul(effectiveLodFactor));
 
     const foamNoise = fbm(xz.mul(1.1).add(vec2(scaledTime.mul(0.22), scaledTime.mul(0.14))))
       .mul(0.5).add(0.5);
-    const foam = smoothstep(0.5, 0.95, foamNoise).mul(smoothstep(1.0, 2.0, crest)).mul(foamAmountUniform).mul(foamEnabledUniform).mul(foamDecayUniform);
+    // Open-ocean whitecaps: gated on crest height, as before.
+    const capFoam = smoothstep(0.5, 0.95, foamNoise).mul(smoothstep(1.0, 2.0, crest));
+
+    // ---- SHORE: the surf line ----
+    // Gated on DEPTH, which is what makes it a shoreline instead of foam that happens to be
+    // near the beach. The travelling term gives run-up rather than a static rim.
+    const runUp = sin(depth.mul(2.4).sub(scaledTime.mul(shoreFoamSpeedUniform).mul(2.2)))
+      .mul(0.5).add(0.5);
+    const shoreBand = smoothstep(shoreFoamWidthUniform.mul(2.0), 0.0, depth);
+    const waterline = smoothstep(0.35, 0.0, abs(depth)).mul(0.65);
+    const shoreFoam = shoreBand.mul(runUp.mul(0.75).add(0.25))
+      .mul(foamNoise.mul(0.5).add(0.6))
+      .add(waterline)
+      .mul(shoreFoamStrengthUniform);
+
+    const foam = capFoam.add(shoreFoam)
+      .mul(foamAmountUniform).mul(foamEnabledUniform).mul(foamDecayUniform);
 
     color.assign(mix(color, vec3(0.92, 0.96, 1.0), clamp(foam.mul(0.85), 0.0, 1.0)));
 
     // Atmospheric horizon concealment — pushed to far distance to preserve vibrant mid-range ocean
     color.assign(mix(color, horizonColorUniform, smoothstep(8000.0, 15500.0, camDist)));
 
-    return vec4(color, waterOpacityUniform);
+    // Depth-driven alpha. A flat 0.92 everywhere is why there was no beach: the wet-sand ramp
+    // the terrain already paints was sitting under opaque water. Now the water thins out as it
+    // shallows, and the land shows through.
+    const alpha = mix(shoreOpacityUniform, waterOpacityUniform,
+                      smoothstep(0.0, shoreDepthUniform, depth));
+
+    return vec4(color, clamp(alpha, 0.0, 1.0));
   })();
 
   return oceanMaterial;
@@ -404,7 +560,9 @@ export function getWaterHeightAt(rawX, rawZ, time, sea) {
   const z = rawZ * oceanScaleUniform.value;
   let y = 0;
   for (const w of WAVES) {
-    const a = (w.steepness.value * sea * swellWavelengthUniform.value) / w.k.value;
+    // Must mirror wavePosition exactly, including the geometry weight -- otherwise buoyancy
+    // floats the player on waves the mesh does not actually have.
+    const a = (w.steepness.value * sea * swellWavelengthUniform.value * w.geo.value) / w.k.value;
     const f = w.k.value * (w.dx.value * x + w.dz.value * z - time * speedUniform.value * w.c.value) + w.phase.value;
     y += a * Math.sin(f) * waveHeightUniform.value;
   }

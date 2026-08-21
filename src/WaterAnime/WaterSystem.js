@@ -57,6 +57,10 @@ export class WaterSystem {
         this.openSeaMesh = new THREE.Mesh(this.geometries['512'], this.openSeaMaterial);
         this.openSeaMesh.frustumCulled = false;
         this.openSeaMesh.position.y = this.waterLevel;
+        // Depth-faded alpha at the shore needs the water to stop writing depth, or it punches
+        // a hole in everything drawn behind it. Explicit render order so it draws after opaque.
+        this.openSeaMaterial.depthWrite = false;
+        this.openSeaMesh.renderOrder = 10;
         this.scene.add(this.openSeaMesh);
 
         this.visible = true;
@@ -137,12 +141,18 @@ export class WaterSystem {
             sunDirUniform.value.copy(sunDir).normalize();
         }
 
-        // Ocean plane follows camera in XZ for infinite horizon
+        // Ocean plane follows camera in XZ for infinite horizon, SNAPPED to the vertex grid.
+        //
+        // Following the raw camera position slid the 31.25 m sampling lattice continuously
+        // beneath a world-locked wave field, so the sampling pattern stayed pinned to the
+        // viewer and travelled with them -- waves never read as passing by. Snapping to whole
+        // grid cells keeps every vertex on the same world position it had last frame.
         if (this.openSeaMesh && camera) {
             if (!this._tempCamPos) this._tempCamPos = new THREE.Vector3();
             camera.getWorldPosition(this._tempCamPos);
-            this.openSeaMesh.position.x = this._tempCamPos.x;
-            this.openSeaMesh.position.z = this._tempCamPos.z;
+            const cell = 16000 / 512;   // must match the mesh tessellation
+            this.openSeaMesh.position.x = Math.round(this._tempCamPos.x / cell) * cell;
+            this.openSeaMesh.position.z = Math.round(this._tempCamPos.z / cell) * cell;
         }
 
         // Player tracking
