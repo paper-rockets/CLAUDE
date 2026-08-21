@@ -10,7 +10,7 @@ export class HUDManager {
 
     updateFPS(fps) {
         if (this.fpsElem) {
-            this.fpsElem.textContent = `FPS${Math.round(fps)}`;
+            this.fpsElem.textContent = `FPS ${Math.round(fps)}`;
         }
     }
 

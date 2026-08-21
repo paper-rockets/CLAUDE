@@ -53,6 +53,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     import { FLIGHT_MODELS } from './config/FlightModelsConfig.js';
     import { FlightModelManager } from './entities/FlightModelManager.js';
     import { BiplaneEngineAudio } from './audio/BiplaneEngineAudio.js';
+    import { AMBIENT_TRACKS } from './audio/AmbientMusic.js';
+    const tracks = AMBIENT_TRACKS;
 
     // Wait for WebGPU Backend to initialize before doing ANY graph or material allocations
     await renderer.init();
@@ -335,6 +337,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let flightModelDropdownController = null;
     let soundMuteController = null;
     let engineSoundController = null;
+    let trackDropdownController = null;
     let flightFolder = null;
     let audioFolder = null;
     let presetsFolder = null;
@@ -883,8 +886,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         engineSound: true,
         engineVolume: 0.038,
         music: false,
+        autoAdvance: true,
+        currentTrack: tracks[0].name,
+        nextTrack: () => {
+            if (typeof selectMusicTrack === 'function') {
+                selectMusicTrack(currentTrack + 1);
+            } else {
+                document.getElementById('track-toggle')?.click();
+            }
+        },
         wind: isWindOn,
-        nextTrack: () => document.getElementById('track-toggle')?.click(),
         toggleMasterSound: () => { if (typeof setSoundMuted === 'function') setSoundMuted(!isSoundMuted); },
         toggleEngineSound: () => { if (typeof setEngineSoundEnabled === 'function') setEngineSoundEnabled(!isEngineSoundOn); }
     };
@@ -903,6 +914,17 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         const btn = document.getElementById('music-toggle');
         if (btn) btn.click();
     });
+    audioFolder.add(audioParams, 'autoAdvance').name('Auto-Advance Songs').onChange(v => {
+        isAutoAdvance = !!v;
+    });
+    trackDropdownController = audioFolder.add(audioParams, 'currentTrack', tracks.map(t => t.name))
+        .name('Current Track')
+        .onChange(name => {
+            const idx = tracks.findIndex(t => t.name === name);
+            if (idx !== -1 && typeof selectMusicTrack === 'function') {
+                selectMusicTrack(idx);
+            }
+        });
     audioFolder.add(audioParams, 'nextTrack').name('Next Track');
     audioFolder.add(params, 'wind').name('Wind Sound').onChange(v => {
         isWindOn = v;
@@ -1025,9 +1047,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     function toggleGUI(show) {
         const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
         if (!guiEl) return;
-        const isCurrentlyHidden = guiEl.style.display === 'none' || (typeof window !== 'undefined' && window.getComputedStyle(guiEl).display === 'none');
+        const isCurrentlyHidden = guiEl.style.display === 'none' || guiEl.classList.contains('closed') || (typeof window !== 'undefined' && window.getComputedStyle(guiEl).display === 'none');
         const isVisible = typeof show === 'boolean' ? show : isCurrentlyHidden;
-        guiEl.style.display = isVisible ? 'block' : 'none';
+        if (isVisible) {
+            gui.open();
+            guiEl.style.display = '';
+            guiEl.classList.remove('closed');
+        } else {
+            gui.close();
+            guiEl.style.display = 'none';
+        }
         params.showGUI = isVisible;
         
         const cogBtn = document.getElementById('gui-toggle-btn');
@@ -1036,9 +1065,30 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             cogBtn.style.transform = isVisible ? 'rotate(45deg)' : 'none';
         }
     }
+
+    if (gui && typeof gui.onOpenClose === 'function') {
+        gui.onOpenClose((changedGui) => {
+            if (changedGui === gui && gui._closed) {
+                toggleGUI(false);
+            }
+        });
+    }
+
+    // Attach click listener on root title to minimize directly to cogwheel
+    const rootTitle = gui.domElement.querySelector('.title');
+    if (rootTitle) {
+        rootTitle.addEventListener('click', () => {
+            setTimeout(() => {
+                if (gui._closed) {
+                    toggleGUI(false);
+                }
+            }, 10);
+        });
+    }
+
     debugFolder.add(params, 'showGUI').name('lil-gui Panel').onChange(v => toggleGUI(v));
-    debugFolder.add(params, 'godRays').name('☀️ God Rays').onChange(v => { godRaysPass.enabled = v; });
-    debugFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('☀️ Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
+    debugFolder.add(params, 'godRays').name('God Rays').onChange(v => { godRaysPass.enabled = v; });
+    debugFolder.add(params, 'godRayIntensity', 0, 2, 0.05).name('Ray Intensity').onChange(v => { godRaysPass.uniforms.uIntensity.value = v; });
 
     const guiToggleBtn = document.getElementById('gui-toggle-btn');
     if (guiToggleBtn) {
@@ -3243,6 +3293,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 biplaneAudio.setActive(false);
             }
         }
+        const topEngineBtn = document.getElementById('top-engine-btn');
+        if (topEngineBtn) {
+            topEngineBtn.style.display = isPlane ? 'inline-flex' : 'none';
+        }
         const charBtn = document.getElementById('char-toggle');
         if (charBtn) {
             charBtn.innerText = `MODEL: ${cfg.name.toUpperCase()}`;
@@ -3250,6 +3304,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (typeof flightModelDropdownController !== 'undefined' && flightModelDropdownController) {
             flightModelDropdownController.setValue(cfg.id);
         }
+    }
+
+    // Initialize initial state for engine button based on starting model
+    const initCfg = flightModelManager.getCurrentConfig();
+    if (initCfg) {
+        onFlightModelChanged(initCfg);
     }
 
     window.addEventListener('flight-model-changed', (e) => {
@@ -3292,6 +3352,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             } else {
                 biplaneAudio.setActive(false);
             }
+        }
+        const topEngineBtn = document.getElementById('top-engine-btn');
+        if (topEngineBtn) {
+            topEngineBtn.style.opacity = isEngineSoundOn ? '1' : '0.45';
+            topEngineBtn.style.color = isEngineSoundOn ? '#4ade80' : 'rgba(255, 255, 255, 0.6)';
+            topEngineBtn.title = isEngineSoundOn ? 'Engine Sound: ON (Click to Mute)' : 'Engine Sound: OFF (Click to Enable)';
         }
         const engineBtn = document.getElementById('engine-sound-btn');
         if (engineBtn) {
@@ -3337,6 +3403,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
     document.getElementById('engine-sound-toggle')?.addEventListener('click', () => {
         setEngineSoundEnabled(!isEngineSoundOn);
+    });
+
+    document.getElementById('top-engine-btn')?.addEventListener('click', () => {
+        setEngineSoundEnabled(!isEngineSoundOn);
+    });
+
+    document.getElementById('top-music-btn')?.addEventListener('click', () => {
+        document.getElementById('music-toggle')?.click();
     });
 
     window.updateCustomModelTransform = function(model) {
@@ -4283,7 +4357,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             lastFpsTime = now;
             const fpsEl = document.getElementById('fps-counter');
             if (fpsEl) {
-                fpsEl.innerText = `FPS${currentFps}`;
+                fpsEl.innerText = `FPS ${currentFps}`;
             }
             const currZn = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
             const biomeEl = document.getElementById('biome-label');
@@ -4628,7 +4702,13 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
 
         if (typeof biplaneAudio !== 'undefined' && biplaneAudio) {
             const currentSpeed = playerPhysics ? playerPhysics.velocity : 18.0;
-            biplaneAudio.update(dt, isBoosting, isBraking, isFlightPaused, currentSpeed);
+            const isBoosting = typeof isBoosted !== 'undefined' ? isBoosted : false;
+            const isBraking = typeof isBrakingActive !== 'undefined' ? isBrakingActive : false;
+            const isFlightPaused = typeof isPaused !== 'undefined' ? isPaused : false;
+            const camDist = cameraManager ? cameraManager.cameraZoomDist : 12.0;
+            const turnRate = playerPhysics ? (playerPhysics.targetRoll || 0) : 0;
+            const pitchRate = playerPhysics ? (playerPhysics.targetPitch || 0) : 0;
+            biplaneAudio.update(dt, isBoosting, isBraking, isFlightPaused, currentSpeed, camDist, turnRate, pitchRate);
         }
 
         // Deep clouds track player (Removed)
@@ -4703,7 +4783,11 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }
     });
     const timeToggleBtn = document.getElementById('time-toggle');
-    const timeIcons = ['☀️', '🌇', '🌙'];
+    const timeIcons = [
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/></svg>',
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14a5 5 0 0 0-10 0"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="4.22" y1="6.22" x2="6.34" y2="8.34"/><line x1="19.78" y1="6.22" x2="17.66" y2="8.34"/><line x1="2" y1="18" x2="22" y2="18"/><line x1="5" y1="22" x2="19" y2="22"/></svg>',
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>'
+    ];
     const timeNames = ['Day', 'Dusk', 'Twilight'];
     
     function setTimePhase(phase) {
@@ -4712,7 +4796,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             params.sunAltitude = envConfigs[timePhase].sunY;
         }
         if (timeToggleBtn) {
-            timeToggleBtn.innerText = timeIcons[timePhase];
+            timeToggleBtn.innerHTML = timeIcons[timePhase];
             timeToggleBtn.title = `Current: ${timeNames[timePhase]} (Click to cycle)`;
         }
         localStorage.setItem('wl_timePhase', timePhase);
@@ -4725,7 +4809,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.setTimePhase = setTimePhase;
 
     if (timeToggleBtn) {
-        timeToggleBtn.innerText = timeIcons[timePhase] || '☀️';
+        timeToggleBtn.innerHTML = timeIcons[timePhase] || timeIcons[0];
         timeToggleBtn.title = `Current: ${timeNames[timePhase] || 'Day'} (Click to cycle)`;
 
         timeToggleBtn.addEventListener('click', () => {
@@ -4785,8 +4869,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // ==========================================
     // 10. PROCEDURAL AMBIENT MUSIC
     // ==========================================
-    let musicGain, reverbNode;
+    let musicGain;
     let isMusicPlaying = false;
+    let isAutoAdvance = true;
+    let loopsPerTrack = 3;
     let currentTrack = 0;
     let nextNoteTime = 0;
     let musicTimerID;
@@ -4795,112 +4881,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let sequenceTime = 0;
     let arpIndex = 0;
 
-    const tracks = [
-        { 
-            name: "Spirited Winds", 
-            chords: [
-                [174.61, 220.00, 261.63, 329.63], // Fmaj7
-                [196.00, 246.94, 293.66, 349.23], // G7
-                [164.81, 196.00, 246.94, 293.66], // Em7
-                [220.00, 261.63, 329.63, 392.00]  // Am7
-            ],
-            speed: 2400, 
-            stepSpeed: 300,
-            padOsc: 'triangle',
-            leadOsc: 'sine'
-        },
-        { 
-            name: "Summer Clouds", 
-            chords: [
-                [261.63, 329.63, 392.00, 493.88], // Cmaj7
-                [196.00, 246.94, 293.66, 392.00], // G
-                [220.00, 261.63, 329.63, 392.00], // Am7
-                [174.61, 220.00, 261.63, 329.63]  // Fmaj7
-            ],
-            speed: 3200, 
-            stepSpeed: 400,
-            padOsc: 'sawtooth',
-            leadOsc: 'triangle'
-        },
-        { 
-            name: "Evening Whispers", 
-            chords: [
-                [220.00, 261.63, 329.63, 493.88], // Am9
-                [174.61, 220.00, 261.63, 392.00], // Fmaj9
-                [261.63, 329.63, 392.00, 493.88], // Cmaj7
-                [164.81, 207.65, 246.94, 293.66]  // E7
-            ],
-            speed: 2800, 
-            stepSpeed: 350,
-            padOsc: 'sine',
-            leadOsc: 'sine'
-        },
-        { 
-            name: "Wandering Spirits", 
-            chords: [
-                [261.63, 329.63, 392.00, 523.25], // C
-                [174.61, 220.00, 261.63, 349.23], // F
-                [196.00, 246.94, 293.66, 392.00], // G
-                [220.00, 261.63, 329.63, 440.00]  // Am
-            ],
-            speed: 2000, 
-            stepSpeed: 250,
-            padOsc: 'triangle',
-            leadOsc: 'triangle'
-        },
-        { 
-            name: "Star Ocean", 
-            chords: [
-                [293.66, 369.99, 440.00, 554.37], // Dmaj7
-                [220.00, 277.18, 329.63, 415.30], // Amaj7
-                [246.94, 293.66, 369.99, 440.00], // Bm7
-                [196.00, 246.94, 293.66, 369.99]  // Gmaj7
-            ],
-            speed: 4000, 
-            stepSpeed: 500,
-            padOsc: 'sine',
-            leadOsc: 'triangle'
-        },
-        { 
-            name: "Floating Islands", 
-            chords: [
-                [207.65, 261.63, 311.13, 392.00], // Abmaj7
-                [233.08, 293.66, 349.23, 440.00], // Bbmaj7
-                [261.63, 329.63, 392.00, 493.88], // Cmaj7
-                [261.63, 329.63, 392.00, 493.88]  // Cmaj7 (held)
-            ],
-            speed: 4500, 
-            stepSpeed: 500,
-            padOsc: 'triangle',
-            leadOsc: 'sine'
-        },
-        { 
-            name: "Mystic Journey", 
-            chords: [
-                [196.00, 233.08, 293.66, 349.23], // Gm7
-                [174.61, 220.00, 261.63, 329.63], // Fmaj7
-                [155.56, 196.00, 233.08, 293.66], // Ebmaj7
-                [146.83, 185.00, 220.00, 293.66]  // D7
-            ],
-            speed: 3600, 
-            stepSpeed: 450,
-            padOsc: 'sine',
-            leadOsc: 'triangle'
-        },
-        { 
-            name: "Gentle Breeze", 
-            chords: [
-                [329.63, 415.30, 493.88, 622.25], // Emaj7
-                [277.18, 349.23, 415.30, 554.37], // Dbmaj7
-                [246.94, 311.13, 369.99, 493.88], // Bmaj7
-                [220.00, 277.18, 329.63, 440.00]  // Amaj7
-            ],
-            speed: 3000, 
-            stepSpeed: 300,
-            padOsc: 'sine',
-            leadOsc: 'sine'
+    function selectMusicTrack(idx) {
+        currentTrack = ((idx % tracks.length) + tracks.length) % tracks.length;
+        sequenceTime = 0;
+        chordIndex = 0;
+        arpIndex = 0;
+        if (audioCtx) {
+            nextNoteTime = audioCtx.currentTime + 0.1;
         }
-    ];
+        const trackBtn = document.getElementById('track-toggle');
+        if (trackBtn) {
+            trackBtn.innerText = "Track: " + tracks[currentTrack].name;
+        }
+        if (typeof trackDropdownController !== 'undefined' && trackDropdownController) {
+            trackDropdownController.setValue(tracks[currentTrack].name);
+        }
+    }
+    window.selectMusicTrack = selectMusicTrack;
 
     const arpPatterns = [
         [0, 1, 2, 3, 2, 1],
@@ -4909,18 +4906,44 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         [1, 2, 3, 2]
     ];
 
-    function createReverb() {
-        const length = audioCtx.sampleRate * (LOW_GFX ? 0.5 : 4); 
-        const impulse = audioCtx.createBuffer(2, length, audioCtx.sampleRate);
-        for (let i = 0; i < 2; i++) {
-            const channel = impulse.getChannelData(i);
-            for (let j = 0; j < length; j++) {
-                channel[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / length, 3);
-            }
-        }
-        const convolver = audioCtx.createConvolver();
-        convolver.buffer = impulse;
-        return convolver;
+    let spaceReverb;
+
+    function createSpaceReverb() {
+        if (!audioCtx) return null;
+        const input = audioCtx.createGain();
+        const output = audioCtx.createGain();
+
+        const delayL = audioCtx.createDelay(1.0);
+        const delayR = audioCtx.createDelay(1.0);
+        delayL.delayTime.value = 0.38;
+        delayR.delayTime.value = 0.53;
+
+        const filterL = audioCtx.createBiquadFilter();
+        const filterR = audioCtx.createBiquadFilter();
+        filterL.type = 'lowpass';
+        filterR.type = 'lowpass';
+        filterL.frequency.value = 1200;
+        filterR.frequency.value = 1000;
+
+        const feedbackL = audioCtx.createGain();
+        const feedbackR = audioCtx.createGain();
+        feedbackL.gain.value = 0.42;
+        feedbackR.gain.value = 0.38;
+
+        input.connect(delayL);
+        input.connect(delayR);
+
+        delayL.connect(filterL);
+        filterL.connect(feedbackL);
+        feedbackL.connect(delayR);
+        filterL.connect(output);
+
+        delayR.connect(filterR);
+        filterR.connect(feedbackR);
+        feedbackR.connect(delayL);
+        filterR.connect(output);
+
+        return { input, output };
     }
 
     function playNote(freq, time, duration, oscType, isPad = false) {
@@ -4949,6 +4972,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         osc.connect(filter);
         filter.connect(env);
         env.connect(musicGain);
+
+        osc.onended = () => {
+            try {
+                osc.disconnect();
+                filter.disconnect();
+                env.disconnect();
+            } catch (e) {}
+        };
         
         osc.start(time);
         osc.stop(time + duration);
@@ -4999,9 +5030,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
                 sequenceTime = 0;
                 chordIndex++;
                 arpIndex = 0;
+
+                // Auto-advance to next track when progression completes loopsPerTrack loops
+                if (isAutoAdvance && chordIndex >= track.chords.length * loopsPerTrack) {
+                    selectMusicTrack(currentTrack + 1);
+                }
             }
         }
-        musicTimerID = setTimeout(scheduleNotes, 50);
+        musicTimerID = setTimeout(scheduleNotes, 80);
     }
 
     document.getElementById('music-toggle').addEventListener('click', () => {
@@ -5010,38 +5046,48 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         
         if (!musicGain) {
             musicGain = audioCtx.createGain();
-            musicGain.gain.value = 0.5;
-            reverbNode = createReverb();
-            musicGain.connect(reverbNode);
-            reverbNode.connect(audioCtx.destination);
+            musicGain.gain.value = 0.45;
+            spaceReverb = createSpaceReverb();
             musicGain.connect(audioCtx.destination);
+            if (spaceReverb) {
+                const wetGain = audioCtx.createGain();
+                wetGain.gain.value = 0.55;
+                musicGain.connect(spaceReverb.input);
+                spaceReverb.output.connect(wetGain);
+                wetGain.connect(audioCtx.destination);
+            }
         }
 
         isMusicPlaying = !isMusicPlaying;
         const trackBtn = document.getElementById('track-toggle');
+        const topMusicBtn = document.getElementById('top-music-btn');
         if (isMusicPlaying) {
             sequenceTime = 0;
             chordIndex = 0;
             arpIndex = 0;
             nextNoteTime = audioCtx.currentTime + 0.1;
             scheduleNotes();
-            document.getElementById('music-toggle').innerText = "⏸ Music";
+            document.getElementById('music-toggle').innerText = "Pause Music";
             trackBtn.style.display = "block";
+            if (topMusicBtn) {
+                topMusicBtn.style.opacity = '1';
+                topMusicBtn.style.color = '#60a5fa';
+                topMusicBtn.title = 'Music: PLAYING (Click to Pause)';
+            }
         } else {
             clearTimeout(musicTimerID);
-            document.getElementById('music-toggle').innerText = "▶ Music";
+            document.getElementById('music-toggle').innerText = "Play Music";
             trackBtn.style.display = "none";
+            if (topMusicBtn) {
+                topMusicBtn.style.opacity = '0.65';
+                topMusicBtn.style.color = 'rgba(255, 255, 255, 0.95)';
+                topMusicBtn.title = 'Music: PAUSED (Click to Play)';
+            }
         }
     });
 
-    document.getElementById('track-toggle').addEventListener('click', () => {
-        currentTrack = (currentTrack + 1) % tracks.length;
-        document.getElementById('track-toggle').innerText = "Track: " + tracks[currentTrack].name;
-        
-        sequenceTime = 0;
-        chordIndex = 0;
-        arpIndex = 0;
-        nextNoteTime = audioCtx.currentTime + 0.1;
+    document.getElementById('track-toggle')?.addEventListener('click', () => {
+        selectMusicTrack(currentTrack + 1);
     });
 
     window.addEventListener('keydown', initAudio, { once: true });

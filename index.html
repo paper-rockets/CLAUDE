@@ -69,7 +69,6 @@
       background: rgba(255, 255, 255, 0.85);
     }
 
-
     @media (hover: hover) and (pointer: fine) {
       #touch-controls { display: none; }
     }
@@ -87,7 +86,7 @@
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 22px;
+      gap: 18px;
       z-index: 100;
       pointer-events: none;
       background: transparent;
@@ -118,12 +117,40 @@
       align-items: center;
       justify-content: center;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), 0 0 8px rgba(0, 0, 0, 0.2);
-      transition: transform 0.15s ease, opacity 0.15s ease;
+      transition: transform 0.15s ease, opacity 0.15s ease, color 0.15s ease;
       user-select: none;
       -webkit-tap-highlight-color: transparent;
       outline: none;
     }
+    #top-bar button:hover {
+      opacity: 1;
+      transform: scale(1.08);
+    }
     #top-bar button:active { transform: scale(0.88); opacity: 0.7; }
+
+    /* lil-gui positioning below top bar */
+    .lil-gui.root {
+      position: fixed !important;
+      top: 58px !important;
+      right: 20px !important;
+      left: auto !important;
+      max-width: min(340px, 92vw) !important;
+      max-height: calc(100vh - 78px) !important;
+      overflow-y: auto !important;
+      border-radius: 12px !important;
+      background: rgba(18, 22, 32, 0.92) !important;
+      backdrop-filter: blur(16px) !important;
+      -webkit-backdrop-filter: blur(16px) !important;
+      border: 1px solid rgba(255, 255, 255, 0.15) !important;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6) !important;
+      z-index: 95 !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    }
+
+    /* When root GUI is minimized/closed, hide completely so it disappears into the cogwheel */
+    .lil-gui.root.closed {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -149,18 +176,19 @@ window.onerror = function(msg, url, line, col, error) {
 };
 window.addEventListener("unhandledrejection", function(event) {
     var reason = event.reason ? (event.reason.message || event.reason) : "unknown";
-    if (reason && reason.includes('Device Lost')) return; // Handled specifically by renderer.onDeviceLost
+    if (reason && reason.includes('Device Lost')) return;
     showError('Unhandled Rejection: ' + reason);
 });
 </script>
   <div id="app"></div>
 
-  
   <div id="top-bar">
     <div id="fps-counter">FPS 61</div>
+    <button id="top-music-btn" title="Toggle Music" aria-label="Toggle Music" style="opacity: 0.65; transition: all 0.2s ease;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+    <button id="top-engine-btn" title="Toggle Engine Sound" aria-label="Toggle Engine Sound" style="display: none; opacity: 1; color: #4ade80; transition: all 0.2s ease;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 9V3c2.5 0 3.5 2 3.5 3.5S14.5 9 12 9z"/><path d="M12 15v6c-2.5 0-3.5-2-3.5-3.5S10.5 15 12 15z"/><path d="M9 12H3c0-2.5 2-3.5 3.5-3.5S9 9.5 9 12z"/><path d="M15 12h6c0 2.5-2 3.5-3.5 3.5S15 14.5 15 12z"/></svg></button>
     <button id="pause-toggle" title="Pause / Resume Flight">⏸</button>
     <button id="god-mode-btn" title="Toggle God Mode (Free Camera) [G]">▲</button>
-    <button id="time-toggle" title="Cycle Time of Day">☀️</button>
+    <button id="time-toggle" title="Cycle Time of Day" aria-label="Cycle Time of Day"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="6.34" y2="6.34"/><line x1="17.66" y1="17.66" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="6.34" y2="17.66"/><line x1="17.66" y1="6.34" x2="19.07" y2="4.93"/></svg></button>
     <button id="fullscreen-toggle" title="Toggle Fullscreen">⛶</button>
     <button id="gui-toggle-btn" title="Settings & Editor Panel">⚙</button>
   </div>
@@ -180,8 +208,6 @@ window.addEventListener("unhandledrejection", function(event) {
     <div id="map-info-text" style="color: #ffffff; font-family: monospace; font-size: 10px; margin-top: 6px; opacity: 0.95; text-align: center; font-weight: bold;">Z: 0m</div>
   </div>
 
-  
-
   <div id="hidden-ui" style="display: none;">
       <div id="time-label"></div>
       <div id="biome-label"></div>
@@ -196,16 +222,9 @@ window.addEventListener("unhandledrejection", function(event) {
       <button id="fullscreen-toggle">Fullscreen</button>
   </div>
 
-
-  
-  
-
-
-
-  
   <!-- Crystal Editor UI -->
   <div id="crystal-editor" style="display: none; position: fixed; left: 20px; top: 20px; width: 240px; box-sizing: border-box; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); color: white; padding: 15px; border-radius: 10px; font-family: sans-serif; z-index: 100; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.2);">
-    <h3 style="margin-top:0; margin-bottom:10px; font-size:16px;">💎 Crystal & Env Editor</h3>
+    <h3 style="margin-top:0; margin-bottom:10px; font-size:16px;">Crystal & Env Editor</h3>
     <div style="margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid #444;">
       <strong style="font-size:13px; display:block; margin-bottom:5px; color:#aaa;">Flying Crystals</strong>
       <div style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom: 5px;">
@@ -261,9 +280,5 @@ window.addEventListener("unhandledrejection", function(event) {
   }
   </script>
   <script type="module" src="./src/main.js"></script>
-<div id="folder-info" style="position: fixed; bottom: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 5px; font-family: monospace; font-size: 12px; z-index: 999999; pointer-events: none;">
-  Path: E:\Z FUCK CLAUDE | Name: Z FUCK CLAUDE
-</div>
 </body>
 </html>
-

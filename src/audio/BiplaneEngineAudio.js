@@ -34,6 +34,7 @@ export class BiplaneEngineAudio {
         this.currentFade = 0.0;
         this.currentRpm = 0.35;
         this.volume = 0.038; // Faint, subtle baseline volume
+        this.clock = 0;
 
         if (this.audioCtx) {
             this._setupNodes();
@@ -235,7 +236,7 @@ export class BiplaneEngineAudio {
         this.isRunning = false;
     }
 
-    update(dt = 0.016, isBoosting = false, isBraking = false, isPaused = false, speed = 18.0) {
+    update(dt = 0.016, isBoosting = false, isBraking = false, isPaused = false, speed = 18.0, camDist = 12.0, turnRate = 0.0, pitchRate = 0.0) {
         const shouldPlay = this.isActive && this.isEnabled && !this.isMuted;
         this.targetFade = shouldPlay ? 1.0 : 0.0;
 
@@ -251,6 +252,8 @@ export class BiplaneEngineAudio {
         if (this.audioCtx.state === 'suspended' && shouldPlay) {
             this.audioCtx.resume().catch(() => {});
         }
+
+        this.clock += dt;
 
         // Smooth fade in / out
         const fadeRate = shouldPlay ? 1.5 : 2.5;
@@ -281,24 +284,46 @@ export class BiplaneEngineAudio {
         const t = this.audioCtx.currentTime;
         const smooth = 0.06;
 
-        // Frequencies mapped across RPM
-        const engineFreq = 46 + this.currentRpm * 52;
-        const pulseFreq = 20 + this.currentRpm * 24;
+        // Distance attenuation & high-frequency damping:
+        // Default distance is 12m. Zoomed in close (5m) = louder (+75%) & crisp presence.
+        // Zoomed far out (50m-300m) = quiet (attenuated to 0.12x) & lowpass muffled.
+        const distRatio = Math.max(4.0, camDist) / 12.0;
+        const distGain = Math.min(1.85, Math.max(0.12, 1.0 / Math.pow(distRatio, 0.65)));
+        const distFilterScale = Math.min(1.4, Math.max(0.38, 1.0 / Math.pow(distRatio, 0.38)));
+
+        // Organic mechanical variations:
+        // 1. Slow analog RPM wandering (micro-drift)
+        const rpmJitter = Math.sin(this.clock * 0.9) * 0.022 
+                        + Math.sin(this.clock * 2.8) * 0.014 
+                        + Math.sin(this.clock * 6.3) * 0.007;
+
+        // 2. Flight maneuver aerodynamic load
+        const maneuverLoad = Math.min(0.18, (Math.abs(turnRate) + Math.abs(pitchRate)) * 0.12);
+
+        const effectiveRpm = Math.max(0.02, Math.min(1.0, this.currentRpm + rpmJitter + maneuverLoad));
+
+        // 3. Frequencies mapped across effective RPM with subtle harmonic detune drift
+        const engineFreq = 45 + effectiveRpm * 54;
+        const pulseFreq = 19 + effectiveRpm * 25 + Math.sin(this.clock * 1.7) * 1.5;
         const subFreq = engineFreq * 0.5;
-        const filterCutoff = 170 + this.currentRpm * 110;
-        const noiseCutoff = 210 + this.currentRpm * 110;
+        const detuneOffset = 0.4 + Math.sin(this.clock * 0.5) * 0.6;
+
+        // 4. Air turbulence flutter on propeller wash
+        const airTurbulence = Math.sin(this.clock * 2.1) * 22 + Math.sin(this.clock * 5.4) * 14;
+        const filterCutoff = Math.max(80, (175 + effectiveRpm * 125) * distFilterScale);
+        const noiseCutoff = Math.max(100, (215 + effectiveRpm * 120 + airTurbulence) * distFilterScale);
 
         if (this.osc1) this.osc1.frequency.setTargetAtTime(engineFreq, t, smooth);
-        if (this.osc2) this.osc2.frequency.setTargetAtTime(engineFreq * 1.018 + 0.4, t, smooth);
+        if (this.osc2) this.osc2.frequency.setTargetAtTime(engineFreq * 1.018 + detuneOffset, t, smooth);
         if (this.subOsc) this.subOsc.frequency.setTargetAtTime(subFreq, t, smooth);
         if (this.lfoOsc) this.lfoOsc.frequency.setTargetAtTime(pulseFreq, t, smooth);
 
         if (this.cylinderFilter) this.cylinderFilter.frequency.setTargetAtTime(filterCutoff, t, smooth);
         if (this.noiseFilter) this.noiseFilter.frequency.setTargetAtTime(noiseCutoff, t, smooth);
 
-        // Faint, subtle master volume (modulated by fade factor and pause)
+        // Master volume (modulated by fade factor, pause, baseline volume, and camera distance)
         const pauseMultiplier = isPaused ? 0.15 : 1.0;
-        const dynamicGain = (0.026 + this.currentRpm * 0.022) * (this.volume / 0.038);
+        const dynamicGain = (0.026 + effectiveRpm * 0.022) * (this.volume / 0.038) * distGain;
         const targetGain = dynamicGain * this.currentFade * pauseMultiplier;
 
         if (this.masterGain) {

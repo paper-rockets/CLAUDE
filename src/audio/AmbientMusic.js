@@ -88,8 +88,10 @@ export class AmbientMusicEngine {
         this.isLowGfx = isLowGfx;
         this.audioCtx = null;
         this.musicGain = null;
-        this.reverbNode = null;
+        this.spaceReverb = null;
         this.isPlaying = false;
+        this.autoAdvance = true;
+        this.loopsPerTrack = 3;
         this.currentTrack = 0;
         this.nextNoteTime = 0;
         this.timerID = null;
@@ -109,19 +111,42 @@ export class AmbientMusicEngine {
         this.audioCtx = ctx;
     }
 
-    createReverb() {
+    createSpaceReverb() {
         if (!this.audioCtx) return null;
-        const length = this.audioCtx.sampleRate * (this.isLowGfx ? 0.5 : 4); 
-        const impulse = this.audioCtx.createBuffer(2, length, this.audioCtx.sampleRate);
-        for (let i = 0; i < 2; i++) {
-            const channel = impulse.getChannelData(i);
-            for (let j = 0; j < length; j++) {
-                channel[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / length, 3);
-            }
-        }
-        const convolver = this.audioCtx.createConvolver();
-        convolver.buffer = impulse;
-        return convolver;
+        const input = this.audioCtx.createGain();
+        const output = this.audioCtx.createGain();
+
+        const delayL = this.audioCtx.createDelay(1.0);
+        const delayR = this.audioCtx.createDelay(1.0);
+        delayL.delayTime.value = 0.38;
+        delayR.delayTime.value = 0.53;
+
+        const filterL = this.audioCtx.createBiquadFilter();
+        const filterR = this.audioCtx.createBiquadFilter();
+        filterL.type = 'lowpass';
+        filterR.type = 'lowpass';
+        filterL.frequency.value = 1200;
+        filterR.frequency.value = 1000;
+
+        const feedbackL = this.audioCtx.createGain();
+        const feedbackR = this.audioCtx.createGain();
+        feedbackL.gain.value = 0.42;
+        feedbackR.gain.value = 0.38;
+
+        input.connect(delayL);
+        input.connect(delayR);
+
+        delayL.connect(filterL);
+        filterL.connect(feedbackL);
+        feedbackL.connect(delayR);
+        filterL.connect(output);
+
+        delayR.connect(filterR);
+        filterR.connect(feedbackR);
+        feedbackR.connect(delayL);
+        filterR.connect(output);
+
+        return { input, output };
     }
 
     playNote(freq, time, duration, oscType, isPad = false) {
@@ -150,6 +175,14 @@ export class AmbientMusicEngine {
         osc.connect(filter);
         filter.connect(env);
         env.connect(this.musicGain);
+
+        osc.onended = () => {
+            try {
+                osc.disconnect();
+                filter.disconnect();
+                env.disconnect();
+            } catch (e) {}
+        };
         
         osc.start(time);
         osc.stop(time + duration);
@@ -192,9 +225,12 @@ export class AmbientMusicEngine {
                 this.sequenceTime = 0;
                 this.chordIndex++;
                 this.arpIndex = 0;
+                if (this.autoAdvance && this.chordIndex >= track.chords.length * this.loopsPerTrack) {
+                    this.nextTrack();
+                }
             }
         }
-        this.timerID = setTimeout(() => this.scheduleNotes(), 50);
+        this.timerID = setTimeout(() => this.scheduleNotes(), 80);
     }
 
     toggle() {
@@ -203,11 +239,16 @@ export class AmbientMusicEngine {
         
         if (!this.musicGain) {
             this.musicGain = this.audioCtx.createGain();
-            this.musicGain.gain.value = 0.5;
-            this.reverbNode = this.createReverb();
-            this.musicGain.connect(this.reverbNode);
-            this.reverbNode.connect(this.audioCtx.destination);
+            this.musicGain.gain.value = 0.45;
+            this.spaceReverb = this.createSpaceReverb();
             this.musicGain.connect(this.audioCtx.destination);
+            if (this.spaceReverb) {
+                const wetGain = this.audioCtx.createGain();
+                wetGain.gain.value = 0.55;
+                this.musicGain.connect(this.spaceReverb.input);
+                this.spaceReverb.output.connect(wetGain);
+                wetGain.connect(this.audioCtx.destination);
+            }
         }
 
         this.isPlaying = !this.isPlaying;
