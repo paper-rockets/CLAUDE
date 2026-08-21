@@ -2563,19 +2563,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     // Golden Hour Dusk look is provably untouched (neutral value at dusk).
     // ==========================================
     const uMilkyWayOpacity = uniform(0.0);
-    const uMilkyWayBrightness = uniform(1.5);
-    const uMilkyWayFilter = uniform(0.06); // luminance threshold — pixels below fade out (suppresses point stars)
+    const uMilkyWayBrightness = uniform(1.15);
     let milkyWayMesh = null;
     // Live-tunable so the look can be perfected from the GUI (Environment > Moonlight & Night
-    // > Milky Way Photo). The bright galactic core lives on the -Z / -Y faces of this cubemap,
-    // so the default tilt swings that core up into the forward view as an arc across the sky.
+    // > Milky Way Photo). Configured to produce a dramatic diagonal galactic arc across the night sky.
     const milkyWayParams = {
-        brightness: 1.5,   // multiplies texture colour; core clips slightly for a glow
-        opacity: 0.95,     // max blend at full night
-        filter: 0.06,      // luminance threshold: raise to kill more stars from the equirect
-        tiltX: -32,        // degrees — lifts the -Z core up toward the zenith
-        tiltY: 18,         // degrees — swings the core left/right into view
-        tiltZ: 24          // degrees — diagonal lean of the galactic band
+        brightness: 1.15,  // multiplies texture colour naturally
+        opacity: 1.0,      // max blend at full night
+        tiltX: -18,        // degrees — positions galactic core at optimal elevation
+        tiltY: 42,         // degrees — swings the core across the diagonal view
+        tiltZ: 42          // degrees — diagonal lean matching starry night photography
     };
     const applyMilkyWayTilt = () => {
         if (!milkyWayMesh) return;
@@ -2604,13 +2601,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             blending: THREE.AdditiveBlending
         });
         // Standard sphere UVs map the equirect panorama seamlessly.
-        // Luminance threshold mask: suppresses small point-stars from the equirect while preserving
-        // the broad diffuse galaxy band (which sits well above the threshold).
         const mwSample = texture(mwTex);
         const mwRaw = mwSample.rgb.mul(mwSample.a);
-        const mwLum = dot(mwRaw, vec3(0.299, 0.587, 0.114));
-        const mwMask = tslSmoothstep(uMilkyWayFilter, uMilkyWayFilter.add(float(0.25)), mwLum);
-        mwMat.colorNode = mwRaw.mul(mwMask).mul(uMilkyWayBrightness);
+        mwMat.colorNode = mwRaw.mul(uMilkyWayBrightness);
         mwMat.opacityNode = uMilkyWayOpacity;
 
         const mwGeo = new THREE.SphereGeometry(16000, 64, 32);
@@ -2634,7 +2627,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const uAuroraTime = uniform(0.0);
     let auroraMesh = null;
     const auroraParams = {
-        opacity: 0.75,
+        opacity: 0.0,      // Off by default to keep starry night clean
         intensity: 1.0,
         speed: 1.0,
         altitude: 2500,  // Y offset above camera
@@ -4915,7 +4908,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             if (milkyWayMesh) {
                 uMilkyWayOpacity.value = skyUniforms.uNightFactor.value * milkyWayParams.opacity;
                 uMilkyWayBrightness.value = milkyWayParams.brightness;
-                uMilkyWayFilter.value = milkyWayParams.filter;
                 milkyWayMesh.visible = uMilkyWayOpacity.value > 0.01;
                 const activeCam = isGodMode ? godCamera : camera;
                 activeCam.getWorldPosition(tempVec1);
@@ -6013,7 +6005,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const mwPhoto = moonFolder.addFolder('Milky Way Photo');
             mwPhoto.add(milkyWayParams, 'brightness', 0.0, 4.0, 0.05).name('Brightness');
             mwPhoto.add(milkyWayParams, 'opacity', 0.0, 1.0, 0.05).name('Opacity');
-            mwPhoto.add(milkyWayParams, 'filter', 0.0, 0.4, 0.01).name('Star Filter (↑ fewer photo stars)');
             mwPhoto.add(milkyWayParams, 'tiltX', -180, 180, 1).name('Elevation (tip up/down)').onChange(applyMilkyWayTilt);
             mwPhoto.add(milkyWayParams, 'tiltY', -180, 180, 1).name('Azimuth (spin L/R)').onChange(applyMilkyWayTilt);
             mwPhoto.add(milkyWayParams, 'tiltZ', -180, 180, 1).name('Roll').onChange(applyMilkyWayTilt);

@@ -15,13 +15,13 @@ export class CameraManager {
         // Settings
         this.BASE_FOV = 60;
         this.cameraZoomDist = initialZoomDist;
-        this.minTerrainClearance = 3.0;
-        this.minWaterClearance = 3.5;
+        this.minTerrainClearance = 8.0;
+        this.minWaterClearance = 16.0; // Enforces minimum elevation above sea level
     }
     
     update(delta, playerGrp, currentYaw, isBoosting, waterLevel = 2.4) {
         const defaultCamDist = this.cameraZoomDist;
-        const defaultCamHeight = this.cameraZoomDist * 0.15;
+        const defaultCamHeight = Math.max(4.0, this.cameraZoomDist * 0.25);
         
         // Smoothly lerp camera to default distance using exponential decay
         const decayZoom = 1.0 - Math.exp(-5.0 * delta);

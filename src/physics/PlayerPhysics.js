@@ -76,17 +76,18 @@ export class PlayerPhysics {
         
         this.character.position.add(this.tempVec1.multiplyScalar(this.velocity * delta));
 
-        // Anti-Clipping Floor Constraint
-        const groundY = getWorldHeight(this.character.position.x, this.character.position.z);
-        const minimumFlightHeight = 18;
+        // Anti-Clipping Floor Constraint (strictly above terrain and sea level)
+        const seaLevelY = 2.4;
+        const groundY = Math.max(getWorldHeight(this.character.position.x, this.character.position.z), seaLevelY);
+        const minimumFlightHeight = 24;
         
         // In Lush Jungle, raise the floor so Kiki flies above the canopy (trees are ~36m tall)
         const biome = getBiomeAt(this.character.position.x, this.character.position.z);
         const inJungle = biome && biome.name && biome.name.toLowerCase().includes('jungle');
-        const canopyHeight = inJungle ? 42 : 15; // 42m clears the 36m canopy with breathing room
+        const canopyHeight = inJungle ? 42 : 18; // clearance above ground/sea
 
         // Auto-swoop to avoid terrain collisions
-        const targetMinY = groundY + (inJungle ? 65 : 55);
+        const targetMinY = groundY + (inJungle ? 65 : 45);
         if (this.character.position.y < targetMinY) {
             const depth = targetMinY - this.character.position.y;
             const swoopPitch = Math.min(Math.PI / 4, depth / 40.0);
@@ -98,7 +99,7 @@ export class PlayerPhysics {
             }
         }
         
-        this.character.position.y = Math.min(Math.max(this.character.position.y, minimumFlightHeight), this.maxAltitude);
+        this.character.position.y = Math.min(Math.max(this.character.position.y, groundY + canopyHeight, minimumFlightHeight), this.maxAltitude);
 
         // Tree Collisions disabled - Kiki flies above the jungle canopy
     }
