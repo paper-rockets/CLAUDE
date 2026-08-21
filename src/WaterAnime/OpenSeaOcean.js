@@ -778,8 +778,10 @@ export const createOpenSeaMaterial = () => {
     /* ---------------- Reflection + Fresnel -------------------------------- */
 
     const R = reflect(V.negate(), N).toVar();
-    R.y.assign(max(R.y, 0.04));
-    R.assign(normalize(R));
+    // skyColor() already blends to hazeColor below the horizon (dir.y < 0), so below-horizon
+    // reflections show the dark ocean haze rather than the bright near-horizon sky. The old
+    // clamp (R.y >= 0.04) pushed every tilted-crest reflection up to the bright horizon colour,
+    // which was the direct cause of the bright parallel lines along every wave crest at Q=4.5.
 
     const NdotV = clamp(dot(N, V), 0.0, 1.0).toVar();
     const fresnelRaw = float(0.02).add(float(0.98).mul(pow(NdotV.oneMinus(), 5.0)));
