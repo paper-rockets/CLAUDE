@@ -4,7 +4,7 @@
 export const FLIGHT_MODELS = [
     {
         id: 'kiki',
-        name: 'Kiki (Broomstick)',
+        name: 'Kiki',
         file: 'flight_models/kiki-draco.glb',
         rotX: 0,
         rotY: 180,
@@ -15,7 +15,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'mitsubishi_b2m2',
-        name: 'Mitsubishi B2M2 (Biplane)',
+        name: 'B2M2',
         file: 'flight_models/mitsubishi_b2m2_-_game_art_1_stylized_plane.glb',
         rotX: 0,
         rotY: 180,
@@ -27,7 +27,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'sopwith_pup',
-        name: 'Sopwith Pup (Biplane)',
+        name: 'Sopwith',
         file: 'flight_models/sopwith_pup_stylized_-_cupido.glb',
         rotX: 0,
         rotY: 0,
@@ -39,7 +39,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'psx_saviola_s21',
-        name: 'Savoia S.21 (PSX)',
+        name: 'Savoia',
         file: 'flight_models/psx_saviola_s21.glb',
         rotX: 0,
         rotY: 180,
@@ -51,7 +51,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'sikorski_s16',
-        name: 'Sikorsky S-16',
+        name: 'Sikorsky',
         file: 'flight_models/sikorski_s-16__flying_circus_dae_assignment.glb',
         rotX: 0,
         rotY: 180,
@@ -63,7 +63,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'princess',
-        name: 'Princess on Whale',
+        name: 'Whale',
         file: 'flight_models/Princess.glb',
         rotX: 0,
         rotY: 180,
@@ -74,7 +74,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'american_robin',
-        name: 'American Robin',
+        name: 'Robin',
         file: 'flight_models/american_robin_-_in_flight.glb',
         rotX: 0,
         rotY: 180,
@@ -85,7 +85,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'wood_pewee',
-        name: 'Eastern Wood-Pewee',
+        name: 'Pewee',
         file: 'flight_models/eastern_wood-pewee_-_in_flight.glb',
         rotX: 0,
         rotY: 180,
@@ -96,7 +96,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'american_bittern',
-        name: 'American Bittern',
+        name: 'Bittern',
         file: 'flight_models/american_bittern_-_in_flight.glb',
         rotX: 0,
         rotY: 180,
@@ -107,7 +107,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'scarlet_macaw',
-        name: 'Scarlet Macaw',
+        name: 'Macaw',
         file: 'flight_models/animated_parrot.glb',
         rotX: 0,
         rotY: 180,
@@ -118,7 +118,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'birds_flock',
-        name: 'Bird Flock',
+        name: 'Flock',
         file: 'flight_models/birds.glb',
         rotX: 0,
         rotY: 0,
@@ -129,7 +129,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'blue_butterfly',
-        name: 'Blue Morpho Butterfly',
+        name: 'Morpho',
         file: 'flight_models/borboleta_azul_-_butterfly.glb',
         rotX: 0,
         rotY: 270,
@@ -140,7 +140,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'monarch_butterfly',
-        name: 'Monarch Butterfly',
+        name: 'Monarch',
         file: 'flight_models/idl_flight_on_spot.glb',
         rotX: 0,
         rotY: 0,
@@ -151,7 +151,7 @@ export const FLIGHT_MODELS = [
     },
     {
         id: 'charizard',
-        name: 'Charizard (Dragon)',
+        name: 'Charizard',
         file: 'flight_models/charizard_flying_animation.glb',
         rotX: 0,
         rotY: 180,

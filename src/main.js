@@ -3756,9 +3756,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (charBtn) {
             charBtn.innerText = `MODEL: ${cfg.name.toUpperCase()}`;
         }
-        const topModelSelect = document.getElementById('top-model-select');
-        if (topModelSelect && topModelSelect.value !== cfg.id) {
-            topModelSelect.value = cfg.id;
+        const topModelDisplay = document.getElementById('top-model-display');
+        if (topModelDisplay) {
+            topModelDisplay.textContent = cfg.name;
         }
         if (typeof flightModelDropdownController !== 'undefined' && flightModelDropdownController) {
             if (flightModelDropdownController.getValue() !== cfg.id) {
@@ -3874,28 +3874,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         document.getElementById('music-toggle')?.click();
     });
 
-    // Top Bar Model Switcher UI Initialization
-    const topModelSelect = document.getElementById('top-model-select');
+    // Top Bar Minimal Model Switcher UI Initialization
+    const topModelDisplay = document.getElementById('top-model-display');
     const topModelPrev = document.getElementById('top-model-prev-btn');
     const topModelNext = document.getElementById('top-model-next-btn');
 
-    if (topModelSelect) {
-        topModelSelect.innerHTML = '';
-        FLIGHT_MODELS.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.id;
-            opt.textContent = m.name;
-            topModelSelect.appendChild(opt);
-        });
+    if (topModelDisplay && initCfg) {
+        topModelDisplay.textContent = initCfg.name;
+    }
 
-        if (initCfg) {
-            topModelSelect.value = initCfg.id;
-        }
-
-        topModelSelect.addEventListener('change', (e) => {
-            const id = e.target.value;
+    if (topModelDisplay) {
+        topModelDisplay.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (typeof flightModelManager !== 'undefined' && flightModelManager) {
-                flightModelManager.setModelById(id);
+                flightModelManager.nextModel();
             }
         });
     }
