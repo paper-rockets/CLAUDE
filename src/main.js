@@ -13,7 +13,7 @@ import { WaterModalUI } from './WaterAnime/WaterModalUI.js';
 import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform, deepColorUniform, shallowColorUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
-import { GroundFogEditor } from './ui/GroundFogEditor.js';
+import { GroundFogEditor, cleanBiomeName, DEFAULT_BIOME_FOG_CONFIGS } from './ui/GroundFogEditor.js';
 
 
 import { LOW_GFX, TERRAIN_RES } from './config/constants.js';
@@ -2387,12 +2387,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.rainSystem = new RainSystem(scene);
 
     // ==========================================
-    // VOLUMETRIC GROUND FOG (GOD RAYS)
+    // VOLUMETRIC GROUND FOG (GOD RAYS & PER-BIOME ATMOSPHERE)
     // ==========================================
     const fogGroup = new THREE.Group();
-    const fogGeo = new THREE.PlaneGeometry(3500, 3500);
+    const fogGeo = new THREE.PlaneGeometry(4500, 4500);
     fogGeo.rotateX(-Math.PI / 2);
-    const fogUniforms = { uTime: uniform(0) };
+    const fogUniforms = {
+        uTime: uniform(0),
+        uFogIntensity: uniform(0.8),
+        uFogOpacity: uniform(0.8),
+        uFogDrift: uniform(1.0),
+        uFogTurbulence: uniform(1.0),
+        uFogNear: uniform(10.0),
+        uFogFar: uniform(1750.0)
+    };
 
     const hash = Fn(([p]) => {
         return fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453123));
@@ -2409,18 +2417,19 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         );
     });
 
-    const getFogAlphaFn = Fn(([wPos, camPos, uTime]) => {
-        const uv = wPos.xz.mul(0.0025);
+    const getFogAlphaFn = Fn(([wPos, camPos, uTime, uDrift, uTurb, uNear, uFar, uIntensity, uOpacity]) => {
+        const scaledTime = uTime.mul(uDrift.mul(0.03));
+        const uv = wPos.xz.mul(0.0025).mul(uTurb);
         const yOffset = wPos.y.mul(0.2);
-        const n1 = noise(uv.add(vec2(uTime.mul(0.03).add(yOffset), uTime.mul(0.02))));
-        const n2 = noise(uv.mul(2.0).sub(vec2(uTime.mul(0.02).sub(yOffset), uTime.mul(-0.03))));
+        const n1 = noise(uv.add(vec2(scaledTime.add(yOffset), scaledTime.mul(0.66))));
+        const n2 = noise(uv.mul(2.0).sub(vec2(scaledTime.mul(0.7).sub(yOffset), scaledTime.mul(-1.0))));
         const noiseAlpha = tslSmoothstep(-0.2, 0.8, n1.add(n2.mul(0.5)));
         
         const dist = wPos.xz.sub(camPos.xz).length();
-        const edgeFade = float(1.0).sub(tslSmoothstep(1200.0, 1700.0, dist));
-        const nearFade = tslSmoothstep(10.0, 50.0, dist);
+        const edgeFade = float(1.0).sub(tslSmoothstep(uFar.mul(0.75), uFar, dist));
+        const nearFade = tslSmoothstep(uNear, uNear.mul(4.0), dist);
         
-        return noiseAlpha.mul(edgeFade).mul(nearFade);
+        return noiseAlpha.mul(edgeFade).mul(nearFade).mul(uOpacity).mul(uIntensity).mul(0.3);
     });
 
     const fogMat = new MeshBasicNodeMaterial({
@@ -2431,20 +2440,31 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         fog: false
     });
     
-    fogMat.opacityNode = getFogAlphaFn(positionWorld, cameraPosition, fogUniforms.uTime).mul(0.25);
+    fogMat.opacityNode = getFogAlphaFn(
+        positionWorld,
+        cameraPosition,
+        fogUniforms.uTime,
+        fogUniforms.uFogDrift,
+        fogUniforms.uFogTurbulence,
+        fogUniforms.uFogNear,
+        fogUniforms.uFogFar,
+        fogUniforms.uFogIntensity,
+        fogUniforms.uFogOpacity
+    );
 
     // Stack 3 planes for cheap 3D parallax volumetric effect
     for(let i = 0; i < 3; i++) {
         const p = new THREE.Mesh(fogGeo, fogMat);
-        p.position.y = 12 + i * 15; // 12, 27, 42
+        p.position.y = 12 + i * 16;
         p.receiveShadow = false;
         fogGroup.add(p);
     }
-    fogGroup.visible = false;
+    fogGroup.visible = true;
     scene.add(fogGroup);
     window.fogGroup = fogGroup;
     window.fogUniforms = fogUniforms;
     window.fogMat = fogMat;
+    window.biomeFogSettings = {};
 
     window.getBiomeAt = getBiomeAt;
     const groundFogEditor = new GroundFogEditor();
@@ -4810,17 +4830,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const activeCam = isGodMode ? godCamera : camera;
             window.rainSystem.update(time, activeCam, params);
         }
-        if (typeof window.fogUniforms !== 'undefined' && window.fogGroup && typeof playerGrp !== 'undefined' && playerGrp.position) {
-            window.fogUniforms.uTime.value = time;
-            const currentB = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
-            const bName = currentB ? currentB.name : '🌊 Open Ocean';
-            const biomeFogOffset = (window.biomeFogSettings && window.biomeFogSettings[bName]) ? window.biomeFogSettings[bName] : 0;
-            const currentGroundY = getWorldHeight(playerGrp.position.x, playerGrp.position.z);
-            // Smoothly interpolate fog group Y to prevent snapping, but snap X and Z to player
-            window.fogGroup.position.x = playerGrp.position.x;
-            window.fogGroup.position.z = playerGrp.position.z;
-            const targetFogY = (currentGroundY <= -4.0 || bName.includes('Ocean')) ? -200.0 : (currentGroundY - 15 + biomeFogOffset);
-            window.fogGroup.position.y += (targetFogY - window.fogGroup.position.y) * dt * 2.0;
+        if (window.groundFogEditor && typeof playerGrp !== 'undefined' && playerGrp.position) {
+            window.groundFogEditor.updateFrame(dt, timePhase);
+            if (typeof window.fogUniforms !== 'undefined' && window.fogGroup) {
+                window.fogUniforms.uTime.value = time;
+                const currentB = getBiomeAt(playerGrp.position.x, playerGrp.position.z);
+                const bName = currentB ? currentB.name : 'Archipelago';
+                const cleanB = cleanBiomeName(bName);
+                const biomeFogOffset = (window.biomeFogSettings && window.biomeFogSettings[cleanB] !== undefined) ? window.biomeFogSettings[cleanB] : 0;
+                const currentGroundY = getWorldHeight(playerGrp.position.x, playerGrp.position.z);
+                
+                // Smoothly position fog group at terrain / water level plus biome offset
+                window.fogGroup.position.x = playerGrp.position.x;
+                window.fogGroup.position.z = playerGrp.position.z;
+                const baseFloor = Math.max(currentGroundY, 2.4);
+                const targetFogY = baseFloor + biomeFogOffset;
+                window.fogGroup.position.y += (targetFogY - window.fogGroup.position.y) * dt * 3.0;
+            }
         }
 
         currentFrame++;
