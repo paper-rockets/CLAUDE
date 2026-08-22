@@ -1,4 +1,4 @@
-import terrainArch from './world/biomes/terrain-archipelago.js';
+﻿import terrainArch from './world/biomes/terrain-archipelago.js';
 import terrainGhibli from './world/biomes/terrain-ghibli.js';
 import terrainPlains from './world/biomes/terrain-plains.js';
 import terrainMtn from './world/biomes/terrain-mountains.js';
@@ -14,6 +14,7 @@ import { WaterEditorGUI } from './WaterAnime/WaterEditorGUI.js';
 import { zenithColorUniform, horizonColorUniform, sunColorUniform, sunDirUniform, deepColorUniform, shallowColorUniform } from './WaterAnime/OpenSeaOcean.js';
 import { TreeBillboardEditor } from './ui/TreeBillboardEditor.js';
 import { GroundFogEditor, cleanBiomeName, DEFAULT_BIOME_FOG_CONFIGS } from './ui/GroundFogEditor.js';
+import { TimeOfDayExporter } from './environment/TimeOfDayExporter.js';
 
 
 import { LOW_GFX, TERRAIN_RES } from './config/constants.js';
@@ -89,7 +90,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             }
         }
     });
-    let cameraZoomDist = parseFloat(localStorage.getItem('wl_zoomDist')) || 12.0;
+    let cameraZoomDist = parseFloat(localStorage.getItem('wl_zoomDist')) || (deviceTier === 'mobile' ? 22.0 : 12.0);
+    if (deviceTier === 'mobile' && cameraZoomDist < 14.0) cameraZoomDist = 22.0;
     let currentFrame = 0;
     let logicTimer = 0;
     let animeWaterSystem = null;
@@ -357,6 +359,18 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     let presetDropdownControllers = [];
 
     const gui = new GUI({ title: 'Controls & Settings' });
+    const origGuiOpen = gui.open.bind(gui);
+    gui.open = function(t = true) {
+        if (this.$children) this.$children.style.height = '';
+        this.domElement.classList.remove('transition');
+        return origGuiOpen(t);
+    };
+    const origGuiClose = gui.close.bind(gui);
+    gui.close = function() {
+        if (this.$children) this.$children.style.height = '';
+        this.domElement.classList.remove('transition');
+        return origGuiClose();
+    };
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
@@ -547,6 +561,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }, 2200);
     }
 
+    let timeOfDayExporter = null;
+
     const settingsManager = {
         presetName: 'My Dusk Look 1',
         loadPreset: 'Golden Hour Dusk (Default)',
@@ -682,6 +698,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             } catch(e) {
                 alert('Invalid JSON: ' + e.message);
             }
+        },
+        exportActiveTimeOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportActivePhase(false) : null,
+        exportDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, false) : null,
+        exportDuskJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, false) : null,
+        exportNightJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, false) : null,
+        exportAllTimesOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportAllPhases(false) : null,
+        downloadActiveTimeOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportActivePhase(true) : null,
+        downloadDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, true) : null,
+        downloadDuskJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, true) : null,
+        downloadNightJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, true) : null,
+        downloadAllEnvironmentSettingsJSON: () => timeOfDayExporter ? timeOfDayExporter.exportAllPhases(true) : null,
+        importTimeOfDayJSON: () => {
+            const input = prompt('Paste Time of Day JSON (Day / Dusk / Night / All):');
+            if (input && timeOfDayExporter) timeOfDayExporter.importSettings(input);
         }
     };
 
@@ -1342,6 +1372,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     if (guiToggleBtn) {
         guiToggleBtn.addEventListener('click', () => toggleGUI());
     }
+    toggleGUI(false);
 
     function openOceanInGui() {
         const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
@@ -2576,23 +2607,23 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     scene.add(proceduralSkyMesh);
 
     // ==========================================
-    // MILKY WAY NIGHT SKY (photographic cubemap)
+    // MILKY WAY NIGHT SKY (photographic cubemap from LEGACY/galactic-home)
     // Real full-sky Milky Way panorama, extracted from galactic-home. It overlays the
     // procedural night dome and fades in ONLY at night. Its opacity is driven by
     // skyUniforms.uNightFactor, which is exactly 0.0 at Day and Dusk, so the locked
     // Golden Hour Dusk look is provably untouched (neutral value at dusk).
     // ==========================================
     const uMilkyWayOpacity = uniform(0.0);
-    const uMilkyWayBrightness = uniform(1.15);
+    const uMilkyWayBrightness = uniform(1.5);
     let milkyWayMesh = null;
     // Live-tunable so the look can be perfected from the GUI (Environment > Moonlight & Night
     // > Milky Way Photo). Configured to produce a dramatic diagonal galactic arc across the night sky.
     const milkyWayParams = {
-        brightness: 1.15,  // multiplies texture colour naturally
+        brightness: 1.5,   // multiplies texture colour naturally
         opacity: 1.0,      // max blend at full night
-        tiltX: -18,        // degrees — positions galactic core at optimal elevation
-        tiltY: 42,         // degrees — swings the core across the diagonal view
-        tiltZ: 42          // degrees — diagonal lean matching starry night photography
+        tiltX: 0,          // degrees — positions galactic core at optimal elevation
+        tiltY: -25,        // degrees — swings the core across the diagonal view
+        tiltZ: 18          // degrees — diagonal lean matching starry night photography
     };
     const applyMilkyWayTilt = () => {
         if (!milkyWayMesh) return;
@@ -3756,9 +3787,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (charBtn) {
             charBtn.innerText = `MODEL: ${cfg.name.toUpperCase()}`;
         }
-        const topModelSelect = document.getElementById('top-model-select');
-        if (topModelSelect && topModelSelect.value !== cfg.id) {
-            topModelSelect.value = cfg.id;
+        const topModelDisplay = document.getElementById('top-model-display');
+        if (topModelDisplay) {
+            topModelDisplay.textContent = cfg.name;
         }
         if (typeof flightModelDropdownController !== 'undefined' && flightModelDropdownController) {
             if (flightModelDropdownController.getValue() !== cfg.id) {
@@ -3874,28 +3905,20 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         document.getElementById('music-toggle')?.click();
     });
 
-    // Top Bar Model Switcher UI Initialization
-    const topModelSelect = document.getElementById('top-model-select');
+    // Top Bar Minimal Model Switcher UI Initialization
+    const topModelDisplay = document.getElementById('top-model-display');
     const topModelPrev = document.getElementById('top-model-prev-btn');
     const topModelNext = document.getElementById('top-model-next-btn');
 
-    if (topModelSelect) {
-        topModelSelect.innerHTML = '';
-        FLIGHT_MODELS.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.id;
-            opt.textContent = m.name;
-            topModelSelect.appendChild(opt);
-        });
+    if (topModelDisplay && initCfg) {
+        topModelDisplay.textContent = initCfg.name;
+    }
 
-        if (initCfg) {
-            topModelSelect.value = initCfg.id;
-        }
-
-        topModelSelect.addEventListener('change', (e) => {
-            const id = e.target.value;
+    if (topModelDisplay) {
+        topModelDisplay.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (typeof flightModelManager !== 'undefined' && flightModelManager) {
-                flightModelManager.setModelById(id);
+                flightModelManager.nextModel();
             }
         });
     }
@@ -4561,34 +4584,55 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const joyBase = document.getElementById('joystick-base');
     const joyKnob = document.getElementById('joystick-knob');
     let activeTouchId = null;
+    let isMouseDraggingJoy = false;
     const maxRadius = 60;
 
+    const isMobileMode = document.documentElement.classList.contains('force-mobile') || 
+                         document.body.classList.contains('force-mobile') || 
+                         window.innerWidth <= 1024;
+
     if (joyBase) {
-        joyBase.style.opacity = '0'; // Hide by default
+        joyBase.style.display = 'none';
+        joyBase.style.opacity = '0';
         joyBase.style.pointerEvents = 'none';
     }
 
     let initialPinchDist = null;
     let initialZoomDist = null;
 
+    // Joystick mouse interaction for desktop preview / simulator
+    if (joyBase) {
+        joyBase.addEventListener('mousedown', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            isMouseDraggingJoy = true;
+            joyBase.style.opacity = '1';
+            joyBase.style.background = 'rgba(255,255,255,0.25)';
+            updateJoystick(e);
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (isMouseDraggingJoy) {
+                e.preventDefault();
+                updateJoystick(e);
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isMouseDraggingJoy) {
+                isMouseDraggingJoy = false;
+                resetJoystick();
+            }
+        });
+    }
+
     window.addEventListener('touchstart', e => {
-        if (e.target.tagName !== 'CANVAS') return; // Ignore touches on UI buttons
+        if (e.target.tagName !== 'CANVAS' && e.target !== joyBase && e.target !== joyKnob) return;
         e.preventDefault();
 
         if (e.touches.length === 1) {
             const touch = e.changedTouches[0];
             activeTouchId = touch.identifier;
-            
-            // Move joyBase to touch point
-            if (joyBase) {
-                joyBase.style.left = (touch.clientX - 50) + 'px';
-                joyBase.style.top = (touch.clientY - 50) + 'px';
-                joyBase.style.bottom = 'auto';
-                joyBase.style.opacity = '1';
-                joyBase.style.background = 'rgba(255,255,255,0.18)';
-                joyBase.style.borderColor = 'rgba(255,255,255,0.4)';
-            }
-            
             updateJoystick(touch);
         } else if (e.touches.length === 2) {
             resetJoystick();
@@ -4609,8 +4653,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const dy = e.touches[0].clientY - e.touches[1].clientY;
             const newDist = Math.sqrt(dx*dx + dy*dy);
             
-            cameraZoomDist = initialZoomDist * (initialPinchDist / newDist);
-            cameraZoomDist = Math.max(5.0, Math.min(300.0, cameraZoomDist));
+            cameraZoomDist = initialZoomDist * (newDist / initialPinchDist);
+            const mobileZoomMin = deviceTier === 'mobile' ? 12.0 : 5.0;
+            cameraZoomDist = Math.max(mobileZoomMin, Math.min(300.0, cameraZoomDist));
             localStorage.setItem('wl_zoomDist', cameraZoomDist);
 
             const zoomToggleBtn = document.getElementById('zoom-toggle');
@@ -4631,8 +4676,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if (joyKnob) joyKnob.style.transform = `translate(-50%, -50%)`;
         if (joyBase) {
             joyBase.style.opacity = '0';
-            joyBase.style.background = '';
-            joyBase.style.borderColor = '';
+            joyBase.style.display = 'none';
         }
     };
 
@@ -5970,6 +6014,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             godRaysPass.uniforms.uRayColorOuter.value.set(v);
         });
         sunGodRaysFolder.add(rayColors, 'applyPreset').name('Apply Sunset Photo Look');
+        sunGodRaysFolder.add({
+            exportDusk: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, false) : null
+        }, 'exportDusk').name('Export Dusk / Sun Rays (Copy JSON)');
+        sunGodRaysFolder.add({
+            downloadDusk: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, true) : null
+        }, 'downloadDusk').name('Download Dusk Settings (.json)');
 
         // 4. Moonlight & Night Subfolder
         const moonParams = {
@@ -5995,6 +6045,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         moonFolder.addColor(moonParams, 'nightSkyColor').name('Night Sky Color').onChange(v => envConfigs[2].bg = parseInt(v.replace('#',''), 16));
         moonFolder.addColor(moonParams, 'nightFogColor').name('Night Fog Color').onChange(v => envConfigs[2].fog = parseInt(v.replace('#',''), 16));
         moonFolder.add(moonParams, 'moonAltitude', 200, 4000, 50).name('Moon Altitude').onChange(v => envConfigs[2].moonY = v);
+        moonFolder.add({
+            exportNight: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, false) : null
+        }, 'exportNight').name('Export Night Settings (Copy JSON)');
+        moonFolder.add({
+            downloadNight: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, true) : null
+        }, 'downloadNight').name('Download Night Settings (.json)');
 
         // Star controls. Every one of these is multiplied by uNightFactor in the shader, which
         // is exactly 0.0 at dusk — so no setting here can affect the golden dusk look.
@@ -6061,6 +6117,12 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         dayFolder.add(dayParams, 'dayAmbIntensity', 0, 3, 0.05).name('Day Fill Power').onChange(v => envConfigs[0].ambI = v);
         dayFolder.addColor(dayParams, 'daySkyColor').name('Day Sky Color').onChange(v => envConfigs[0].bg = parseInt(v.replace('#',''), 16));
         dayFolder.addColor(dayParams, 'dayFogColor').name('Day Fog Color').onChange(v => envConfigs[0].fog = parseInt(v.replace('#',''), 16));
+        dayFolder.add({
+            exportDay: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, false) : null
+        }, 'exportDay').name('Export Day Settings (Copy JSON)');
+        dayFolder.add({
+            downloadDay: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, true) : null
+        }, 'downloadDay').name('Download Day Settings (.json)');
 
         // 5. Weather & Fog Subfolder
         const weatherFolder = envFolder.addFolder('Weather & Fog');
@@ -6439,7 +6501,67 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             gui.controllersRecursive().forEach(c => c.updateDisplay());
         }}, 'clearDesertDay').name('Clear Desert Day');
 
-        // 11. Presets & Profiles Folder (Root Level & Environment Subfolder)
+        // Initialize Time of Day JSON Exporter & Manager
+        timeOfDayExporter = new TimeOfDayExporter(() => ({
+            envConfigs,
+            timePhase,
+            params,
+            skyUniforms,
+            godRaysPass,
+            skyEditorParams,
+            cloudParams,
+            milkyWayParams: typeof milkyWayParams !== 'undefined' ? milkyWayParams : null,
+            auroraParams: typeof auroraParams !== 'undefined' ? auroraParams : null,
+            currentWeather: typeof currentWeather !== 'undefined' ? currentWeather : 'clear',
+            showToast: showVisualToast,
+            setTimePhase: typeof setTimePhase === 'function' ? setTimePhase : (typeof window.setTimePhase === 'function' ? window.setTimePhase : null),
+            refreshGUI: () => {
+                if (typeof updateAtmoParamsFromPhase === 'function') updateAtmoParamsFromPhase();
+                if (gui) gui.controllersRecursive().forEach(c => c.updateDisplay());
+            }
+        }));
+        window.timeOfDayExporter = timeOfDayExporter;
+
+        // 11. Time of Day JSON Export Subfolder (Environment Subfolder)
+        const todExportFolder = envFolder.addFolder('Time of Day JSON Export');
+        todExportFolder.add({
+            exportActive: () => timeOfDayExporter.exportActivePhase(false)
+        }, 'exportActive').name('Export Active Time of Day (Copy JSON)');
+        todExportFolder.add({
+            exportDay: () => timeOfDayExporter.exportPhase(0, false)
+        }, 'exportDay').name('Export Day Settings (Copy JSON)');
+        todExportFolder.add({
+            exportDusk: () => timeOfDayExporter.exportPhase(1, false)
+        }, 'exportDusk').name('Export Dusk Settings (Copy JSON)');
+        todExportFolder.add({
+            exportNight: () => timeOfDayExporter.exportPhase(2, false)
+        }, 'exportNight').name('Export Night Settings (Copy JSON)');
+        todExportFolder.add({
+            exportAll: () => timeOfDayExporter.exportAllPhases(false)
+        }, 'exportAll').name('Export All 3 Times of Day (Copy JSON)');
+        todExportFolder.add({
+            downloadActive: () => timeOfDayExporter.exportActivePhase(true)
+        }, 'downloadActive').name('Download Active Time of Day (.json)');
+        todExportFolder.add({
+            downloadDay: () => timeOfDayExporter.exportPhase(0, true)
+        }, 'downloadDay').name('Download Day Settings (.json)');
+        todExportFolder.add({
+            downloadDusk: () => timeOfDayExporter.exportPhase(1, true)
+        }, 'downloadDusk').name('Download Dusk Settings (.json)');
+        todExportFolder.add({
+            downloadNight: () => timeOfDayExporter.exportPhase(2, true)
+        }, 'downloadNight').name('Download Night Settings (.json)');
+        todExportFolder.add({
+            downloadAll: () => timeOfDayExporter.exportAllPhases(true)
+        }, 'downloadAll').name('Download All environment_settings.json');
+        todExportFolder.add({
+            importJSON: () => {
+                const input = prompt('Paste Time of Day JSON (Day / Dusk / Night / All):');
+                if (input) timeOfDayExporter.importSettings(input);
+            }
+        }, 'importJSON').name('Import Time of Day (Paste JSON)');
+
+        // 12. Presets & Profiles Folder (Root Level & Environment Subfolder)
         presetsFolder = gui.addFolder('Presets & Profiles');
         presetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
         presetsFolder.add({
@@ -6472,6 +6594,33 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         presetsFolder.add({
             importJSON: () => settingsManager.importPresets()
         }, 'importJSON').name('Import Presets (Paste JSON)');
+
+        presetsFolder.add({
+            exportActiveTOD: () => timeOfDayExporter.exportActivePhase(false)
+        }, 'exportActiveTOD').name('Export Active Time of Day (Copy JSON)');
+
+        presetsFolder.add({
+            exportDayTOD: () => timeOfDayExporter.exportPhase(0, false)
+        }, 'exportDayTOD').name('Export Day Settings (Copy JSON)');
+
+        presetsFolder.add({
+            exportDuskTOD: () => timeOfDayExporter.exportPhase(1, false)
+        }, 'exportDuskTOD').name('Export Dusk Settings (Copy JSON)');
+
+        presetsFolder.add({
+            exportNightTOD: () => timeOfDayExporter.exportPhase(2, false)
+        }, 'exportNightTOD').name('Export Night Settings (Copy JSON)');
+
+        presetsFolder.add({
+            exportAllTOD: () => timeOfDayExporter.exportAllPhases(false)
+        }, 'exportAllTOD').name('Export All Times of Day (Copy JSON)');
+
+        presetsFolder.add({
+            importTOD: () => {
+                const input = prompt('Paste Time of Day JSON:');
+                if (input) timeOfDayExporter.importSettings(input);
+            }
+        }, 'importTOD').name('Import Time of Day (Paste JSON)');
 
         updateAllPresetDropdowns('Golden Hour Dusk (Default)');
 
