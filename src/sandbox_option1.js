@@ -35,7 +35,7 @@ import { MeshToonNodeMaterial, MeshStandardNodeMaterial, MeshBasicNodeMaterial, 
 import { uniform, texture, Fn, positionLocal, abs, positionGeometry, sin, step, positionWorld, normalWorld, cameraPosition, float, vec2, vec3, vec4, dot, fract, mix, pow, clamp, normalize, smoothstep as tslSmoothstep, attribute } from 'three/tsl';
 import { scene, camera, renderer, clock, applyRenderBudget } from './core/Engine.js';
 import { deviceTier, tierSettings, budgetedPixelRatio, AdaptiveResolution, describeTier } from './core/DeviceTier.js';
-import { StylizedPineSystem } from './entities/StylizedPineSystem.js';
+import { GhibliTreeSystem } from './entities/GhibliTreeSystem.js';
 import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, godRaysPass, initPostProcessingUI, uRolloffKnee, setGodRaySunVisible, uPhaseExposure, uDitherAmount } from './core/PostProcessing.js';
 
     import { initTerrainEditor } from '../TerrainEditor.js';
@@ -371,15 +371,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         this.domElement.classList.remove('transition');
         return origGuiClose();
     };
-
-    let timePhase = (localStorage.getItem('wl_timePhase') !== null) ? parseInt(localStorage.getItem('wl_timePhase')) : 1; // Default to 1: Dusk
-
-    let envConfigs = [
-        {name: 'Day', bg: 0x3f7fc4, mid: 0x74add9, fog: 0xbcd2e2, amb: 0xcfe6f7, dir: 0xfff3d8, ambI: 0.75, dirI: 1.60, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfdf7e8}, // Day / Morning — light energy cut from 3.6 to 2.35 and hue pulled off pure white; near-white light at high intensity pushed R,G,B over the soft-clip knee together, which is what flattened the frame to haze
-        {name: 'Dusk', bg: 0x2a5090, mid: 0xc85078, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xfffaec}, // Dusk — deep blue zenith, magenta/peach mid, warm orange horizon+fog
-        {name: 'Twilight', bg: 0x0a1330, mid: 0x1b2f5c, fog: 0x24406e, amb: 0x6b82ad, dir: 0x9ecbff, ambI: 1.05, dirI: 2.2, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x8cc4ff, cloudCol: 0x33507d}, // Twilight / Night — moonlight lifted so terrain is readable; sky no longer collapses to a flat 2% dome
-    ];
-
     const params = {
         worldMode: 'Islands',
         sceneFog: true,
@@ -478,6 +469,14 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.params = params;
 
     const toonShaderManager = new ToonShaderManager();
+
+    let timePhase = (localStorage.getItem('wl_timePhase') !== null) ? parseInt(localStorage.getItem('wl_timePhase')) : 1; // Default to 1: Dusk
+
+    let envConfigs = [
+        {name: 'Day', bg: 0x3f7fc4, mid: 0x74add9, fog: 0xbcd2e2, amb: 0xcfe6f7, dir: 0xfff3d8, ambI: 0.75, dirI: 1.60, starOp: 0, sunY: 10000, moonY: -8000, glintCol: 0xfff0d0, cloudCol: 0xfdf7e8},
+        {name: 'Dusk', bg: 0x2a5090, mid: 0xc85078, fog: 0xffa07a, amb: 0xffdab9, dir: 0xffaa00, ambI: 1.1, dirI: 3.2, starOp: 0, sunY: 160, moonY: 200, glintCol: 0xffaa00, cloudCol: 0xfffaec},
+        {name: 'Twilight', bg: 0x0a1330, mid: 0x1b2f5c, fog: 0x24406e, amb: 0x6b82ad, dir: 0x9ecbff, ambI: 1.05, dirI: 2.2, starOp: 1.0, sunY: -8000, moonY: 9000, glintCol: 0x8cc4ff, cloudCol: 0x33507d}
+    ];
 
     // ==========================================
     // SAVE / LOAD PRESETS & PROFILES
@@ -687,6 +686,74 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         reset: () => {
             settingsManager.loadSetting('Golden Hour Dusk (Default)');
         },
+        exportFullBackup: () => {
+            const backup = {
+                wanderlust_version: '2.0',
+                timestamp: new Date().toISOString(),
+                timePhase: timePhase,
+                envConfigs: (typeof envConfigs !== 'undefined') ? JSON.parse(JSON.stringify(envConfigs)) : [],
+                params: Object.assign({}, params),
+                cloudParams: (typeof cloudParams !== 'undefined') ? JSON.parse(JSON.stringify(cloudParams)) : {},
+                biomeFogSettings: window.biomeFogSettings || {},
+                biomeSkyConfigs: window.BIOME_SKY_CONFIGS || {},
+                customPresets: JSON.parse(localStorage.getItem('wl_custom_presets') || '{}')
+            };
+            const jsonStr = JSON.stringify(backup, null, 2);
+            navigator.clipboard.writeText(jsonStr).then(() => {
+                showVisualToast('Full Backup copied to clipboard');
+            }).catch(() => {
+                prompt('Copy Full Backup JSON:', jsonStr);
+            });
+            // Also trigger file download
+            try {
+                const blob = new Blob([jsonStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `wanderlust_full_backup_${Date.now()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch(e) {}
+        },
+        importFullBackup: () => {
+            const input = prompt('Paste Wanderlust Full Backup JSON:');
+            if (!input) return;
+            try {
+                const data = JSON.parse(input);
+                if (data.envConfigs && Array.isArray(data.envConfigs) && typeof envConfigs !== 'undefined') {
+                    for (let i = 0; i < data.envConfigs.length; i++) {
+                        if (envConfigs[i]) Object.assign(envConfigs[i], data.envConfigs[i]);
+                    }
+                }
+                if (data.params) {
+                    Object.assign(params, data.params);
+                }
+                if (data.cloudParams && typeof cloudParams !== 'undefined') {
+                    Object.assign(cloudParams, data.cloudParams);
+                }
+                if (data.biomeFogSettings) {
+                    window.biomeFogSettings = Object.assign({}, window.biomeFogSettings || {}, data.biomeFogSettings);
+                }
+                if (data.biomeSkyConfigs && window.BIOME_SKY_CONFIGS) {
+                    window.BIOME_SKY_CONFIGS = Object.assign({}, window.BIOME_SKY_CONFIGS, data.biomeSkyConfigs);
+                }
+                if (data.customPresets) {
+                    localStorage.setItem('wl_custom_presets', JSON.stringify(data.customPresets));
+                }
+                if (data.timePhase !== undefined) {
+                    if (typeof window.setTimePhase === 'function') window.setTimePhase(data.timePhase);
+                    else timePhase = data.timePhase;
+                }
+                updateAllPresetDropdowns();
+                if (gui) gui.controllersRecursive().forEach(c => c.updateDisplay());
+                if (typeof updateAtmoParamsFromPhase === 'function') updateAtmoParamsFromPhase();
+                showVisualToast('Restored Full Backup Successfully');
+            } catch(e) {
+                alert('Invalid JSON Backup: ' + e.message);
+            }
+        },
         exportPresets: () => {
             const saved = localStorage.getItem('wl_custom_presets') || '{}';
             navigator.clipboard.writeText(saved).then(() => {
@@ -708,20 +775,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             } catch(e) {
                 alert('Invalid JSON: ' + e.message);
             }
-        },
-        exportActiveTimeOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportActivePhase(false) : null,
-        exportDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, false) : null,
-        exportDuskJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, false) : null,
-        exportNightJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, false) : null,
-        exportAllTimesOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportAllPhases(false) : null,
-        downloadActiveTimeOfDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportActivePhase(true) : null,
-        downloadDayJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(0, true) : null,
-        downloadDuskJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(1, true) : null,
-        downloadNightJSON: () => timeOfDayExporter ? timeOfDayExporter.exportPhase(2, true) : null,
-        downloadAllEnvironmentSettingsJSON: () => timeOfDayExporter ? timeOfDayExporter.exportAllPhases(true) : null,
-        importTimeOfDayJSON: () => {
-            const input = prompt('Paste Time of Day JSON (Day / Dusk / Night / All):');
-            if (input && timeOfDayExporter) timeOfDayExporter.importSettings(input);
         }
     };
 
@@ -1020,84 +1073,102 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     audioFolder.add(audioParams, 'toggleMasterSound').name('Toggle Master Sound');
     audioFolder.add(audioParams, 'toggleEngineSound').name('Toggle Engine Sound');
 
-    // =========================================================================
-    // Dedicated Stylized Pine Trees Settings Folder
-    // =========================================================================
-    const stylizedTreeFolder = gui.addFolder('Stylized Trees');
-    const _pines = () => window.stylizedTrees;
-    const _respawnPines = () => { if (_pines()) _pines().respawn(); };
+    // Ghibli Trees GUI Folder
+    const ghibliTreeFolder = gui.addFolder('Ghibli Trees');
+    ghibliTreeFolder.add(params, 'showTrees').name('Trees Visible').onChange(v => {
+        if (typeof treeMeshes !== 'undefined') treeMeshes.forEach(m => m.visible = v);
+        if (window.instJungleTreeParts) window.instJungleTreeParts.forEach(m => m.visible = v);
+        if (window.instPalmTreeParts) window.instPalmTreeParts.forEach(m => m.visible = v);
+    });
+    // These drive BOTH tree systems: the legacy instanced pines AND the Background Tree Atlas
+    // trees. Wiring only the pines is what made "Tree Scale" look dead -- the trees actually on
+    // screen in Ghibli Land are the atlas ones.
+    const _bgTrees = () => window.ghibliTrees;
 
-    const pineParams = {
+    ghibliTreeFolder.add(params, 'ghibliTreeScale', 0.2, 3.5, 0.05).name('Tree Scale').onChange(v => {
+        if (typeof window.updateGhibliTreeScale === 'function') window.updateGhibliTreeScale(v);
+        const t = _bgTrees();
+        if (t) { t.scaleMul = v; t.respawn(); }
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeDensity', 0.1, 3.0, 0.05).name('Tree Density').onChange(v => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.density = v; t.respawn(); }
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMinDist', 6.0, 30.0, 0.5).name('Min Spacing').onChange(v => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        // Cell size IS the spacing guarantee for the atlas trees, so this maps directly.
+        const t = _bgTrees();
+        if (t && typeof t.setCellSize === 'function') t.setCellSize(v * 2.4);
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMinHeight', 0.0, 40.0, 0.5).name('Elevation Min').onChange(v => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.minElevation = v; t.respawn(); }
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeMaxHeight', 25.0, 120.0, 1.0).name('Elevation Max').onChange(v => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        const t = _bgTrees();
+        if (t) { t.maxElevation = v; t.respawn(); }
+    });
+    ghibliTreeFolder.add(params, 'ghibliTreeWindSway', 0.0, 3.0, 0.1).name('Wind Sway').onChange(v => {
+        if (typeof treeUniforms !== 'undefined' && treeUniforms && treeUniforms.uTreeScale) {
+            treeUniforms.uTreeScale.value = 1.5 * v;
+        }
+        const t = _bgTrees();
+        if (t) t.uWindStrength.value = v;
+    });
+    ghibliTreeFolder.add({ respawn: () => {
+        if (typeof window.respawnGhibliTrees === 'function') window.respawnGhibliTrees();
+        if (window.ghibliTrees) window.ghibliTrees.respawn();
+    }}, 'respawn').name('Respawn Trees');
+
+    // ---- Background Tree Atlas (the three Ghibli card trees) ----
+    // Separate subfolder so these do not collide with the legacy pine controls above.
+    const bgTreeParams = {
         visible: true,
-        scale: 1.0,
         density: 1.0,
-        minSpacing: 32.0,
-        minElevation: 4.0,
-        maxElevation: 85.0,
-        windSway: 1.0,
-        preset: 'spring',
-        leafBottom: 0x1c3b23,
-        leafTop: 0x5c8338,
-        leafVarColor: 0x1e4430,
-        barkBase: 0x2e1b10,
-        barkTop: 0x5c3a21,
-        barkBrightness: 1.35,
+        scale: 1.0,
+        elevMin: 6.8,
+        elevMax: 58.0,
+        maxSlope: 0.55,
+        wind: 1.0,
+        atlasMix: 0.75,
+        tintSpread: 0.18,
+        canopyShadow: '#2c5233',
+        canopyLit: '#6aa34a',
+        canopyTip: '#9ec96a',
+        trunkBase: '#3d2b1c',
+        trunkTop: '#6b4c33',
         counts: '—'
     };
+    const bgTreeFolder = ghibliTreeFolder.addFolder('Background Tree Atlas');
+    const _tsys = () => window.ghibliTrees;
+    const _respawnBg = () => { if (_tsys()) _tsys().respawn(); };
 
-    stylizedTreeFolder.add(pineParams, 'visible').name('Tree Visible').onChange(v => {
-        if (_pines()) _pines().setVisible(v);
-    });
-    stylizedTreeFolder.add(pineParams, 'scale', 0.2, 3.5, 0.05).name('Tree Scale').onChange(v => {
-        if (_pines()) { _pines().scaleMul = v; _respawnPines(); }
-    });
-    stylizedTreeFolder.add(pineParams, 'density', 0.1, 3.0, 0.05).name('Tree Density').onChange(v => {
-        if (_pines()) { _pines().density = v; _respawnPines(); }
-    });
-    stylizedTreeFolder.add(pineParams, 'minSpacing', 10.0, 60.0, 1.0).name('Min Spacing').onChange(v => {
-        if (_pines()) _pines().setCellSize(v);
-    });
-    stylizedTreeFolder.add(pineParams, 'minElevation', 0.0, 50.0, 0.5).name('Min Elevation').onChange(v => {
-        if (_pines()) { _pines().minElevation = v; _respawnPines(); }
-    });
-    stylizedTreeFolder.add(pineParams, 'maxElevation', 20.0, 150.0, 1.0).name('Elevation Max').onChange(v => {
-        if (_pines()) { _pines().maxElevation = v; _respawnPines(); }
-    });
-    stylizedTreeFolder.add(pineParams, 'windSway', 0.0, 3.0, 0.05).name('Wind Sway').onChange(v => {
-        if (_pines()) _pines().uWindStrength.value = v;
-    });
-    stylizedTreeFolder.add(pineParams, 'preset', ['spring', 'autumn']).name('Season Preset').onChange(v => {
-        if (_pines()) _pines().setPreset(v);
-    });
-    stylizedTreeFolder.add({ respawn: _respawnPines }, 'respawn').name('Respawn Trees');
+    // Scale / Density / Elevation / Wind live on the PARENT folder and drive both tree
+    // systems. Only atlas-specific controls belong here, so there is exactly one slider
+    // per concept.
+    bgTreeFolder.add(bgTreeParams, 'visible').name('Visible').onChange(v => { if (_tsys()) _tsys().setVisible(v); });
+    bgTreeFolder.add(bgTreeParams, 'maxSlope', 0.1, 2.0, 0.05).name('Max Slope').onChange(v => { if (_tsys()) { _tsys().maxSlope = v; _respawnBg(); } });
+    bgTreeFolder.add(bgTreeParams, 'atlasMix', 0.0, 1.0, 0.05).name('Texture vs Palette').onChange(v => { if (_tsys()) _tsys().uAtlasMix.value = v; });
+    bgTreeFolder.add(bgTreeParams, 'tintSpread', 0.0, 0.6, 0.02).name('Per-Tree Variation').onChange(v => { if (_tsys()) _tsys().uTintSpread.value = v; });
 
-    const treeColorsFolder = stylizedTreeFolder.addFolder('Colors');
-    treeColorsFolder.addColor(pineParams, 'leafBottom').name('Leaf Bottom (Shadow)').onChange(c => {
-        if (_pines()) _pines().uLeafBottom.value.set(c);
-    });
-    treeColorsFolder.addColor(pineParams, 'leafTop').name('Leaf Top (Lit)').onChange(c => {
-        if (_pines()) _pines().uLeafTop.value.set(c);
-    });
-    treeColorsFolder.addColor(pineParams, 'leafVarColor').name('Variation Tone').onChange(c => {
-        if (_pines()) _pines().uLeafVarColor.value.set(c);
-    });
-    treeColorsFolder.addColor(pineParams, 'barkBase').name('Trunk Base').onChange(c => {
-        if (_pines()) _pines().uBarkBase.value.set(c);
-    });
-    treeColorsFolder.addColor(pineParams, 'barkTop').name('Trunk Top').onChange(c => {
-        if (_pines()) _pines().uBarkTop.value.set(c);
-    });
-    treeColorsFolder.add(pineParams, 'barkBrightness', 0.2, 3.0, 0.05).name('Trunk Brightness').onChange(v => {
-        if (_pines()) _pines().uBarkBrightness.value = v;
-    });
+    const bgColorFolder = bgTreeFolder.addFolder('Colors');
+    bgColorFolder.addColor(bgTreeParams, 'canopyShadow').name('Canopy Shadow').onChange(v => { if (_tsys()) _tsys().setColor('canopyShadow', v); });
+    bgColorFolder.addColor(bgTreeParams, 'canopyLit').name('Canopy Lit').onChange(v => { if (_tsys()) _tsys().setColor('canopyLit', v); });
+    bgColorFolder.addColor(bgTreeParams, 'canopyTip').name('Canopy Tip').onChange(v => { if (_tsys()) _tsys().setColor('canopyTip', v); });
+    bgColorFolder.addColor(bgTreeParams, 'trunkBase').name('Trunk Base').onChange(v => { if (_tsys()) _tsys().setColor('trunkBase', v); });
+    bgColorFolder.addColor(bgTreeParams, 'trunkTop').name('Trunk Top').onChange(v => { if (_tsys()) _tsys().setColor('trunkTop', v); });
 
-    const treeCountCtrl = stylizedTreeFolder.add(pineParams, 'counts').name('Instances (N/M/F)').disable();
+    // Live instance readout, for tuning density against the frame budget
+    const bgCountCtrl = bgTreeFolder.add(bgTreeParams, 'counts').name('Instances (N/M/F)').disable();
     setInterval(() => {
-        const t = _pines();
-        if (!t || !treeCountCtrl) return;
+        const t = _tsys();
+        if (!t || !bgCountCtrl) return;
         const c = t.lastCounts;
-        pineParams.counts = `${c.near} / ${c.mid} / ${c.far}`;
-        treeCountCtrl.updateDisplay();
+        bgTreeParams.counts = `${c.near} / ${c.mid} / ${c.far}`;
+        bgCountCtrl.updateDisplay();
     }, 700);
 
     function setGodMode(enabled) {
@@ -2493,7 +2564,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         fogGroup.add(p);
     }
     fogGroup.visible = false;
-    // scene.add(fogGroup); // Ground fog over terrain removed
+    // scene.add(fogGroup); // Ground fog over terrain completely removed
     window.fogGroup = fogGroup;
     window.fogUniforms = fogUniforms;
     window.fogMat = fogMat;
@@ -2607,129 +2678,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const { mesh: proceduralSkyMesh, material: proceduralSkyMat, uniforms: skyUniforms } = createProceduralSky();
     window._skyDbg = skyUniforms;
     scene.add(proceduralSkyMesh);
-
-    // ==========================================
-    // MILKY WAY NIGHT SKY (photographic cubemap from LEGACY/galactic-home)
-    // Real full-sky Milky Way panorama, extracted from galactic-home. It overlays the
-    // procedural night dome and fades in ONLY at night. Its opacity is driven by
-    // skyUniforms.uNightFactor, which is exactly 0.0 at Day and Dusk, so the locked
-    // Golden Hour Dusk look is provably untouched (neutral value at dusk).
-    // ==========================================
-    const uMilkyWayOpacity = uniform(0.0);
-    const uMilkyWayBrightness = uniform(1.5);
-    let milkyWayMesh = null;
-    // Live-tunable so the look can be perfected from the GUI (Environment > Moonlight & Night
-    // > Milky Way Photo). Configured to produce a dramatic diagonal galactic arc across the night sky.
-    const milkyWayParams = {
-        brightness: 1.5,   // multiplies texture colour naturally
-        opacity: 1.0,      // max blend at full night
-        tiltX: 0,          // degrees — positions galactic core at optimal elevation
-        tiltY: -25,        // degrees — swings the core across the diagonal view
-        tiltZ: 18          // degrees — diagonal lean matching starry night photography
-    };
-    const applyMilkyWayTilt = () => {
-        if (!milkyWayMesh) return;
-        milkyWayMesh.rotation.set(
-            THREE.MathUtils.degToRad(milkyWayParams.tiltX),
-            THREE.MathUtils.degToRad(milkyWayParams.tiltY),
-            THREE.MathUtils.degToRad(milkyWayParams.tiltZ)
-        );
-    };
-    try {
-        // Equirectangular Milky Way panorama (built from the galactic-home cubemap). Using a
-        // single 2D texture on a sphere — the same proven setup as the procedural sky dome —
-        // instead of a samplerCube node, which dropped the WebGPU device on this renderer.
-        const mwTex = new THREE.TextureLoader().load('assets/skybox/milkyway_equirect.png');
-        mwTex.colorSpace = THREE.SRGBColorSpace;
-        mwTex.anisotropy = 4;
-
-        const mwMat = new MeshBasicNodeMaterial({
-            side: THREE.BackSide,
-            depthWrite: false,
-            transparent: true,
-            fog: false,
-            // Additive: the panorama's near-black sky adds nothing, so the procedural starfield
-            // underneath stays visible — we only ADD the Milky Way band/glow on top of it.
-            // depthTest=true (default) ensures it doesn't bleed through the water surface.
-            blending: THREE.AdditiveBlending
-        });
-        // Standard sphere UVs map the equirect panorama seamlessly.
-        const mwSample = texture(mwTex);
-        const mwRaw = mwSample.rgb.mul(mwSample.a);
-        mwMat.colorNode = mwRaw.mul(uMilkyWayBrightness);
-        mwMat.opacityNode = uMilkyWayOpacity;
-
-        const mwGeo = new THREE.SphereGeometry(16000, 64, 32);
-        milkyWayMesh = new THREE.Mesh(mwGeo, mwMat);
-        milkyWayMesh.renderOrder = -999; // just after the procedural dome (-1000), before terrain
-        milkyWayMesh.frustumCulled = false;
-        applyMilkyWayTilt();
-        scene.add(milkyWayMesh);
-    } catch (e) {
-        console.warn('[MilkyWay] failed to init sky panorama', e);
-    }
-    window._milkyWay = () => milkyWayMesh;
-
-    // ==========================================
-    // AURORA BOREALIS — animated curtain rings
-    // CylinderGeometry (open) + TSL overlapping sine waves + AdditiveBlending.
-    // Gated by uNightFactor so it never appears at Dusk or Day.
-    // ==========================================
-    const uAuroraOpacity = uniform(0.0);
-    const uAuroraIntensity = uniform(1.0);
-    const uAuroraTime = uniform(0.0);
-    let auroraMesh = null;
-    const auroraParams = {
-        opacity: 0.0,      // Off by default to keep starry night clean
-        intensity: 1.0,
-        speed: 1.0,
-        altitude: 2500,  // Y offset above camera
-    };
-
-    try {
-        const auroraMat = new MeshBasicNodeMaterial({
-            side: THREE.BackSide,
-            depthWrite: false,
-            transparent: true,
-            fog: false,
-            blending: THREE.AdditiveBlending
-        });
-
-        // Cylinder half-height = 2500, radius = 12000
-        const px = positionLocal.x.div(float(12000));
-        const pz = positionLocal.z.div(float(12000));
-        // Normalise Y: 0 at bottom of cylinder, 1 at top
-        const pyNorm = positionLocal.y.add(float(2500)).div(float(5000));
-
-        // Soft fade at top and bottom edges of the curtain
-        const vFade = tslSmoothstep(float(0.0), float(0.2), pyNorm)
-            .mul(tslSmoothstep(float(1.0), float(0.8), pyNorm));
-
-        const t = uAuroraTime.mul(float(0.4));
-        // Three overlapping sine waves — different frequencies & phase speeds create organic ribbons
-        const w1 = sin(px.mul(float(9.0)).add(t)).mul(float(0.5)).add(float(0.5));
-        const w2 = sin(pz.mul(float(7.0)).sub(t.mul(float(1.3)))).mul(float(0.5)).add(float(0.5));
-        const w3 = sin(px.mul(float(11.0)).add(pz.mul(float(8.0))).sub(t.mul(float(0.8)))).mul(float(0.5)).add(float(0.5));
-
-        // Multiply + power to get narrow bright ribbons with soft falloff
-        const ribbon = w1.mul(w2.mul(float(0.7)).add(float(0.3))).mul(w3).pow(float(2.0));
-
-        const cGreen = vec3(0.0, 1.0, 0.3);
-        const cBlue  = vec3(0.0, 0.4, 1.0);
-        const auroraColor = mix(cGreen, cBlue, w2).mul(ribbon).mul(vFade);
-
-        auroraMat.colorNode = auroraColor.mul(uAuroraIntensity);
-        auroraMat.opacityNode = uAuroraOpacity;
-
-        const auroraGeo = new THREE.CylinderGeometry(12000, 12000, 5000, 64, 1, true);
-        auroraMesh = new THREE.Mesh(auroraGeo, auroraMat);
-        auroraMesh.renderOrder = -998;
-        auroraMesh.frustumCulled = false;
-        scene.add(auroraMesh);
-    } catch (e) {
-        console.warn('[Aurora] failed to init', e);
-    }
-    window._aurora = () => auroraMesh;
 
     // SKY MODE. "flat" reproduces flight-merged (WebGL): the procedural dome is hidden and a solid
     // background colour carries the sky, which the dense fog fades geometry into. The dome is kept
@@ -3326,10 +3274,10 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             const focusX = isFreeCam ? (isGodMode ? godCamera.position.x : camera.position.x) : playerX;
             const focusZ = isFreeCam ? (isGodMode ? godCamera.position.z : camera.position.z) : playerZ;
             
-            // Stylized Pine Biome Trees: deterministic cell-hash placement, 3 LOD bands.
-            // Runs on the same focus point as the player/camera so editor/God-mode freecam works.
-            if (stylizedTrees && stylizedTrees.ready) {
-                stylizedTrees.update(focusX, focusZ);
+            // Ghibli biome trees: deterministic cell-hash placement, three LOD bands.
+            // Runs on the same focus point as the pines so editor/God-mode freecam works.
+            if (ghibliTrees && ghibliTrees.ready) {
+                ghibliTrees.update(focusX, focusZ);
             }
 
 
@@ -3738,9 +3686,9 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     window.flightModelManager = flightModelManager;
 
     // ==========================================
-    // STYLIZED PINE TREES (procedural, instanced, LOD)
+    // GHIBLI BIOME TREES (procedural, instanced, LOD)
     // ==========================================
-    const stylizedTrees = new StylizedPineSystem({
+    const ghibliTrees = new GhibliTreeSystem({
         scene,
         gltfLoader,
         resolveAssetUrl,
@@ -3752,16 +3700,16 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         getPathStrength,
         densityScale: tierSettings.treeDensity
     });
-    window.stylizedTrees = stylizedTrees;
-    stylizedTrees.load().then(ok => {
+    window.ghibliTrees = ghibliTrees;
+    ghibliTrees.load().then(ok => {
         if (ok) {
-            console.info(`[Wanderlust] Stylized pines ready — pools near/mid/far =`,
-                stylizedTrees.poolSizes, `(tier ${deviceTier})`);
-            stylizedTrees.respawn();
+            console.info(`[Wanderlust] Ghibli trees ready — pools near/mid/far =`,
+                ghibliTrees.poolSizes, `(tier ${deviceTier})`);
+            ghibliTrees.respawn();
         } else {
-            console.warn('[Wanderlust] Stylized pine tree system failed to build geometry');
+            console.warn('[Wanderlust] Ghibli tree system failed to build geometry');
         }
-    }).catch(err => console.error('[Wanderlust] Stylized pine tree load failed:', err));
+    }).catch(err => console.error('[Wanderlust] Ghibli tree load failed:', err));
 
     let isModelVisible = true;
     let isSoundMuted = false;
@@ -4801,6 +4749,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     const tempVecMoonOff = new THREE.Vector3();
     const tempVecToLight = new THREE.Vector3();
     const tempColorTarget = new THREE.Color();
+
     // Exposure defaults live on `params` (dayExposure / nightExposure) so the sliders drive
     // them live. Dusk deliberately has NO slider and is hard-pinned to 1.0 below.
 
@@ -4965,30 +4914,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             skyUniforms.uNightFactor.value += (targetNightFactor - skyUniforms.uNightFactor.value) * decayEnv;
             skyUniforms.uDuskFactor.value += (targetDuskFactor - skyUniforms.uDuskFactor.value) * decayEnv;
 
-            // Milky Way night skybox — fade in with night, keep centred on the camera.
-            // Driven off uNightFactor so it is fully invisible at Dusk (dusk look untouched).
-            if (milkyWayMesh) {
-                uMilkyWayOpacity.value = skyUniforms.uNightFactor.value * milkyWayParams.opacity;
-                uMilkyWayBrightness.value = milkyWayParams.brightness;
-                milkyWayMesh.visible = uMilkyWayOpacity.value > 0.01;
-                const activeCam = isGodMode ? godCamera : camera;
-                activeCam.getWorldPosition(tempVec1);
-                milkyWayMesh.position.copy(tempVec1);
-            }
-            if (auroraMesh) {
-                const nightF = skyUniforms.uNightFactor.value;
-                uAuroraTime.value += dt * auroraParams.speed;
-                uAuroraOpacity.value = nightF * auroraParams.opacity;
-                uAuroraIntensity.value = auroraParams.intensity;
-                const activeCam = isGodMode ? godCamera : camera;
-                activeCam.getWorldPosition(tempVec1);
-                auroraMesh.position.set(
-                    tempVec1.x,
-                    tempVec1.y + auroraParams.altitude,
-                    tempVec1.z
-                );
-                auroraMesh.visible = uAuroraOpacity.value > 0.01;
-            }
+
 
             // Compute distinct zenith, mid, and horizon colors based on time of day
             let targetZenithHex = (timePhase === 1) ? target.bg : ((timePhase === 2) ? target.bg : biomeTarget.skyZenith);
@@ -6076,24 +6002,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             mwFolder.addColor(mwParams, 'coreColor').name('Core Color').onChange(v => skyUniforms.uMilkyCoreColor.value.set(v));
         }
 
-        // Photographic Milky Way cubemap (extracted from galactic-home). Night-only:
-        // its opacity is uNightFactor * opacity, and uNightFactor is exactly 0 at dusk,
-        // so none of these controls can touch the locked Golden Hour Dusk look.
-        if (typeof milkyWayParams !== 'undefined') {
-            const mwPhoto = moonFolder.addFolder('Milky Way Photo');
-            mwPhoto.add(milkyWayParams, 'brightness', 0.0, 4.0, 0.05).name('Brightness');
-            mwPhoto.add(milkyWayParams, 'opacity', 0.0, 1.0, 0.05).name('Opacity');
-            mwPhoto.add(milkyWayParams, 'tiltX', -180, 180, 1).name('Elevation (tip up/down)').onChange(applyMilkyWayTilt);
-            mwPhoto.add(milkyWayParams, 'tiltY', -180, 180, 1).name('Azimuth (spin L/R)').onChange(applyMilkyWayTilt);
-            mwPhoto.add(milkyWayParams, 'tiltZ', -180, 180, 1).name('Roll').onChange(applyMilkyWayTilt);
-        }
-        if (typeof auroraParams !== 'undefined') {
-            const auroraFolder = moonFolder.addFolder('Aurora Borealis');
-            auroraFolder.add(auroraParams, 'opacity', 0.0, 1.0, 0.05).name('Opacity');
-            auroraFolder.add(auroraParams, 'intensity', 0.0, 3.0, 0.1).name('Intensity');
-            auroraFolder.add(auroraParams, 'speed', 0.1, 4.0, 0.1).name('Speed');
-            auroraFolder.add(auroraParams, 'altitude', -2000, 8000, 100).name('Altitude');
-        }
+
 
         // 4b. Daylight Subfolder — day was blown out because near-white light at high
         // intensity pushed every channel over the soft-clip knee at once.
@@ -6461,41 +6370,6 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
             }
         }}, 'openOceanFolder').name('Ocean Editor (O)');
 
-        // 10. Environment Presets Subfolder
-        const presetFolder = envFolder.addFolder('Environment Presets');
-        presetFolder.add({ clearDesertDay: () => {
-            teleportToBiome('Desert Dunes');
-            params.fogPlane = false;
-            if (typeof window.fogGroup !== 'undefined') window.fogGroup.visible = false;
-            params.timeOfDay = 'day';
-            if (typeof window.setTimePhase === 'function') window.setTimePhase(0);
-            else timePhase = 0;
-            if (typeof cloudParams !== 'undefined') {
-                cloudParams.density = 0.1;
-                params.showVolumetricClouds = false;
-                if (typeof toonCloudMat !== 'undefined' && toonCloudMat.uniforms && toonCloudMat.uniforms.uEnableClouds) {
-                    toonCloudMat.uniforms.uEnableClouds.value = 0.0;
-                }
-                if (typeof instClouds !== 'undefined') {
-                    instClouds.count = Math.max(1, Math.floor(params.cloudCountRegular * cloudParams.density));
-                    if (instClouds.instanceMatrix) instClouds.instanceMatrix.needsUpdate = true;
-                }
-                if (typeof instHighClouds !== 'undefined') {
-                    instHighClouds.count = Math.max(1, Math.floor(params.cloudCountHigh * cloudParams.density));
-                    if (instHighClouds.instanceMatrix) instHighClouds.instanceMatrix.needsUpdate = true;
-                }
-                if (typeof instWispyClouds !== 'undefined') {
-                    instWispyClouds.count = Math.max(1, Math.floor(params.cloudCountWispy * cloudParams.density));
-                    if (instWispyClouds.instanceMatrix) instWispyClouds.instanceMatrix.needsUpdate = true;
-                }
-                if (typeof instMegaClouds !== 'undefined') {
-                    instMegaClouds.count = Math.max(1, Math.floor(params.cloudCountMega * cloudParams.density));
-                    if (instMegaClouds.instanceMatrix) instMegaClouds.instanceMatrix.needsUpdate = true;
-                }
-            }
-            gui.controllersRecursive().forEach(c => c.updateDisplay());
-        }}, 'clearDesertDay').name('Clear Desert Day');
-
         // Initialize Time of Day JSON Exporter & Manager
         timeOfDayExporter = new TimeOfDayExporter(() => ({
             envConfigs,
@@ -6517,48 +6391,147 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         }));
         window.timeOfDayExporter = timeOfDayExporter;
 
-        // 11. Time of Day JSON Export Subfolder (Environment Subfolder)
-        const todExportFolder = envFolder.addFolder('Time of Day JSON Export');
-        todExportFolder.add({
-            exportActive: () => timeOfDayExporter.exportActivePhase(false)
-        }, 'exportActive').name('Export Active Time of Day (Copy JSON)');
-        todExportFolder.add({
-            exportDay: () => timeOfDayExporter.exportPhase(0, false)
-        }, 'exportDay').name('Export Day Settings (Copy JSON)');
-        todExportFolder.add({
-            exportDusk: () => timeOfDayExporter.exportPhase(1, false)
-        }, 'exportDusk').name('Export Dusk Settings (Copy JSON)');
-        todExportFolder.add({
-            exportNight: () => timeOfDayExporter.exportPhase(2, false)
-        }, 'exportNight').name('Export Night Settings (Copy JSON)');
-        todExportFolder.add({
-            exportAll: () => timeOfDayExporter.exportAllPhases(false)
-        }, 'exportAll').name('Export All 3 Times of Day (Copy JSON)');
-        todExportFolder.add({
-            downloadActive: () => timeOfDayExporter.exportActivePhase(true)
-        }, 'downloadActive').name('Download Active Time of Day (.json)');
-        todExportFolder.add({
-            downloadDay: () => timeOfDayExporter.exportPhase(0, true)
-        }, 'downloadDay').name('Download Day Settings (.json)');
-        todExportFolder.add({
-            downloadDusk: () => timeOfDayExporter.exportPhase(1, true)
-        }, 'downloadDusk').name('Download Dusk Settings (.json)');
-        todExportFolder.add({
-            downloadNight: () => timeOfDayExporter.exportPhase(2, true)
-        }, 'downloadNight').name('Download Night Settings (.json)');
-        todExportFolder.add({
-            downloadAll: () => timeOfDayExporter.exportAllPhases(true)
-        }, 'downloadAll').name('Download All environment_settings.json');
-        todExportFolder.add({
-            importJSON: () => {
-                const input = prompt('Paste Time of Day JSON (Day / Dusk / Night / All):');
-                if (input) timeOfDayExporter.importSettings(input);
+        // 1. Unified Time of Day Studio (Context-Driven Active Phase Editor)
+        const todStudioFolder = gui.addFolder('Time of Day Studio');
+        const phaseNames = ['Day', 'Dusk', 'Night'];
+        const todControls = {
+            activePhase: phaseNames[timePhase] || 'Dusk',
+            get sunAltitude() { return typeof params.sunAltitude === 'number' ? params.sunAltitude : (envConfigs[timePhase]?.sunY || 0); },
+            set sunAltitude(v) { params.sunAltitude = v; if (envConfigs[timePhase]) envConfigs[timePhase].sunY = v; },
+            get sunAzimuth() { return typeof params.sunAzimuth === 'number' ? params.sunAzimuth : 0; },
+            set sunAzimuth(v) { params.sunAzimuth = v; },
+            get sunlightIntensity() { return envConfigs[timePhase]?.dirI || 1.5; },
+            set sunlightIntensity(v) { if (envConfigs[timePhase]) envConfigs[timePhase].dirI = v; if (dirLight) dirLight.intensity = v; },
+            get ambientIntensity() { return envConfigs[timePhase]?.ambI || 1.0; },
+            set ambientIntensity(v) { if (envConfigs[timePhase]) envConfigs[timePhase].ambI = v; if (ambientLight) ambientLight.intensity = v; },
+            get skyZenith() { return '#' + (envConfigs[timePhase]?.bg || 0x2a5090).toString(16).padStart(6, '0'); },
+            set skyZenith(v) { if (envConfigs[timePhase]) envConfigs[timePhase].bg = parseInt(v.replace('#',''), 16); },
+            get skyMid() { return '#' + (envConfigs[timePhase]?.mid || 0xc85078).toString(16).padStart(6, '0'); },
+            set skyMid(v) { if (envConfigs[timePhase]) envConfigs[timePhase].mid = parseInt(v.replace('#',''), 16); },
+            get skyHorizon() { return '#' + (envConfigs[timePhase]?.fog || 0xffa07a).toString(16).padStart(6, '0'); },
+            set skyHorizon(v) { if (envConfigs[timePhase]) envConfigs[timePhase].fog = parseInt(v.replace('#',''), 16); },
+            get sunlightColor() { return '#' + (envConfigs[timePhase]?.dir || 0xffaa00).toString(16).padStart(6, '0'); },
+            set sunlightColor(v) { if (envConfigs[timePhase]) envConfigs[timePhase].dir = parseInt(v.replace('#',''), 16); },
+            get ambientColor() { return '#' + (envConfigs[timePhase]?.amb || 0xffdab9).toString(16).padStart(6, '0'); },
+            set ambientColor(v) { if (envConfigs[timePhase]) envConfigs[timePhase].amb = parseInt(v.replace('#',''), 16); },
+            get exposure() { return typeof params.exposure === 'number' ? params.exposure : 1.9; },
+            set exposure(v) { params.exposure = v; },
+            copyToNextPhase: () => {
+                const nextPhase = (timePhase + 1) % 3;
+                if (envConfigs[timePhase] && envConfigs[nextPhase]) {
+                    Object.assign(envConfigs[nextPhase], JSON.parse(JSON.stringify(envConfigs[timePhase])));
+                    showVisualToast(`Copied ${phaseNames[timePhase]} settings to ${phaseNames[nextPhase]}`);
+                }
             }
-        }, 'importJSON').name('Import Time of Day (Paste JSON)');
+        };
 
-        // 12. Presets & Profiles Folder (Root Level & Environment Subfolder)
-        presetsFolder = gui.addFolder('Presets & Profiles');
-        presetsFolder.add(settingsManager, 'presetName').name('New Preset Name');
+        todStudioFolder.add(todControls, 'activePhase', phaseNames).name('Selected Time Phase').onChange(val => {
+            const idx = phaseNames.indexOf(val);
+            if (idx !== -1) {
+                if (typeof window.setTimePhase === 'function') window.setTimePhase(idx);
+                else timePhase = idx;
+                todStudioFolder.controllersRecursive().forEach(c => c.updateDisplay());
+            }
+        });
+        todStudioFolder.add(todControls, 'sunAltitude', -12000, 15000, 50).name('Sun Altitude');
+        todStudioFolder.add(todControls, 'sunAzimuth', -3.14, 3.14, 0.02).name('Sun Azimuth');
+        todStudioFolder.addColor(todControls, 'sunlightColor').name('Sunlight Color');
+        todStudioFolder.add(todControls, 'sunlightIntensity', 0, 6.0, 0.1).name('Sunlight Intensity');
+        todStudioFolder.addColor(todControls, 'ambientColor').name('Ambient Color');
+        todStudioFolder.add(todControls, 'ambientIntensity', 0, 3.0, 0.05).name('Ambient Intensity');
+        todStudioFolder.addColor(todControls, 'skyZenith').name('Sky Zenith Color');
+        todStudioFolder.addColor(todControls, 'skyMid').name('Sky Mid Color');
+        todStudioFolder.addColor(todControls, 'skyHorizon').name('Horizon / Fog Color');
+        todStudioFolder.add(todControls, 'exposure', 0.2, 4.0, 0.05).name('Global Exposure');
+        todStudioFolder.add(params, 'godRays').name('Enable God Rays');
+        todStudioFolder.add(params, 'godRayIntensity', 0.0, 2.0, 0.05).name('God Rays Intensity');
+        todStudioFolder.add(todControls, 'copyToNextPhase').name('Copy Phase to Next Phase');
+
+        // 2. Unified Biome Studio (Per-Biome Fog & Atmosphere Tuning)
+        const biomeStudioFolder = gui.addFolder('Biome Studio');
+        const biomeList = [
+            'Archipelago', 'Ghibli Land', 'Vast Plains', 'Misty Mountains',
+            'Lush Jungle', 'Crystal Land', 'Open Ocean', 'Desert Dunes',
+            'Badlands Canyon', 'North Pole'
+        ];
+        let currentSelectedBiome = 'Misty Mountains';
+
+        const getSkyConfig = (bName) => {
+            if (!window.BIOME_SKY_CONFIGS) return null;
+            return window.BIOME_SKY_CONFIGS[bName] || Object.values(window.BIOME_SKY_CONFIGS)[0];
+        };
+
+        const biomeControls = {
+            selectedBiome: currentSelectedBiome,
+            teleport: () => {
+                teleportToBiome(currentSelectedBiome);
+                showVisualToast(`Teleported to ${currentSelectedBiome}`);
+            },
+            get fogOffset() {
+                if (!window.biomeFogSettings) window.biomeFogSettings = {};
+                return (window.biomeFogSettings[currentSelectedBiome] !== undefined) ? window.biomeFogSettings[currentSelectedBiome] : 0;
+            },
+            set fogOffset(v) {
+                if (!window.biomeFogSettings) window.biomeFogSettings = {};
+                window.biomeFogSettings[currentSelectedBiome] = v;
+            },
+            get cloudCoverage() {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                return cfg ? (cfg.coverage || 0.4) : 0.4;
+            },
+            set cloudCoverage(v) {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                if (cfg) cfg.coverage = v;
+            },
+            get cloudEdge() {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                return cfg ? (cfg.edge || 0.08) : 0.08;
+            },
+            set cloudEdge(v) {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                if (cfg) cfg.edge = v;
+            },
+            get cloudSpeed() {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                return cfg ? (cfg.speed || 0.02) : 0.02;
+            },
+            set cloudSpeed(v) {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                if (cfg) cfg.speed = v;
+            },
+            get skyZenithTint() {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                return '#' + (cfg?.skyZenith || 0x4a90d9).toString(16).padStart(6, '0');
+            },
+            set skyZenithTint(v) {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                if (cfg) cfg.skyZenith = parseInt(v.replace('#',''), 16);
+            },
+            get skyHorizonTint() {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                return '#' + (cfg?.skyHorizon || 0xb8d4e8).toString(16).padStart(6, '0');
+            },
+            set skyHorizonTint(v) {
+                const cfg = getSkyConfig(currentSelectedBiome);
+                if (cfg) cfg.skyHorizon = parseInt(v.replace('#',''), 16);
+            }
+        };
+
+        biomeStudioFolder.add(biomeControls, 'selectedBiome', biomeList).name('Select Biome').onChange(val => {
+            currentSelectedBiome = val;
+            biomeStudioFolder.controllersRecursive().forEach(c => c.updateDisplay());
+        });
+        biomeStudioFolder.add(biomeControls, 'teleport').name('Teleport to Selected Biome');
+        biomeStudioFolder.add(biomeControls, 'fogOffset', -100, 300, 2).name('Ground Fog Offset (m)');
+        biomeStudioFolder.addColor(biomeControls, 'skyHorizonTint').name('Fog / Horizon Tint');
+        biomeStudioFolder.addColor(biomeControls, 'skyZenithTint').name('Sky Zenith Tint');
+        biomeStudioFolder.add(biomeControls, 'cloudCoverage', 0.0, 1.0, 0.02).name('Cloud Coverage');
+        biomeStudioFolder.add(biomeControls, 'cloudEdge', 0.01, 0.30, 0.01).name('Cloud Edge Crispness');
+        biomeStudioFolder.add(biomeControls, 'cloudSpeed', 0.001, 0.08, 0.002).name('Cloud Wind Speed');
+
+        // 3. Consolidated Presets & Backup Folder (Radically Simplified)
+        presetsFolder = gui.addFolder('Presets & Backup');
+        presetsFolder.add(settingsManager, 'presetName').name('Preset Name');
         presetsFolder.add({
             saveCurrent: () => settingsManager.saveSetting()
         }, 'saveCurrent').name('Save Current as Preset');
@@ -6571,57 +6544,26 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         presetDropdownControllers.push(mainPresetDropdown);
 
         presetsFolder.add({
-            loadSelected: () => settingsManager.loadSetting()
-        }, 'loadSelected').name('Load Selected Preset');
-        
+            exportBackup: () => settingsManager.exportFullBackup()
+        }, 'exportBackup').name('Export All Settings (Backup JSON)');
+
         presetsFolder.add({
-            deleteSelected: () => settingsManager.deleteSetting()
-        }, 'deleteSelected').name('Delete Selected Preset');
-        
+            importBackup: () => settingsManager.importFullBackup()
+        }, 'importBackup').name('Import Settings (Restore JSON)');
+
         presetsFolder.add({
             resetToDusk: () => settingsManager.reset()
         }, 'resetToDusk').name('Reset to Default Golden Dusk');
 
         presetsFolder.add({
-            exportJSON: () => settingsManager.exportPresets()
-        }, 'exportJSON').name('Export Presets (Copy JSON)');
-
-        presetsFolder.add({
-            importJSON: () => settingsManager.importPresets()
-        }, 'importJSON').name('Import Presets (Paste JSON)');
-
-        presetsFolder.add({
-            exportActiveTOD: () => timeOfDayExporter.exportActivePhase(false)
-        }, 'exportActiveTOD').name('Export Active Time of Day (Copy JSON)');
-
-        presetsFolder.add({
-            exportDayTOD: () => timeOfDayExporter.exportPhase(0, false)
-        }, 'exportDayTOD').name('Export Day Settings (Copy JSON)');
-
-        presetsFolder.add({
-            exportDuskTOD: () => timeOfDayExporter.exportPhase(1, false)
-        }, 'exportDuskTOD').name('Export Dusk Settings (Copy JSON)');
-
-        presetsFolder.add({
-            exportNightTOD: () => timeOfDayExporter.exportPhase(2, false)
-        }, 'exportNightTOD').name('Export Night Settings (Copy JSON)');
-
-        presetsFolder.add({
-            exportAllTOD: () => timeOfDayExporter.exportAllPhases(false)
-        }, 'exportAllTOD').name('Export All Times of Day (Copy JSON)');
-
-        presetsFolder.add({
-            importTOD: () => {
-                const input = prompt('Paste Time of Day JSON:');
-                if (input) timeOfDayExporter.importSettings(input);
-            }
-        }, 'importTOD').name('Import Time of Day (Paste JSON)');
+            deleteSelected: () => settingsManager.deleteSetting()
+        }, 'deleteSelected').name('Delete Selected Preset');
 
         updateAllPresetDropdowns('Golden Hour Dusk (Default)');
 
-        // Reorder folders: most-used first
+        // Reorder folders: Presets & Studios first, followed by controls
         const folderOrder = [
-            flightFolder, editorFolder, audioFolder, debugFolder, navFolder, perfFolder, envFolder, presetsFolder
+            presetsFolder, todStudioFolder, biomeStudioFolder, flightFolder, editorFolder, audioFolder, debugFolder, navFolder, perfFolder, envFolder
         ].filter(Boolean);
         const guiContainer = gui.$children || gui.domElement.querySelector('.children') || gui.domElement;
         folderOrder.forEach(f => {

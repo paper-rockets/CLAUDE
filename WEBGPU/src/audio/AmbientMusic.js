@@ -1,85 +1,126 @@
 // Procedural Web Audio Ambient Music Synthesizer
+// Relaxing, mellow, warm ambient soundtracks with deep 8-chord progressions and soft tone shaping.
 
 export const AMBIENT_TRACKS = [
     { 
         name: "Spirited Winds", 
+        description: "Uplifting & Nostalgic - Morning flight over sunlit green meadows",
         chords: [
-            [174.61, 220.00, 261.63, 329.63], // Fmaj7
-            [196.00, 246.94, 293.66, 349.23], // G7
-            [164.81, 196.00, 246.94, 293.66], // Em7
-            [220.00, 261.63, 329.63, 392.00]  // Am7
+            [174.61, 220.00, 261.63, 329.63, 392.00], // Fmaj9
+            [196.00, 246.94, 293.66, 329.63],         // G6
+            [164.81, 196.00, 246.94, 293.66],         // Em7
+            [220.00, 261.63, 329.63, 392.00, 493.88], // Am9
+            [146.83, 174.61, 220.00, 261.63, 329.63], // Dm9
+            [196.00, 261.63, 293.66, 349.23],         // G7sus4
+            [130.81, 196.00, 261.63, 329.63, 493.88], // Cmaj7
+            [174.61, 220.00, 261.63, 329.63]          // Fmaj7
         ],
-        speed: 2400, stepSpeed: 300, padOsc: 'triangle', leadOsc: 'sine'
+        speed: 4800, stepSpeed: 400, padOsc: 'sine', leadOsc: 'sine'
     },
     { 
-        name: "Summer Clouds", 
+        name: "Summer Drift", 
+        description: "Warm & Golden - Serene afternoon soaring along golden coastlines",
         chords: [
-            [261.63, 329.63, 392.00, 493.88], // Cmaj7
-            [196.00, 246.94, 293.66, 392.00], // G
-            [220.00, 261.63, 329.63, 392.00], // Am7
-            [174.61, 220.00, 261.63, 329.63]  // Fmaj7
+            [130.81, 196.00, 261.63, 293.66, 329.63], // Cmaj9
+            [123.47, 196.00, 246.94, 293.66],         // G/B
+            [110.00, 174.61, 220.00, 261.63, 329.63], // Am7
+            [164.81, 196.00, 246.94, 329.63],         // Em7
+            [174.61, 220.00, 261.63, 329.63, 392.00], // Fmaj9
+            [164.81, 196.00, 261.63, 329.63],         // C/E
+            [146.83, 174.61, 220.00, 261.63],         // Dm7
+            [196.00, 246.94, 261.63, 293.66]          // Gsus4
         ],
-        speed: 3200, stepSpeed: 400, padOsc: 'sawtooth', leadOsc: 'triangle'
+        speed: 5200, stepSpeed: 450, padOsc: 'triangle', leadOsc: 'sine'
     },
     { 
         name: "Evening Whispers", 
+        description: "Twilight & Reflective - Quiet purple dusk drifting into dusk",
         chords: [
-            [220.00, 261.63, 329.63, 493.88], // Am9
-            [174.61, 220.00, 261.63, 392.00], // Fmaj9
-            [261.63, 329.63, 392.00, 493.88], // Cmaj7
-            [164.81, 207.65, 246.94, 293.66]  // E7
+            [110.00, 220.00, 261.63, 329.63, 493.88], // Am9
+            [174.61, 220.00, 261.63, 329.63, 392.00], // Fmaj9
+            [146.83, 174.61, 220.00, 261.63],         // Dm7
+            [196.00, 246.94, 293.66, 349.23],         // G7
+            [130.81, 196.00, 261.63, 329.63, 493.88], // Cmaj7
+            [174.61, 220.00, 261.63, 329.63],         // Fmaj7
+            [123.47, 174.61, 220.00, 293.66],         // Bm7b5
+            [164.81, 220.00, 246.94, 293.66]          // E7sus4
         ],
-        speed: 2800, stepSpeed: 350, padOsc: 'sine', leadOsc: 'sine'
+        speed: 5600, stepSpeed: 450, padOsc: 'sine', leadOsc: 'sine'
     },
     { 
-        name: "Wandering Spirits", 
+        name: "Wandering Clouds", 
+        description: "Meditative & Weightless - Drifting slowly across vast cumulus banks",
         chords: [
-            [261.63, 329.63, 392.00, 523.25], // C
-            [174.61, 220.00, 261.63, 349.23], // F
-            [196.00, 246.94, 293.66, 392.00], // G
-            [220.00, 261.63, 329.63, 440.00]  // Am
+            [146.83, 220.00, 293.66, 369.99, 440.00], // Dmaj7
+            [138.59, 220.00, 277.18, 329.63],         // A/C#
+            [123.47, 185.00, 246.94, 293.66, 369.99], // Bm9
+            [185.00, 220.00, 277.18, 369.99],         // F#m7
+            [196.00, 246.94, 293.66, 369.99, 440.00], // Gmaj9
+            [185.00, 220.00, 293.66, 369.99],         // D/F#
+            [164.81, 196.00, 246.94, 293.66, 369.99], // Em9
+            [110.00, 220.00, 293.66, 329.63]          // Asus4
         ],
-        speed: 2000, stepSpeed: 250, padOsc: 'triangle', leadOsc: 'triangle'
+        speed: 5000, stepSpeed: 400, padOsc: 'sine', leadOsc: 'sine'
     },
     { 
         name: "Star Ocean", 
+        description: "Cosmic & Ethereal - Infinite starlit deep space flight",
         chords: [
-            [293.66, 369.99, 440.00, 554.37], // Dmaj7
-            [220.00, 277.18, 329.63, 415.30], // Amaj7
-            [246.94, 293.66, 369.99, 440.00], // Bm7
-            [196.00, 246.94, 293.66, 369.99]  // Gmaj7
+            [82.41, 164.81, 196.00, 246.94, 293.66, 369.99], // Em9
+            [98.00, 196.00, 246.94, 293.66, 369.99],         // Gmaj7
+            [130.81, 196.00, 246.94, 261.63, 293.66],        // Cmaj9
+            [110.00, 164.81, 220.00, 261.63, 293.66],        // Am9
+            [123.47, 185.00, 246.94, 293.66, 369.99],        // Bm7
+            [130.81, 196.00, 261.63, 329.63],                // Cmaj7
+            [146.83, 220.00, 246.94, 293.66, 369.99],        // D6
+            [82.41, 164.81, 196.00, 246.94, 293.66]          // Em7
         ],
-        speed: 4000, stepSpeed: 500, padOsc: 'sine', leadOsc: 'triangle'
+        speed: 6400, stepSpeed: 500, padOsc: 'sine', leadOsc: 'triangle'
     },
     { 
         name: "Floating Islands", 
+        description: "Ancient & Mystical - Soaring between lush mystical plateaus",
         chords: [
-            [207.65, 261.63, 311.13, 392.00], // Abmaj7
-            [233.08, 293.66, 349.23, 440.00], // Bbmaj7
-            [261.63, 329.63, 392.00, 493.88], // Cmaj7
-            [261.63, 329.63, 392.00, 493.88]  // Cmaj7
+            [103.83, 207.65, 261.63, 311.13, 392.00], // Abmaj7
+            [87.31, 174.61, 207.65, 261.63, 311.13, 349.23], // Fm9
+            [116.54, 174.61, 233.08, 277.18, 349.23], // Bbm7
+            [77.78, 155.56, 207.65, 233.08, 277.18],  // Eb7sus4
+            [138.59, 207.65, 261.63, 277.18, 311.13], // Dbmaj9
+            [130.81, 196.00, 261.63, 311.13],         // Cm7
+            [116.54, 174.61, 233.08, 261.63, 277.18], // Bbm9
+            [77.78, 155.56, 196.00, 233.08, 277.18]   // Eb7
         ],
-        speed: 4500, stepSpeed: 500, padOsc: 'triangle', leadOsc: 'sine'
+        speed: 6000, stepSpeed: 500, padOsc: 'sine', leadOsc: 'sine'
     },
     { 
-        name: "Mystic Journey", 
+        name: "Mystic Horizon", 
+        description: "Velvet Midnight - Moonlit calm flight over sleeping seas",
         chords: [
-            [196.00, 233.08, 293.66, 349.23], // Gm7
-            [174.61, 220.00, 261.63, 329.63], // Fmaj7
-            [155.56, 196.00, 233.08, 293.66], // Ebmaj7
-            [146.83, 185.00, 220.00, 293.66]  // D7
+            [98.00, 196.00, 233.08, 293.66, 349.23, 392.00], // Gm9
+            [77.78, 155.56, 196.00, 233.08, 293.66, 349.23], // Ebmaj9
+            [116.54, 174.61, 233.08, 293.66, 349.23],        // Bbmaj7
+            [87.31, 174.61, 233.08, 261.63, 349.23],         // Fsus4
+            [130.81, 196.00, 233.08, 261.63, 293.66, 311.13], // Cm9
+            [146.83, 174.61, 220.00, 261.63],                 // Dm7
+            [155.56, 196.00, 233.08, 293.66],                 // Ebmaj7
+            [146.83, 196.00, 220.00, 261.63]                  // D7sus4
         ],
-        speed: 3600, stepSpeed: 450, padOsc: 'sine', leadOsc: 'triangle'
+        speed: 5400, stepSpeed: 450, padOsc: 'sine', leadOsc: 'triangle'
     },
     { 
-        name: "Gentle Breeze", 
+        name: "Gentle Aurora", 
+        description: "Crystalline Glow - Calming polar light dancing across high clouds",
         chords: [
-            [329.63, 415.30, 493.88, 622.25], // Emaj7
-            [277.18, 349.23, 415.30, 554.37], // Dbmaj7
-            [246.94, 311.13, 369.99, 493.88], // Bmaj7
-            [220.00, 277.18, 329.63, 440.00]  // Amaj7
+            [82.41, 164.81, 246.94, 311.13, 329.63, 369.99], // Emaj9
+            [103.83, 207.65, 246.94, 311.13, 369.99],         // G#m7
+            [138.59, 164.81, 207.65, 246.94, 277.18, 311.13], // C#m9
+            [110.00, 164.81, 220.00, 277.18, 311.13, 329.63], // Amaj9
+            [92.50, 185.00, 220.00, 277.18, 329.63],          // F#m9
+            [103.83, 207.65, 246.94, 311.13],                 // G#m7
+            [110.00, 220.00, 277.18, 329.63],                 // Amaj7
+            [123.47, 185.00, 246.94, 277.18, 329.63]          // Bsus4
         ],
-        speed: 3000, stepSpeed: 300, padOsc: 'sine', leadOsc: 'sine'
+        speed: 5800, stepSpeed: 450, padOsc: 'sine', leadOsc: 'sine'
     }
 ];
 
@@ -100,10 +141,10 @@ export class AmbientMusicEngine {
         this.arpIndex = 0;
         
         this.arpPatterns = [
-            [0, 1, 2, 3, 2, 1],
-            [0, 2, 1, 3, 2, 3],
-            [0, 1, 2, 1],
-            [1, 2, 3, 2]
+            [0, 1, 2, 3, 4, 3, 2, 1],
+            [0, 2, 1, 3, 2, 4, 3, 1],
+            [0, 1, 3, 2, 4, 2, 3, 1],
+            [0, 2, 4, 3, 2, 1, 0, 2]
         ];
     }
 
@@ -118,20 +159,20 @@ export class AmbientMusicEngine {
 
         const delayL = this.audioCtx.createDelay(1.0);
         const delayR = this.audioCtx.createDelay(1.0);
-        delayL.delayTime.value = 0.38;
-        delayR.delayTime.value = 0.53;
+        delayL.delayTime.value = 0.42;
+        delayR.delayTime.value = 0.63;
 
         const filterL = this.audioCtx.createBiquadFilter();
         const filterR = this.audioCtx.createBiquadFilter();
         filterL.type = 'lowpass';
         filterR.type = 'lowpass';
-        filterL.frequency.value = 1200;
-        filterR.frequency.value = 1000;
+        filterL.frequency.value = 750;
+        filterR.frequency.value = 650;
 
         const feedbackL = this.audioCtx.createGain();
         const feedbackR = this.audioCtx.createGain();
-        feedbackL.gain.value = 0.42;
-        feedbackR.gain.value = 0.38;
+        feedbackL.gain.value = 0.45;
+        feedbackR.gain.value = 0.40;
 
         input.connect(delayL);
         input.connect(delayR);
@@ -160,16 +201,19 @@ export class AmbientMusicEngine {
         filter.type = 'lowpass';
         
         if (isPad) {
-            filter.frequency.value = 600;
+            filter.frequency.setValueAtTime(360, time);
+            filter.Q.setValueAtTime(0.7, time);
             env.gain.setValueAtTime(0, time);
-            env.gain.linearRampToValueAtTime(0.04, time + duration * 0.4);
-            env.gain.linearRampToValueAtTime(0.001, time + duration);
+            env.gain.linearRampToValueAtTime(0.045, time + Math.min(2.0, duration * 0.4));
+            env.gain.linearRampToValueAtTime(0.0001, time + duration);
         } else {
-            filter.frequency.setValueAtTime(1200, time);
-            filter.frequency.exponentialRampToValueAtTime(400, time + duration);
+            // Warm, mellow acoustic music-box tone without piercing high frequencies
+            filter.frequency.setValueAtTime(550, time);
+            filter.frequency.exponentialRampToValueAtTime(240, time + duration);
+            filter.Q.setValueAtTime(0.8, time);
             env.gain.setValueAtTime(0, time);
-            env.gain.linearRampToValueAtTime(0.1, time + 0.05);
-            env.gain.exponentialRampToValueAtTime(0.001, time + duration);
+            env.gain.linearRampToValueAtTime(0.07, time + 0.06);
+            env.gain.exponentialRampToValueAtTime(0.0005, time + duration);
         }
         
         osc.connect(filter);
@@ -199,8 +243,9 @@ export class AmbientMusicEngine {
         while (this.nextNoteTime < this.audioCtx.currentTime + 0.2) {
             if (this.sequenceTime % track.speed === 0) {
                 const chord = track.chords[this.chordIndex % track.chords.length];
-                chord.forEach(freq => {
-                    this.playNote(freq / 2, this.nextNoteTime, track.speed / 1000 * 1.5, track.padOsc, true);
+                chord.forEach((freq, idx) => {
+                    const octaveDiv = (idx === 0) ? 2 : 1;
+                    this.playNote(freq / octaveDiv, this.nextNoteTime, track.speed / 1000 * 1.35, track.padOsc, true);
                 });
             }
             
@@ -208,13 +253,13 @@ export class AmbientMusicEngine {
             const pattern = this.arpPatterns[this.chordIndex % this.arpPatterns.length];
             
             if (this.sequenceTime % track.stepSpeed === 0) {
-                const arpFreq = chord[pattern[this.arpIndex % pattern.length]] * 2;
-                this.playNote(arpFreq, this.nextNoteTime, track.stepSpeed / 1000 * 2.0, track.leadOsc, false);
+                const noteFreq = chord[pattern[this.arpIndex % pattern.length] % chord.length];
+                this.playNote(noteFreq, this.nextNoteTime, track.stepSpeed / 1000 * 2.2, track.leadOsc, false);
                 this.arpIndex++;
                 
-                if (Math.random() > 0.7) {
-                    const melFreq = chord[Math.floor(Math.random() * chord.length)] * 4;
-                    this.playNote(melFreq, this.nextNoteTime, track.speed / 1000 * 0.8, track.leadOsc, false);
+                if (Math.random() > 0.72) {
+                    const melFreq = chord[Math.floor(Math.random() * chord.length)];
+                    this.playNote(melFreq, this.nextNoteTime, track.stepSpeed / 1000 * 3.5, track.leadOsc, false);
                 }
             }
             
