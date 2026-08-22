@@ -93,11 +93,9 @@ canvas { display: block; touch-action: none; }
   width: 96px;
   height: 96px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
   border: 1.5px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
   pointer-events: auto;
   touch-action: none;
 }
@@ -109,12 +107,10 @@ canvas { display: block; touch-action: none; }
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.45);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transform: translate(-50%, -50%);
   pointer-events: none;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
 }
 
 #boost-btn {
@@ -191,9 +187,7 @@ canvas { display: block; touch-action: none; }
   max-height: calc(100vh - 78px) !important;
   overflow-y: auto !important;
   border-radius: 12px !important;
-  background: rgba(18, 22, 32, 0.92) !important;
-  backdrop-filter: blur(16px) !important;
-  -webkit-backdrop-filter: blur(16px) !important;
+  background: rgba(15, 20, 28, 0.96) !important;
   border: 1px solid rgba(255, 255, 255, 0.15) !important;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6) !important;
   z-index: 95 !important;

@@ -16,3 +16,13 @@ public/assets/skybox/Untitled-1.png
 __pycache__/
 *.pyc
 *.pyo
+.vite/
+external/
+ez-tree/
+public/assets/skybox/milkyway_16k.*
+public/assets/skybox/milkyway_8k.*
+assets/skybox/milkyway_16k.*
+assets/skybox/milkyway_8k.*
+
+
+

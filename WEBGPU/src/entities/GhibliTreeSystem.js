@@ -1,37 +1,10 @@
-// Ghibli Biome Tree System
+// Unified Procedural Tree & Foliage System
 // =========================================================================================
-// Procedural, instanced, LOD'd placement of the three Background_Tree_Atlas cards.
-//
-// WHY THIS IS A NEW MODULE RATHER THAN AN EXTENSION OF THE PINE SYSTEM
-//
-// The existing pine recycler in main.js places trees with rejection sampling driven by
-// Math.random(): up to 14 attempts per instance, capped at 60 attempts per frame across all
-// ten species. That has three structural problems this system avoids:
-//
-//   1. It is not deterministic. Fly away and come back and the forest is different, so trees
-//      visibly pop into new places.
-//   2. It is starved. The per-frame attempt cap means dense forest fills in slowly enough to
-//      watch it happen.
-//   3. It is expensive. Every rejected attempt still pays for getWorldHeight, getBiomeAt and
-//      getPathStrength -- the same heavy noise chain the terrain rebuild uses.
-//
-// Instead, placement here is a pure function of world position: hash the cell coordinates,
-// get the same trees back every time, forever. No sampling loop, no popping, and minimum
-// spacing comes free from the cell size rather than from a neighbour search.
-//
-// ASSET NOTES (verified by inspecting the GLBs)
-//
-//   - 36-109 triangles each. Geometry is a non-issue; ten thousand of these is 700K tris.
-//     The real cost is FILL RATE from double-sided alpha-masked overdraw, which is why the
-//     LOD bands below cut fragment work rather than triangles.
-//   - All three files embed BYTE-IDENTICAL textures (base colour md5 5ae66749...). Loaded
-//     naively that is 9 uploads of 1024x1024 instead of 1. We share one.
-//   - Normal and roughness maps do nothing under a toon material, which quantises lighting to
-//     a gradient ramp. Both are dropped, along with the TANGENT attribute that only existed
-//     to support them.
-//   - Every mesh already carries a custom `_IS_CANOPY` vertex attribute (0 = trunk, 1 = canopy).
-//     GLTFLoader lowercases unknown attributes, so it arrives as `_is_canopy`. That is the
-//     trunk/canopy split, supplied by the artist -- no geometry surgery needed.
+// Multi-species, instanced, LOD-managed placement supporting:
+// - Tier 1 Desktop (Default), Tier 2 Mobile, Tier 3 Flight Ultra
+// - Full Tree Catalog: Pines, Pines Unreal Pack, Broadleaf/Aspen, Oaks, Ghibli Atlas Cards (001-010), Palms & Custom Slot
+// - Independent per-species toggles & placement parameters (Density, Elevation Min/Max, Slope, Scale)
+// - Real-time hot-reload / respawn in the flight world
 
 import * as THREE from 'three';
 import { MeshToonNodeMaterial } from 'three/webgpu';
@@ -40,29 +13,398 @@ import {
     smoothstep, positionLocal, positionGeometry, modelWorldMatrix, fract, sin, cos, max
 } from 'three/tsl';
 
-const TREE_FILES = [
-    { key: 'ghibli_bg_001', path: 'assets/Trees/Ghibli/Background_Tree_Atlas_001_alt.glb', targetHeight: 17.0 },
-    { key: 'ghibli_bg_002', path: 'assets/Trees/Ghibli/Background_Tree_Atlas_002_alt.glb', targetHeight: 12.0 },
-    { key: 'ghibli_bg_003', path: 'assets/Trees/Ghibli/Background_Tree_Atlas_003_alt.glb', targetHeight: 13.5 }
+// Available Quality Tiers
+export const QUALITY_TIERS = {
+    DESKTOP: 'Tier1_Desktop',
+    MOBILE: 'Tier2_Mobile',
+    FLIGHT_ULTRA: 'Tier3_Flight_Ultra'
+};
+
+// Master Tree Species Catalog
+export const DEFAULT_SPECIES_CATALOG = [
+    // --- 1. TIER OPTIMIZED PINES (Default Active) ---
+    {
+        key: 'Pine_Large_1',
+        name: 'Pine Large 1',
+        category: 'Pines',
+        type: 'tier',
+        enabled: true,
+        height: 22.0,
+        density: 1.0,
+        minElev: 10.0,
+        maxElev: 110.0,
+        maxSlope: 0.85,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Large_2',
+        name: 'Pine Large 2',
+        category: 'Pines',
+        type: 'tier',
+        enabled: true,
+        height: 17.0,
+        density: 1.0,
+        minElev: 8.0,
+        maxElev: 95.0,
+        maxSlope: 0.80,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Medium',
+        name: 'Pine Medium',
+        category: 'Pines',
+        type: 'tier',
+        enabled: true,
+        height: 15.0,
+        density: 1.0,
+        minElev: 6.8,
+        maxElev: 85.0,
+        maxSlope: 0.75,
+        scale: 1.0
+    },
+
+    // --- 2. PINES PACK (Unreal Extract) ---
+    {
+        key: 'Pine_Tall_01',
+        name: 'Pine Tall 01',
+        category: 'Pines Pack',
+        type: 'pack',
+        packFolder: 'assets/Trees/Pines_Pack/Pine_Tall_01',
+        enabled: true,
+        height: 24.0,
+        density: 0.9,
+        minElev: 10.0,
+        maxElev: 115.0,
+        maxSlope: 0.85,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Tall_02',
+        name: 'Pine Tall 02',
+        category: 'Pines Pack',
+        type: 'pack',
+        packFolder: 'assets/Trees/Pines_Pack/Pine_Tall_02',
+        enabled: false,
+        height: 22.0,
+        density: 0.9,
+        minElev: 10.0,
+        maxElev: 110.0,
+        maxSlope: 0.85,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Mid_01',
+        name: 'Pine Mid 01',
+        category: 'Pines Pack',
+        type: 'pack',
+        packFolder: 'assets/Trees/Pines_Pack/Pine_Mid_01',
+        enabled: true,
+        height: 16.0,
+        density: 0.9,
+        minElev: 8.0,
+        maxElev: 90.0,
+        maxSlope: 0.80,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Small_01',
+        name: 'Pine Small 01',
+        category: 'Pines Pack',
+        type: 'pack',
+        packFolder: 'assets/Trees/Pines_Pack/Pine_Small_01',
+        enabled: false,
+        height: 10.0,
+        density: 0.8,
+        minElev: 6.8,
+        maxElev: 75.0,
+        maxSlope: 0.70,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Dead_01',
+        name: 'Pine Dead 01',
+        category: 'Pines Pack',
+        type: 'pack',
+        packFolder: 'assets/Trees/Pines_Pack/Pine_Dead_01',
+        enabled: false,
+        height: 15.0,
+        density: 0.3,
+        minElev: 15.0,
+        maxElev: 120.0,
+        maxSlope: 0.90,
+        scale: 1.0
+    },
+
+    // --- 3. BROADLEAF & ASPEN ---
+    {
+        key: 'Aspen_Large_1',
+        name: 'Aspen Large 1',
+        category: 'Broadleaf',
+        type: 'tier',
+        enabled: true,
+        height: 20.0,
+        density: 0.8,
+        minElev: 6.5,
+        maxElev: 52.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Aspen_Large_2',
+        name: 'Aspen Large 2',
+        category: 'Broadleaf',
+        type: 'tier',
+        enabled: false,
+        height: 20.0,
+        density: 0.8,
+        minElev: 6.5,
+        maxElev: 52.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ash_Large',
+        name: 'Ash Large',
+        category: 'Broadleaf',
+        type: 'tier',
+        enabled: true,
+        height: 18.0,
+        density: 0.8,
+        minElev: 6.5,
+        maxElev: 48.0,
+        maxSlope: 0.50,
+        scale: 1.0
+    },
+    {
+        key: 'Ash_Medium',
+        name: 'Ash Medium',
+        category: 'Broadleaf',
+        type: 'tier',
+        enabled: false,
+        height: 14.0,
+        density: 0.8,
+        minElev: 6.5,
+        maxElev: 45.0,
+        maxSlope: 0.50,
+        scale: 1.0
+    },
+
+    // --- 4. OAKS ---
+    {
+        key: 'Oak_Large_1',
+        name: 'Oak Large 1',
+        category: 'Oaks',
+        type: 'tier',
+        enabled: true,
+        height: 19.0,
+        density: 0.7,
+        minElev: 5.5,
+        maxElev: 42.0,
+        maxSlope: 0.45,
+        scale: 1.0
+    },
+    {
+        key: 'Oak_Large_2',
+        name: 'Oak Large 2',
+        category: 'Oaks',
+        type: 'tier',
+        enabled: false,
+        height: 19.0,
+        density: 0.7,
+        minElev: 5.5,
+        maxElev: 42.0,
+        maxSlope: 0.45,
+        scale: 1.0
+    },
+
+    // --- 5. GHIBLI ATLAS BACKGROUND CARDS ---
+    {
+        key: 'Ghibli_Card_001',
+        name: 'Ghibli Atlas 001',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_001_alt.glb',
+        enabled: false,
+        height: 17.0,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ghibli_Card_002',
+        name: 'Ghibli Atlas 002',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_002_alt.glb',
+        enabled: false,
+        height: 12.0,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ghibli_Card_003',
+        name: 'Ghibli Atlas 003',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_003_alt.glb',
+        enabled: false,
+        height: 13.5,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ghibli_Card_004',
+        name: 'Ghibli Atlas 004',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_004_alt.glb',
+        enabled: false,
+        height: 14.0,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ghibli_Card_005',
+        name: 'Ghibli Atlas 005',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_005_alt.glb',
+        enabled: false,
+        height: 15.0,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+    {
+        key: 'Ghibli_Card_006',
+        name: 'Ghibli Atlas 006',
+        category: 'Ghibli Cards',
+        type: 'direct',
+        path: 'assets/Trees/Ghibli/Background_Tree_Atlas_006_alt.glb',
+        enabled: false,
+        height: 16.0,
+        density: 0.6,
+        minElev: 6.8,
+        maxElev: 55.0,
+        maxSlope: 0.55,
+        scale: 1.0
+    },
+
+    // --- 6. ADDITIONAL STYLIZED WORKING MODELS ---
+    {
+        key: 'Pine_Ghibli_02',
+        name: 'Pine Ghibli 02',
+        category: 'Additional Pines',
+        type: 'direct',
+        path: 'assets/Trees/Working Folder/Pine_Ghibli_02.glb',
+        enabled: false,
+        height: 16.0,
+        density: 0.8,
+        minElev: 8.0,
+        maxElev: 80.0,
+        maxSlope: 0.70,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Stylized_03',
+        name: 'Pine Stylized 03',
+        category: 'Additional Pines',
+        type: 'direct',
+        path: 'assets/Trees/Working Folder/Pine_Stylized_03_Tree.glb',
+        enabled: false,
+        height: 15.0,
+        density: 0.8,
+        minElev: 8.0,
+        maxElev: 80.0,
+        maxSlope: 0.70,
+        scale: 1.0
+    },
+    {
+        key: 'Pine_Model_A_2',
+        name: 'Pine Model A2',
+        category: 'Additional Pines',
+        type: 'direct',
+        path: 'assets/Trees/Working Folder/Pine model  A (2).glb',
+        enabled: false,
+        height: 16.0,
+        density: 0.8,
+        minElev: 8.0,
+        maxElev: 80.0,
+        maxSlope: 0.70,
+        scale: 1.0
+    },
+
+    // --- 7. PALMS & EXOTICS ---
+    {
+        key: 'Palm_Tropical_01',
+        name: 'Palm Tropical 01',
+        category: 'Palms & Exotics',
+        type: 'direct',
+        path: 'assets/Trees/Working Folder/Palm_Tropical_01.glb',
+        enabled: false,
+        height: 12.0,
+        density: 0.5,
+        minElev: 2.0,
+        maxElev: 18.0,
+        maxSlope: 0.35,
+        scale: 1.0
+    },
+    {
+        key: 'Realistic_Baobab',
+        name: 'Baobab Tree',
+        category: 'Palms & Exotics',
+        type: 'direct',
+        path: 'assets/Trees/01/realistic_baobab_tree.glb',
+        enabled: false,
+        height: 20.0,
+        density: 0.3,
+        minElev: 4.0,
+        maxElev: 28.0,
+        maxSlope: 0.30,
+        scale: 1.0
+    },
+
+    // --- 8. CUSTOM USER MODEL SLOT ---
+    {
+        key: 'Custom_Tree_Slot',
+        name: 'Custom Tree Slot',
+        category: 'Custom Slot',
+        type: 'custom',
+        customPath: 'assets/Trees/Working Folder/Pine model  A (4).glb',
+        enabled: false,
+        height: 16.0,
+        density: 1.0,
+        minElev: 6.0,
+        maxElev: 90.0,
+        maxSlope: 0.75,
+        scale: 1.0
+    }
 ];
 
-// LOD bands. Note these differ in MATERIAL, not geometry -- at ~100 triangles a mesh there is
-// nothing worth decimating, and every millisecond is in the fragment stage.
-//
-// Raising alphaTest with distance is the important trick: it discards more fragments earlier,
-// which directly buys back the fill rate alpha-masked foliage costs, and it reduces the shimmer
-// thin alpha edges produce once they are smaller than a pixel.
+// Distance LOD bands
 const LOD_BANDS = [
-    { name: 'near', maxDist: 140,  doubleSided: true,  sway: true,  alphaTest: 0.35 },
-    { name: 'mid',  maxDist: 420,  doubleSided: false, sway: true,  alphaTest: 0.50 },
-    { name: 'far',  maxDist: 1100, doubleSided: false, sway: false, alphaTest: 0.62 }
+    { name: 'near', maxDist: 140,  doubleSided: true,  sway: true,  alphaTest: 0.35, lodIdx: 0 },
+    { name: 'mid',  maxDist: 420,  doubleSided: false, sway: true,  alphaTest: 0.50, lodIdx: 1 },
+    { name: 'far',  maxDist: 1100, doubleSided: false, sway: false, alphaTest: 0.62, lodIdx: 2 }
 ];
 
-const DEFAULT_CELL_SIZE = 34.0;  // world units; also the effective minimum tree spacing
-const REBUILD_DISTANCE = 55.0;   // rebuild the field once the focus has moved this far
-const REBUILD_FRAMES = 18;       // spread one rebuild across this many frames
+const DEFAULT_CELL_SIZE = 34.0;
+const REBUILD_DISTANCE = 55.0;
+const REBUILD_FRAMES = 18;
 
-/** Deterministic 0..1 hash. Same cell always yields the same trees, forever. */
 function cellHash(cx, cz, slot) {
     let h = Math.imul(cx, 374761393) + Math.imul(cz, 668265263) + Math.imul(slot, 2654435761);
     h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -82,107 +424,216 @@ export class GhibliTreeSystem {
         this.getPathStrength = opts.getPathStrength || (() => 0);
         this.densityScale = opts.densityScale !== undefined ? opts.densityScale : 1.0;
 
+        // Active Tier: Desktop is Default!
+        this.tier = opts.tier || QUALITY_TIERS.DESKTOP;
+
         this.ready = false;
         this.enabled = true;
-        this.meshes = [];            // flat list, for visibility toggles
-        this._byVariantBand = [];    // [variantIndex][bandIndex] -> InstancedMesh
+        this.meshes = [];            // flat list of all active InstancedMeshes
+        this._speciesInstances = {}; // key -> [nearMesh, midMesh, farMesh]
+        this._speciesList = JSON.parse(JSON.stringify(DEFAULT_SPECIES_CATALOG));
         this._dummy = new THREE.Object3D();
         this._lastFocusX = Infinity;
         this._lastFocusZ = Infinity;
-        this._walk = null;          // in-flight sliced cell walk, or null
+        this._walk = null;
         this._collected = [];
-        this.lastCounts = { near: 0, mid: 0, far: 0 };
+        this.lastCounts = { near: 0, mid: 0, far: 0, total: 0 };
 
-        // ----- Editable appearance -----
-        // Multiplied against the atlas rather than replacing it, so painted detail survives
-        // while the palette stays fully editable.
+        // Global Appearance & Placement Controls
         this.uCanopyShadow = uniform(new THREE.Color(0x2c5233));
         this.uCanopyLit    = uniform(new THREE.Color(0x6aa34a));
         this.uCanopyTip    = uniform(new THREE.Color(0x9ec96a));
         this.uTrunkBase    = uniform(new THREE.Color(0x3d2b1c));
         this.uTrunkTop     = uniform(new THREE.Color(0x6b4c33));
         this.uTintSpread   = uniform(0.18);
-        this.uAtlasMix     = uniform(0.75);   // 0 = flat palette, 1 = raw atlas colours
+        this.uAtlasMix     = uniform(0.75);
         this.uWindStrength = uniform(1.0);
         this.uTreeScale    = uniform(1.0);
 
-        // Pool sizes per band, scaled by device tier
-        const d = this.densityScale;
-        this.poolSizes = {
-            near: Math.max(24, Math.round(700 * d)),
-            mid:  Math.max(48, Math.round(1600 * d)),
-            far:  Math.max(64, Math.round(2800 * d))
-        };
-
-        // Placement rules — overridable live from the GUI
-        this.minElevation = 6.8;
-        this.maxElevation = 58.0;
-        this.maxSlope = 0.55;
+        // Global Placement Rules
+        this.minElevation = 6.0;
+        this.maxElevation = 110.0;
+        this.maxSlope = 0.85;
         this.density = 1.0;
         this.scaleMul = 1.0;
         this.cellSize = DEFAULT_CELL_SIZE;
+
+        const d = this.densityScale;
+        this.poolSizes = {
+            near: Math.max(32, Math.round(900 * d)),
+            mid:  Math.max(64, Math.round(2000 * d)),
+            far:  Math.max(96, Math.round(3500 * d))
+        };
     }
 
     // ---------------------------------------------------------------------------------
-    // LOADING
+    // SPECIES MANAGEMENT
+    // ---------------------------------------------------------------------------------
+    getSpeciesList() {
+        return this._speciesList;
+    }
+
+    getSpecies(key) {
+        return this._speciesList.find(s => s.key === key);
+    }
+
+    setSpeciesEnabled(key, enabled) {
+        const s = this.getSpecies(key);
+        if (s) {
+            s.enabled = !!enabled;
+            this._updateMeshVisibility(key);
+            this.respawn();
+        }
+    }
+
+    setSpeciesDensity(key, density) {
+        const s = this.getSpecies(key);
+        if (s) {
+            s.density = Math.max(0.0, Math.min(3.0, density));
+            this.respawn();
+        }
+    }
+
+    setSpeciesElevation(key, minElev, maxElev) {
+        const s = this.getSpecies(key);
+        if (s) {
+            if (minElev !== undefined) s.minElev = minElev;
+            if (maxElev !== undefined) s.maxElev = maxElev;
+            this.respawn();
+        }
+    }
+
+    setSpeciesSlope(key, maxSlope) {
+        const s = this.getSpecies(key);
+        if (s) {
+            s.maxSlope = maxSlope;
+            this.respawn();
+        }
+    }
+
+    setSpeciesScale(key, scale) {
+        const s = this.getSpecies(key);
+        if (s) {
+            s.scale = scale;
+            this.respawn();
+        }
+    }
+
+    setCustomTreePath(path, height = 16.0) {
+        const s = this.getSpecies('Custom_Tree_Slot');
+        if (s) {
+            s.customPath = path;
+            s.height = height;
+            this.reload();
+        }
+    }
+
+    setTier(tierName) {
+        if (this.tier === tierName) return;
+        this.tier = tierName;
+        this.reload();
+    }
+
+    _updateMeshVisibility(key) {
+        const s = this.getSpecies(key);
+        const meshes = this._speciesInstances[key];
+        if (meshes && s) {
+            meshes.forEach(m => { m.visible = this.enabled && s.enabled; });
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // LOADING & INSTANCING
     // ---------------------------------------------------------------------------------
     async load() {
-        const gltfs = await Promise.all(TREE_FILES.map(f =>
-            new Promise((res, rej) => this.gltfLoader.load(this.resolveAssetUrl(f.path), res, undefined, rej))
-        ));
+        this.dispose();
 
-        // Share ONE base-colour texture across all three variants. The files embed identical
-        // images, so loading them separately would be 9 uploads of 1024x1024 (~48 MB with
-        // mips) instead of 1 (~5.3 MB).
-        let sharedAtlas = null;
-        for (const gltf of gltfs) {
-            gltf.scene.traverse(c => {
-                if (!sharedAtlas && c.isMesh && c.material && c.material.map) sharedAtlas = c.material.map;
-            });
-            if (sharedAtlas) break;
+        for (const sp of this._speciesList) {
+            try {
+                await this._loadSpecies(sp);
+            } catch (err) {
+                console.warn(`[GhibliTreeSystem] Could not load species ${sp.name}:`, err.message);
+            }
         }
-        if (sharedAtlas) {
-            sharedAtlas.colorSpace = THREE.SRGBColorSpace;
-            sharedAtlas.anisotropy = 4;
-            sharedAtlas.generateMipmaps = true;
-            sharedAtlas.minFilter = THREE.LinearMipmapLinearFilter;
-        }
-        this.atlas = sharedAtlas;
 
-        gltfs.forEach((gltf, vi) => {
-            const geo = this._extractGeometry(gltf, TREE_FILES[vi].targetHeight);
-            if (!geo) return;
-            const row = [];
-            LOD_BANDS.forEach((band) => {
-                const mat = this._buildMaterial(band);
-                const pool = this.poolSizes[band.name];
-                // Split each band's pool across the three variants
-                const count = Math.max(8, Math.round(pool / TREE_FILES.length));
-                const mesh = new THREE.InstancedMesh(geo, mat, count);
-                mesh.name = `${TREE_FILES[vi].key}_${band.name}`;
-                mesh.castShadow = false;         // alpha-masked foliage in a shadow map is
-                mesh.receiveShadow = true;       // expensive and reads as noise at this scale
-                mesh.count = 0;                  // nothing placed yet
-                // Explicit bounding sphere: the mesh is recycled around the player so the
-                // computed one goes stale instantly. Setting it by hand is what lets us keep
-                // frustum culling ON, unlike the pine meshes which switch it off entirely.
-                mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(), band.maxDist + 60);
-                mesh.frustumCulled = false;      // re-enabled once the sphere is positioned
-                this.scene.add(mesh);
-                row.push(mesh);
-                this.meshes.push(mesh);
-            });
-            this._byVariantBand.push(row);
-        });
-
-        this.ready = this._byVariantBand.length > 0;
+        this.ready = Object.keys(this._speciesInstances).length > 0;
         return this.ready;
     }
 
-    /**
-     * Flatten the GLTF into one geometry: bake node transforms, normalise height, drop the
-     * attributes a toon material cannot use, and guarantee `_is_canopy` exists.
-     */
+    async reload() {
+        await this.load();
+        this.respawn();
+    }
+
+    async _loadSpecies(species) {
+        // Resolve LOD URLs for this species
+        const bandUrls = LOD_BANDS.map(band => {
+            if (species.type === 'tier') {
+                return `assets/Trees/${this.tier}/${species.key}/${species.key}_LOD${band.lodIdx}.glb`;
+            } else if (species.type === 'pack') {
+                return `${species.packFolder}/${species.key}_LOD${band.lodIdx}.glb`;
+            } else if (species.type === 'direct') {
+                return species.path;
+            } else if (species.type === 'custom') {
+                return species.customPath || species.path;
+            }
+            return `assets/Trees/${this.tier}/${species.key}/${species.key}_LOD0.glb`;
+        });
+
+        // Load GLTFs
+        const gltfs = await Promise.all(bandUrls.map(url =>
+            new Promise((resolve, reject) => {
+                this.gltfLoader.load(this.resolveAssetUrl(url), resolve, undefined, () => {
+                    // Fallback to Tier 1 Desktop if specific tier missing
+                    const fbUrl = `assets/Trees/Tier1_Desktop/${species.key}/${species.key}_LOD0.glb`;
+                    this.gltfLoader.load(this.resolveAssetUrl(fbUrl), resolve, undefined, reject);
+                });
+            })
+        ));
+
+        // Extract shared atlas
+        let speciesAtlas = null;
+        for (const gltf of gltfs) {
+            gltf.scene.traverse(c => {
+                if (!speciesAtlas && c.isMesh && c.material && c.material.map) {
+                    speciesAtlas = c.material.map;
+                }
+            });
+            if (speciesAtlas) break;
+        }
+
+        if (speciesAtlas) {
+            speciesAtlas.colorSpace = THREE.SRGBColorSpace;
+            speciesAtlas.generateMipmaps = true;
+            speciesAtlas.minFilter = THREE.LinearMipmapLinearFilter;
+        }
+
+        const row = [];
+        LOD_BANDS.forEach((band, bi) => {
+            const gltf = gltfs[bi] || gltfs[0];
+            const geo = this._extractGeometry(gltf, species.height);
+            if (!geo) return;
+
+            const mat = this._buildMaterial(band, speciesAtlas);
+            const pool = Math.max(16, Math.round(this.poolSizes[band.name] / 4));
+            const mesh = new THREE.InstancedMesh(geo, mat, pool);
+
+            mesh.name = `${species.key}_${band.name}`;
+            mesh.castShadow = false;
+            mesh.receiveShadow = true;
+            mesh.count = 0;
+            mesh.visible = this.enabled && species.enabled;
+            mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(), band.maxDist + 60);
+            mesh.frustumCulled = false;
+
+            this.scene.add(mesh);
+            row.push(mesh);
+            this.meshes.push(mesh);
+        });
+
+        this._speciesInstances[species.key] = row;
+    }
+
     _extractGeometry(gltf, targetHeight) {
         gltf.scene.updateMatrixWorld(true);
         let source = null;
@@ -196,21 +647,23 @@ export class GhibliTreeSystem {
         const bb = g.boundingBox;
         const h = bb.max.y - bb.min.y;
         const s = h > 0 ? targetHeight / h : 1.0;
-        g.translate(0, -bb.min.y, 0);   // sit exactly on the ground
+        g.translate(0, -bb.min.y, 0);
         g.scale(s, s, s);
 
-        // TANGENT exists only to support the normal map, which a toon material ignores.
-        // 16 bytes per vertex of pure waste.
         if (g.attributes.tangent) g.deleteAttribute('tangent');
         if (g.attributes.color) g.deleteAttribute('color');
 
-        // GLTFLoader lowercases unknown attributes, so _IS_CANOPY arrives as _is_canopy.
-        // Fall back to "everything above the base is canopy" if a file ever ships without it.
-        if (!g.attributes._is_canopy) {
+        if (!g.attributes._is_canopy && !g.attributes._aisbark) {
             const n = g.attributes.position.count;
             const arr = new Float32Array(n);
             const posArr = g.attributes.position;
             for (let i = 0; i < n; i++) arr[i] = posArr.getY(i) > targetHeight * 0.28 ? 1 : 0;
+            g.setAttribute('_is_canopy', new THREE.BufferAttribute(arr, 1));
+        } else if (g.attributes._aisbark && !g.attributes._is_canopy) {
+            const n = g.attributes._aisbark.count;
+            const arr = new Float32Array(n);
+            const barkArr = g.attributes._aisbark;
+            for (let i = 0; i < n; i++) arr[i] = barkArr.getX(i) > 0.5 ? 0 : 1;
             g.setAttribute('_is_canopy', new THREE.BufferAttribute(arr, 1));
         }
 
@@ -219,10 +672,7 @@ export class GhibliTreeSystem {
         return g;
     }
 
-    // ---------------------------------------------------------------------------------
-    // MATERIAL
-    // ---------------------------------------------------------------------------------
-    _buildMaterial(band) {
+    _buildMaterial(band, speciesAtlas) {
         const mat = new MeshToonNodeMaterial({
             gradientMap: this.gradientMap || undefined,
             side: band.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
@@ -233,38 +683,29 @@ export class GhibliTreeSystem {
         });
 
         const isCanopy = attribute('_is_canopy', 'float');
-        const atlasSample = this.atlas ? texture(this.atlas, uv()) : null;
+        const atlasSample = speciesAtlas ? texture(speciesAtlas, uv()) : null;
 
         mat.colorNode = Fn(() => {
-            const localY = clamp(positionLocal.y.div(16.0), 0.0, 1.0);
+            const localY = clamp(positionLocal.y.div(18.0), 0.0, 1.0);
 
-            // Per-instance hash from the instance's world origin, for subtle tonal variety
-            // between neighbouring trees.
             const origin = modelWorldMatrix.mul(vec4(0.0, 0.0, 0.0, 1.0));
             const instHash = fract(sin(origin.x.mul(12.9898).add(origin.z.mul(78.233))).mul(43758.5453));
             const tint = float(1.0).sub(this.uTintSpread.mul(0.5)).add(instHash.mul(this.uTintSpread));
 
-            // Canopy ramp: shadow at the base of the crown, lit through the middle, bright tips
             const canopyLow = mix(this.uCanopyShadow, this.uCanopyLit, smoothstep(float(0.10), float(0.62), localY));
             const canopyCol = mix(canopyLow, this.uCanopyTip, smoothstep(float(0.58), float(0.98), localY)).mul(tint);
-
-            // Trunk ramp: dark at ground contact, warmer where light reaches it
             const trunkCol = mix(this.uTrunkBase, this.uTrunkTop, smoothstep(float(0.0), float(0.45), localY));
 
             const palette = mix(trunkCol, canopyCol, isCanopy);
-
             if (!atlasSample) return palette;
-            // Multiply, don't replace: the atlas keeps its painted detail while the ramps
-            // above stay fully editable from the GUI.
-            const tinted = atlasSample.rgb.mul(palette).mul(2.0);
+
+            const tinted = atlasSample.rgb.mul(palette).mul(1.8);
             return mix(palette, tinted, this.uAtlasMix);
         })();
 
         if (atlasSample) mat.opacityNode = atlasSample.a;
 
         if (band.sway) {
-            // Sway is weighted by _is_canopy AND by height, so trunks stay rigid and only the
-            // crown moves. The whole term is scaled by uWindStrength so it can be turned off.
             mat.positionNode = Fn(() => {
                 const p = positionLocal.toVar();
                 const origin = modelWorldMatrix.mul(vec4(0.0, 0.0, 0.0, 1.0));
@@ -273,10 +714,10 @@ export class GhibliTreeSystem {
                 const w2 = cos(this.uTime.mul(2.6).add(origin.x.mul(0.06)).add(origin.z.mul(0.04))).mul(0.028);
                 const gust = sin(this.uTime.mul(4.0).add(origin.x.mul(0.12))).mul(0.012);
 
-                const heightF = max(0.0, positionGeometry.y).div(16.0);
+                const heightF = max(0.0, positionGeometry.y).div(18.0);
                 const swayAmt = w1.add(w2).add(gust)
                     .mul(heightF.mul(1.5))
-                    .mul(isCanopy)                 // trunk does not move
+                    .mul(isCanopy)
                     .mul(this.uWindStrength);
 
                 p.x.addAssign(swayAmt);
@@ -289,10 +730,9 @@ export class GhibliTreeSystem {
     }
 
     // ---------------------------------------------------------------------------------
-    // PLACEMENT
+    // PROCEDURAL PLACEMENT
     // ---------------------------------------------------------------------------------
-    /** True if a tree may stand here. Same tests the pine system uses, plus a slope check. */
-    _isValidSite(x, z) {
+    _isValidSite(x, z, species) {
         const biome = this.getBiomeAt(x, z);
         if (!biome || !biome.name || !biome.name.includes('Ghibli')) return null;
 
@@ -300,39 +740,35 @@ export class GhibliTreeSystem {
         if (!island || island.mask < 0.35) return null;
 
         const h = this.getWorldHeight(x, z);
-        if (h < this.minElevation || h > this.maxElevation) return null;
+        const minE = species ? Math.max(this.minElevation, species.minElev) : this.minElevation;
+        const maxE = species ? Math.min(this.maxElevation, species.maxElev) : this.maxElevation;
+        if (h < minE || h > maxE) return null;
 
         if (this.getPathStrength(x, z) >= 0.20) return null;
 
-        // Slope: trees should not grow out of cliff faces. Two taps, not four -- this runs
-        // for every candidate and the island cache makes the neighbours nearly free.
         const hx = this.getWorldHeight(x + 8, z);
         const hz = this.getWorldHeight(x, z + 8);
         const slope = Math.max(Math.abs(hx - h), Math.abs(hz - h)) / 8.0;
-        if (slope > this.maxSlope) return null;
+        const maxS = species ? Math.min(this.maxSlope, species.maxSlope) : this.maxSlope;
+        if (slope > maxS) return null;
 
         return h;
     }
 
-    /**
-     * Visit one cell and append any trees it contains to `out`.
-     * Pure function of (cx, cz) -- the same cell always produces the same trees.
-     */
     _visitCell(cx, cz, focusX, focusZ, maxDistSq, out) {
-        // Cheap circular reject before touching any noise
         const ddx = (cx + 0.5) * this.cellSize - focusX;
         const ddz = (cz + 0.5) * this.cellSize - focusZ;
         const distSq = ddx * ddx + ddz * ddz;
         if (distSq > maxDistSq) return;
 
-        // How many trees this cell wants, from its own hash. Density scales the threshold
-        // rather than the count, so lowering it thins the forest evenly instead of
-        // deleting whole cells.
+        const activeSpecies = this._speciesList.filter(s => s.enabled && this._speciesInstances[s.key]);
+        if (activeSpecies.length === 0) return;
+
         const fill = cellHash(cx, cz, 0);
         const d = this.density;
         let slots = 0;
-        if (fill < 0.62 * d) slots = 1;
-        if (fill < 0.34 * d) slots = 2;
+        if (fill < 0.65 * d) slots = 1;
+        if (fill < 0.35 * d) slots = 2;
         if (fill < 0.12 * d) slots = 3;
         if (slots <= 0) return;
 
@@ -342,50 +778,33 @@ export class GhibliTreeSystem {
             const x = (cx + jx) * this.cellSize;
             const z = (cz + jz) * this.cellSize;
 
-            const h = this._isValidSite(x, z);
-            if (h === null) continue;
-
             const r = cellHash(cx, cz, s * 3 + 3);
-            // Species from a low-frequency field, so you get groves of one type rather
-            // than an even shuffle of all three. 18% mixed undergrowth breaks up the edges.
             const grove = Math.sin(x * 0.0016) * Math.cos(z * 0.0013);
-            let variant;
-            if (r < 0.18) variant = Math.floor(cellHash(cx, cz, s * 3 + 4) * TREE_FILES.length);
-            // Thresholds are the measured 33/67 quantiles of sin*cos, so the three species get
-            // equal share globally. Locally the field still favours one, which is the point --
-            // that is what makes groves instead of an even shuffle.
-            else variant = grove < -0.2097 ? 0 : (grove < 0.2093 ? 1 : 2);
-            variant = Math.min(TREE_FILES.length - 1, Math.max(0, variant));
+            const spIdx = Math.floor(Math.abs(grove + r * 0.5) * activeSpecies.length) % activeSpecies.length;
+            const chosenSpecies = activeSpecies[spIdx];
+
+            if (r > chosenSpecies.density) continue;
+
+            const h = this._isValidSite(x, z, chosenSpecies);
+            if (h === null) continue;
 
             out.push({
                 x, y: h, z,
-                variant,
+                speciesKey: chosenSpecies.key,
                 rot: r * Math.PI * 2.0,
-                scale: (0.85 + cellHash(cx, cz, s * 3 + 5) * 0.34) * this.scaleMul,
+                scale: (0.85 + cellHash(cx, cz, s * 3 + 5) * 0.34) * this.scaleMul * chosenSpecies.scale,
                 dist: Math.sqrt(distSq)
             });
         }
     }
 
-    /** Full synchronous collection. Used by tooling and tests; the frame path slices it. */
-    _collectCandidates(focusX, focusZ) {
-        const maxDist = LOD_BANDS[LOD_BANDS.length - 1].maxDist;
-        const R = Math.ceil(maxDist / this.cellSize);
-        const baseCX = Math.floor(focusX / this.cellSize);
-        const baseCZ = Math.floor(focusZ / this.cellSize);
-        const out = [];
-        for (let dz = -R; dz <= R; dz++)
-            for (let dx = -R; dx <= R; dx++)
-                this._visitCell(baseCX + dx, baseCZ + dz, focusX, focusZ, maxDist * maxDist, out);
-        return out;
-    }
-
-    /** Write the collected candidates into the right InstancedMesh for their distance band. */
     _commit(focusX, focusZ) {
-        const perMeshCount = this._byVariantBand.map(row => row.map(() => 0));
-        const dummy = this._dummy;
+        const perMeshCount = {};
+        Object.keys(this._speciesInstances).forEach(k => {
+            perMeshCount[k] = [0, 0, 0];
+        });
 
-        // Nearest first, so if a pool overflows it is the far trees that get dropped
+        const dummy = this._dummy;
         this._collected.sort((a, b) => a.dist - b.dist);
 
         for (const c of this._collected) {
@@ -395,48 +814,44 @@ export class GhibliTreeSystem {
             }
             if (band < 0) continue;
 
-            const row = this._byVariantBand[c.variant];
-            if (!row) continue;
-            const mesh = row[band];
+            const meshes = this._speciesInstances[c.speciesKey];
+            if (!meshes) continue;
+            const mesh = meshes[band];
             if (!mesh) continue;
 
-            const idx = perMeshCount[c.variant][band];
-            if (idx >= mesh.instanceMatrix.count) continue;   // pool full; drop the farthest
+            const idx = perMeshCount[c.speciesKey][band];
+            if (idx >= mesh.instanceMatrix.count) continue;
 
             dummy.position.set(c.x, c.y, c.z);
             dummy.rotation.set(0, c.rot, 0);
             dummy.scale.setScalar(c.scale);
             dummy.updateMatrix();
             mesh.setMatrixAt(idx, dummy.matrix);
-            perMeshCount[c.variant][band] = idx + 1;
+            perMeshCount[c.speciesKey][band] = idx + 1;
         }
 
-        const counts = { near: 0, mid: 0, far: 0 };
-        this._byVariantBand.forEach((row, vi) => {
-            row.forEach((mesh, bi) => {
-                mesh.count = perMeshCount[vi][bi];
+        const counts = { near: 0, mid: 0, far: 0, total: 0 };
+        Object.keys(this._speciesInstances).forEach(key => {
+            const meshes = this._speciesInstances[key];
+            meshes.forEach((mesh, bi) => {
+                mesh.count = perMeshCount[key][bi];
                 mesh.instanceMatrix.needsUpdate = true;
-                // Keep the bounding sphere centred on the focus so culling stays correct
                 mesh.boundingSphere.center.set(focusX, 0, focusZ);
                 mesh.boundingSphere.radius = LOD_BANDS[bi].maxDist + 60;
                 mesh.frustumCulled = true;
                 counts[LOD_BANDS[bi].name] += mesh.count;
+                counts.total += mesh.count;
             });
         });
         this.lastCounts = counts;
     }
 
     // ---------------------------------------------------------------------------------
-    // PER-FRAME
+    // PER-FRAME UPDATE
     // ---------------------------------------------------------------------------------
     update(focusX, focusZ) {
         if (!this.ready || !this.enabled) return;
 
-        // ---- Continue an in-flight walk before considering a new one ----
-        // Collection is the expensive half (it calls the same noise chain the terrain rebuild
-        // uses), so the CELL WALK itself is sliced across frames, not just the buffer write.
-        // A full sweep at this radius is ~30ms in one burst; spread over 18 frames it is ~1.7ms
-        // and never shows up as a hitch.
         if (this._walk) {
             const w = this._walk;
             const perFrame = Math.ceil(w.total / REBUILD_FRAMES);
@@ -450,8 +865,6 @@ export class GhibliTreeSystem {
             w.i = end;
 
             if (w.i >= w.total) {
-                // Commit only once the whole field is known, so the instance buffer is never
-                // shown half-populated.
                 this._commit(w.focusX, w.focusZ);
                 this._walk = null;
             }
@@ -479,10 +892,6 @@ export class GhibliTreeSystem {
         };
     }
 
-    /**
-     * Cell size IS the minimum-spacing guarantee, so the Min Spacing slider maps onto it
-     * directly. Clamped: below ~14 the walk visits far more cells for little visual gain.
-     */
     setCellSize(v) {
         const next = Math.max(14.0, Math.min(90.0, v));
         if (Math.abs(next - this.cellSize) < 0.01) return;
@@ -490,7 +899,6 @@ export class GhibliTreeSystem {
         this.respawn();
     }
 
-    /** Force a full rebuild — used when a placement rule changes from the GUI. */
     respawn() {
         this._lastFocusX = Infinity;
         this._lastFocusZ = Infinity;
@@ -505,8 +913,11 @@ export class GhibliTreeSystem {
 
     setColor(which, hex) {
         const u = {
-            canopyShadow: this.uCanopyShadow, canopyLit: this.uCanopyLit, canopyTip: this.uCanopyTip,
-            trunkBase: this.uTrunkBase, trunkTop: this.uTrunkTop
+            canopyShadow: this.uCanopyShadow,
+            canopyLit: this.uCanopyLit,
+            canopyTip: this.uCanopyTip,
+            trunkBase: this.uTrunkBase,
+            trunkTop: this.uTrunkTop
         }[which];
         if (u) u.value.set(hex);
     }
@@ -517,8 +928,6 @@ export class GhibliTreeSystem {
             if (m.material) m.material.dispose();
         });
         this.meshes.length = 0;
-        this._byVariantBand.length = 0;
+        this._speciesInstances = {};
     }
 }
-
-export { TREE_FILES, LOD_BANDS };

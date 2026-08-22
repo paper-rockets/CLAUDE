@@ -631,7 +631,7 @@ export class GroundFogEditor {
 
         // Apply to scene objects
         if (window.fogGroup) {
-            window.fogGroup.visible = targetCfg.enabled !== false && this.runtimeState.opacity > 0.01;
+            window.fogGroup.visible = false;
             const children = window.fogGroup.children;
             for (let i = 0; i < children.length; i++) {
                 children[i].position.y = 12 + i * this.runtimeState.layerSpacing;
