@@ -1337,31 +1337,42 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     function toggleGUI(show) {
         const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
         if (!guiEl) return;
-        const isCurrentlyHidden = guiEl.style.display === 'none' || guiEl.classList.contains('closed') || (typeof window !== 'undefined' && window.getComputedStyle(guiEl).display === 'none');
-        const isVisible = typeof show === 'boolean' ? show : isCurrentlyHidden;
-        if (isVisible) {
-            gui.open();
+        
+        const isDisplayNone = guiEl.style.display === 'none' || (typeof window !== 'undefined' && window.getComputedStyle(guiEl).display === 'none');
+        const isAccordionClosed = guiEl.classList.contains('closed') || (gui && gui._closed);
+        const isHeightZero = gui && gui.$children && (gui.$children.style.height === '0px' || (guiEl.style.display !== 'none' && gui.$children.clientHeight === 0));
+        
+        const shouldBeVisible = typeof show === 'boolean' ? show : (isDisplayNone || isAccordionClosed || isHeightZero);
+        
+        if (shouldBeVisible) {
             guiEl.style.display = '';
             guiEl.classList.remove('closed');
+            guiEl.classList.remove('transition');
+            if (gui) {
+                gui._closed = false;
+                if (gui.$children) gui.$children.style.height = '';
+                if (gui.$title) gui.$title.setAttribute('aria-expanded', 'true');
+                if (typeof gui.foldersRecursive === 'function') {
+                    gui.foldersRecursive().forEach(f => {
+                        if (f && f.domElement) f.domElement.classList.remove('transition');
+                        if (f && f.$children && !f._closed) f.$children.style.height = '';
+                    });
+                }
+            }
         } else {
-            gui.close();
             guiEl.style.display = 'none';
+            guiEl.classList.remove('transition');
+            if (gui && gui.$children) {
+                gui.$children.style.height = '';
+            }
         }
-        params.showGUI = isVisible;
+        params.showGUI = shouldBeVisible;
         
         const cogBtn = document.getElementById('gui-toggle-btn');
         if (cogBtn) {
-            cogBtn.style.opacity = isVisible ? '1' : '0.85';
-            cogBtn.style.transform = isVisible ? 'rotate(45deg)' : 'none';
+            cogBtn.style.opacity = shouldBeVisible ? '1' : '0.85';
+            cogBtn.style.transform = shouldBeVisible ? 'rotate(45deg)' : 'none';
         }
-    }
-
-    if (gui && typeof gui.onOpenClose === 'function') {
-        gui.onOpenClose((changedGui) => {
-            if (changedGui === gui && gui._closed) {
-                toggleGUI(false);
-            }
-        });
     }
 
     debugFolder.add(params, 'showGUI').name('Settings Panel').onChange(v => toggleGUI(v));
@@ -1375,8 +1386,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
     toggleGUI(false);
 
     function openOceanInGui() {
-        const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
-        if (guiEl) guiEl.style.display = '';
+        toggleGUI(true);
         if (animeWaterGUI && animeWaterGUI.gui) {
             animeWaterGUI.gui.open();
             animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -4542,10 +4552,7 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         if(e.key === 'Shift') keys.shift = true;
         if(e.key === ' ') keys.space = true;
         if(e.key.toLowerCase() === 'h') {
-            uiVisible = !uiVisible;
-            if (typeof gui !== 'undefined') gui.domElement.style.display = uiVisible ? 'block' : 'none';
-            
-
+            toggleGUI();
         }
         if(e.key.toLowerCase() === 'v') {
             isModelVisible = !isModelVisible;
@@ -6458,9 +6465,8 @@ import { postProcessing as composer, scenePass, initPostProcessing, bloomPass, g
         // 9. Ocean & Water Subfolder
         const oceanFolder = envFolder.addFolder('Ocean & Water');
         oceanFolder.add({ openOceanFolder: () => {
+            toggleGUI(true);
             if (animeWaterGUI && animeWaterGUI.gui) {
-                const guiEl = document.querySelector('.lil-gui.root') || (gui && gui.domElement);
-                if (guiEl) guiEl.style.display = '';
                 animeWaterGUI.gui.open();
                 animeWaterGUI.gui.domElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
