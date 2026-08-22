@@ -70,8 +70,17 @@ function classify() {
 
 let _forcedTier = null;
 try {
-    const saved = localStorage.getItem('wl_forceTier');
-    if (saved && PIXEL_BUDGET[saved]) _forcedTier = saved;
+    const urlParams = typeof window !== 'undefined' && window.location ? new URLSearchParams(window.location.search) : null;
+    if (urlParams && urlParams.has('tier') && PIXEL_BUDGET[urlParams.get('tier')]) {
+        _forcedTier = urlParams.get('tier');
+    } else if (urlParams && urlParams.has('mobile')) {
+        _forcedTier = TIER.MOBILE;
+    } else if (typeof window !== 'undefined' && window.self !== window.top) {
+        _forcedTier = TIER.MOBILE;
+    } else {
+        const saved = localStorage.getItem('wl_forceTier');
+        if (saved && PIXEL_BUDGET[saved]) _forcedTier = saved;
+    }
 } catch (e) { /* private browsing */ }
 
 export const deviceTier = _forcedTier || classify();

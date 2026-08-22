@@ -43,38 +43,32 @@
       user-select: none; pointer-events: auto;
       box-shadow: 0 4px 16px rgba(0,0,0,0.4);
       backdrop-filter: blur(4px);
-      background: rgba(59, 130, 246, 0.75); border: 2px solid rgba(96, 165, 250, 0.9);
+      background: rgba(59, 130, 246, 0.28); border: 2px solid rgba(96, 165, 250, 0.45);
       transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       z-index: 20;
     }
 
-    @media (max-width: 768px) {
-      #world-map { display: none !important; }
+    #touch-controls {
+      display: none !important;
     }
-
-    #ui-stack {
-      position: fixed; right: 16px; top: 16px;
-      z-index: 10; pointer-events: auto;
-      display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
-    }
-    #ui-stack button {
-      color: rgba(60, 50, 70, 0.9); background: rgba(255, 255, 255, 0.65);
-      backdrop-filter: blur(8px); padding: 8px 14px;
-      border-radius: 8px; font-size: 13px; cursor: pointer;
-      border: 1px solid rgba(255,255,255,0.4); font-weight: bold; width: fit-content;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    #ui-stack button:hover {
-      background: rgba(255, 255, 255, 0.85);
-    }
-
-    @media (hover: hover) and (pointer: fine) {
-      #touch-controls { display: none; }
+    body.force-mobile #world-map,
+    .force-mobile #world-map {
+      display: none !important;
     }
     .dg { zoom: 1.2 !important; }
     .dg.ac { zoom: 1.2 !important; }
   </style>
+  <script>
+    (function() {
+      var params = new URLSearchParams(window.location.search);
+      if (params.has('mobile') || window.self !== window.top || window.innerWidth <= 1024) {
+        document.documentElement.classList.add('force-mobile');
+        document.addEventListener('DOMContentLoaded', function() {
+          document.body.classList.add('force-mobile');
+        });
+      }
+    })();
+  </script>
 
   <style>
     /* modern top bar */
@@ -218,10 +212,6 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
 
-    /* When root GUI is minimized/closed, hide completely so it disappears into the cogwheel */
-    .lil-gui.root.closed {
-      display: none !important;
-    }
   </style>
 </head>
 <body>

@@ -21,7 +21,7 @@ export class CameraManager {
     
     update(delta, playerGrp, currentYaw, isBoosting, waterLevel = 2.4) {
         const defaultCamDist = this.cameraZoomDist;
-        const defaultCamHeight = Math.max(4.0, this.cameraZoomDist * 0.25);
+        const defaultCamHeight = this.cameraZoomDist * 0.18;
         
         // Smoothly lerp camera to default distance using exponential decay
         const decayZoom = 1.0 - Math.exp(-5.0 * delta);
