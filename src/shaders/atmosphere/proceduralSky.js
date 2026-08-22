@@ -115,7 +115,7 @@ export function createProceduralSky() {
     const uStarDensity = uniform(0.055);
     const uStarBrightness = uniform(1.0);
     const uStarTwinkle = uniform(0.45);
-    const uMilkyWay = uniform(0.0); // 0.0 default so photographic Milky Way panorama renders cleanly without double-band artifact
+    const uMilkyWay = uniform(0.9);
     const uMilkyDust = uniform(1.0);
     const uMilkyArmColor = uniform(new THREE.Color(0.34, 0.40, 0.62));
     const uMilkyCoreColor = uniform(new THREE.Color(0.72, 0.63, 0.50));
